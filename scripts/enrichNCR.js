@@ -5,7 +5,7 @@
  *
  * Queries all gyms in the NCR cities (Delhi, Noida, Gurugram, Ghaziabad,
  * Meerut, Hapur, Bulandshahr) and enqueues gym-enrichment BullMQ jobs
- * in the atlas06-enrichment queue at priority 2.
+ * in the atlas-enrichment queue at priority 2.
  *
  * Usage:
  *   node scripts/enrichNCR.js                    # enqueue all NCR gyms
@@ -20,7 +20,7 @@
 require('dotenv').config();
 
 const { connectDB }      = require('../src/db/connection');
-const Gym                = require('../src/db/gymModel');
+const Space = require('../src/db/spaceModel');
 const { addEnrichmentJob } = require('../src/queue/queues');
 const logger             = require('../src/utils/logger');
 
@@ -47,7 +47,7 @@ function parseArgs() {
 }
 
 async function getGymsForCity(cityName) {
-  return Gym.find(
+  return Space.find(
     {
       // Match areaName containing the city (case-insensitive)
       areaName: { $regex: new RegExp(cityName, 'i') },

@@ -11,7 +11,7 @@
  * CLI script (scripts/enrichNCR.js) — NOT by the standard city-crawl path.
  */
 
-const Gym                 = require('../db/gymModel');
+const Space = require('../db/spaceModel');
 const Photo               = require('../db/photoModel');
 const GymChangeLog        = require('../db/gymChangeLogModel');
 const { Review, buildReviewDocs, mergeReviewEnrichment } = require('../db/reviewModel');
@@ -126,7 +126,7 @@ async function processEnrichmentJob(enriched, gymId, jobId) {
   const now = new Date();
 
   try {
-    const existing = await Gym.findById(gymId).lean();
+    const existing = await Space.findById(gymId).lean();
     if (!existing) {
       result.action = 'error';
       result.error  = `Gym not found: ${gymId}`;
@@ -220,19 +220,26 @@ async function processEnrichmentJob(enriched, gymId, jobId) {
       $set.totalPhotos  = $set.rawPhotoUrls.length;
     }
 
-    // ── Enrichment meta ──────────────────────────────────────────────────────
-    $set['enrichmentMeta.lastAttempt'] = now;
-    $set['enrichmentMeta.lastSuccess'] = now;
-    $set['enrichmentMeta.status']      = 'success';
-    $set['enrichmentMeta.consecutiveErrors'] = 0;
+    // ── Enrichment meta (v5: spaces.enrichment{}) ──────────────────────────
+    $set['enrichment.lastAttempt'] = now;
+    $set['enrichment.lastSuccess'] = now;
+    $set['enrichment.status']      = 'success';
+    $set['enrichment.consecutiveErrors'] = 0;
+    $set['enrichment.error']       = null;
     $set.updatedAt = now;
+
+    // ── Outcome deltas: track what fields were filled this run ─────────────
+    const fieldsFilledThisRun = Object.keys($set).filter(k =>
+      !k.startsWith('enrichment.') && k !== 'updatedAt'
+    );
+    result.fieldsFilled = fieldsFilledThisRun;
 
     // ── Write changelog ──────────────────────────────────────────────────────
     if (diffs.length) await writeChangeLogs(gymId, diffs, now);
 
     // ── Write gym document ────────────────────────────────────────────────────
     if (Object.keys($set).length > 3) { // more than just timestamps
-      await Gym.findByIdAndUpdate(gymId, { $set }, { new: false });
+      await Space.findByIdAndUpdate(gymId, { $set }, { new: false });
       result.action = 'enriched';
     } else {
       result.action = 'skipped';
@@ -245,7 +252,7 @@ async function processEnrichmentJob(enriched, gymId, jobId) {
 
     // Update totalReviews count if new reviews added
     if (newReviews > 0) {
-      await Gym.findByIdAndUpdate(gymId, {
+      await Space.findByIdAndUpdate(gymId, {
         $inc: { totalReviews: newReviews },
         $set: { reviewsScraped: (existing.reviewsScraped || 0) + newReviews },
       });
@@ -267,22 +274,33 @@ async function processEnrichmentJob(enriched, gymId, jobId) {
 
     result.newPhotos = heroCount + videoCount + reviewPhotoCount;
 
-    logger.info(`[ENRICH] "${existing.name}" → action:${result.action} +${result.newReviews}rev +${result.updatedReviews}upd +${result.newPhotos}photos`);
+    logger.info(`[ENRICH] "${existing.name}" → action:${result.action} +${result.newReviews}rev +${result.updatedReviews}upd +${result.newPhotos}photos (fields: ${fieldsFilledThisRun.length})`);
     return result;
 
   } catch (err) {
     logger.error(`processEnrichmentJob error [${gymId}]: ${err.message}`);
-    // Mark enrichment error on gym doc
+    const QUARANTINE_THRESHOLD = 5;
+
+    // Mark enrichment error on space doc with quarantine logic
     try {
-      await Gym.findByIdAndUpdate(gymId, {
+      const space = await Space.findById(gymId, { 'enrichment.consecutiveErrors': 1, name: 1 }).lean();
+      const newErrorCount = (space?.enrichment?.consecutiveErrors || 0) + 1;
+      const shouldQuarantine = newErrorCount >= QUARANTINE_THRESHOLD;
+
+      await Space.findByIdAndUpdate(gymId, {
         $set: {
-          'enrichmentMeta.lastAttempt':       now,
-          'enrichmentMeta.status':             'failed',
-          'enrichmentMeta.error':              err.message.slice(0, 200),
-          $inc: { 'enrichmentMeta.consecutiveErrors': 1 },
+          'enrichment.lastAttempt': now,
+          'enrichment.status': shouldQuarantine ? 'quarantined' : 'failed',
+          'enrichment.error': err.message.slice(0, 200),
+          'enrichment.consecutiveErrors': newErrorCount,
         },
       });
+
+      if (shouldQuarantine) {
+        logger.warn(`[ENRICH] ⛔ "${space?.name || gymId}" quarantined after ${newErrorCount} consecutive failures — will not be re-queued`);
+      }
     } catch (_) {}
+
     result.action = 'error';
     result.error  = err.message;
     return result;

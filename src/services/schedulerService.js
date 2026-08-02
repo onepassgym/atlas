@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const logger = require('../utils/logger');
 const CrawlJob = require('../db/crawlJobModel');
-const Gym = require('../db/gymModel');
+const Space = require('../db/spaceModel');
 const { addCityJob, addGymNameJob } = require('../queue/queues');
 const { FITNESS_CATEGORIES } = require('../scraper/googleMapsScraper');
 const bus = require('./eventBus');
@@ -99,51 +99,50 @@ async function runScheduledCrawl(frequency, reason = 'cron') {
 }
 
 // ── Staleness-aware re-crawl ─────────────────────────────────────────────────
-// Finds gyms that haven't been crawled for >N days and queues them for refresh.
+// Finds spaces that haven't been crawled for >N days and queues them for refresh.
 
 async function queueStaleGyms(reason = 'staleness-check') {
   const config = getScheduleConfig();
   const settings = config.staleness || {};
   const thresholdDays = settings.enrichmentThresholdDays || 30;
-  const maxStale = settings.maxStaleDays || 90;
   const batchSize = settings.batchSize || 50;
 
   const cutoff = new Date(Date.now() - thresholdDays * 86_400_000);
 
-  // Find gyms crawled more than N days ago, sorted oldest first
-  const staleGyms = await Gym.find({
-    permanentlyClosed: { $ne: true },
+  // Find spaces crawled more than N days ago, sorted oldest first
+  const staleSpaces = await Space.find({
+    deletedAt: null,
     $or: [
-      { 'crawlMeta.lastCrawledAt': { $lt: cutoff } },
-      { 'crawlMeta.lastCrawledAt': { $exists: false } },
+      { 'crawl.lastCrawledAt': { $lt: cutoff } },
+      { 'crawl.lastCrawledAt': { $exists: false } },
     ],
   })
-    .select('name areaName slug crawlMeta.lastCrawledAt')
-    .sort({ 'crawlMeta.lastCrawledAt': 1 })
+    .select('name areaName slug crawl.lastCrawledAt')
+    .sort({ 'crawl.lastCrawledAt': 1 })
     .limit(batchSize)
     .lean();
 
-  if (!staleGyms.length) {
-    logger.info(`📅 Staleness check: all gyms are fresh (< ${thresholdDays} days)`);
+  if (!staleSpaces.length) {
+    logger.info(`📅 Staleness check: all spaces are fresh (< ${thresholdDays} days)`);
     return [];
   }
 
-  logger.info(`\n📅 Staleness check [${reason}] — found ${staleGyms.length} stale gyms (> ${thresholdDays} days)`);
+  logger.info(`\n📅 Staleness check [${reason}] — found ${staleSpaces.length} stale spaces (> ${thresholdDays} days)`);
 
   const queued = [];
-  for (const g of staleGyms) {
-    const gymName = `${g.name} ${g.areaName || ''}`.trim();
+  for (const g of staleSpaces) {
+    const spaceName = `${g.name} ${g.areaName || ''}`.trim();
     const jobId = uuidv4();
     try {
-      await CrawlJob.create({ jobId, type: 'gym_name', input: { gymName }, status: 'queued' });
-      await addGymNameJob(jobId, gymName);
-      queued.push({ gymName, jobId });
+      await CrawlJob.create({ jobId, type: 'gym_name', input: { gymName: spaceName }, status: 'queued' });
+      await addGymNameJob(jobId, spaceName);
+      queued.push({ spaceName, jobId });
     } catch (err) {
-      logger.error(`  ❌ Failed to queue stale gym "${gymName}": ${err.message}`);
+      logger.error(`  ❌ Failed to queue stale space "${spaceName}": ${err.message}`);
     }
   }
 
-  logger.info(`📅 Staleness: ${queued.length} stale gyms queued for re-crawl\n`);
+  logger.info(`📅 Staleness: ${queued.length} stale spaces queued for re-crawl\n`);
   return queued;
 }
 
@@ -155,39 +154,74 @@ async function queueIncompleteGyms(reason = 'enrichment') {
 
   if (!settings.enabled) return [];
 
-  const threshold = settings.completenessThreshold || 60;
   const batchSize = settings.batchSize || 30;
+  const Location = require('../db/locationModel');
+  const { addEnrichmentJob } = require('../queue/queues');
 
-  const incomplete = await Gym.find({
-    permanentlyClosed: { $ne: true },
-    'crawlMeta.dataCompleteness': { $lt: threshold },
+  // Phase 2: Smart selection — prioritize by (isServiceable city) × (low completeness) × (staleness)
+  // Exclude quarantined spaces (consecutiveErrors >= 5)
+  const QUARANTINE_THRESHOLD = 5;
+  const STALE_DAYS = 14;
+  const staleCutoff = new Date(Date.now() - STALE_DAYS * 86_400_000);
+
+  // Get serviceable city opgIds for priority boost
+  const serviceableCities = await Location.find(
+    { type: 'city', isServiceable: true },
+    { opgId: 1 }
+  ).lean();
+  const serviceableCityIds = new Set(serviceableCities.map(c => c.opgId));
+
+  // Find candidates: not quarantined, not deleted, has a googleMapsUrl to enrich
+  const candidates = await Space.find({
+    deletedAt: null,
+    googleMapsUrl: { $exists: true, $ne: null },
+    'enrichment.status': { $ne: 'quarantined' },
+    'enrichment.consecutiveErrors': { $lt: QUARANTINE_THRESHOLD },
+    $or: [
+      { dataCompleteness: { $lt: 80 } },
+      { 'enrichment.lastSuccess': { $lt: staleCutoff } },
+      { 'enrichment.lastSuccess': null },
+    ],
   })
-    .select('name areaName crawlMeta.dataCompleteness')
-    .sort({ 'crawlMeta.dataCompleteness': 1 })
-    .limit(batchSize)
+    .select('name areaName city cityOpgId googleMapsUrl dataCompleteness enrichment.lastSuccess enrichment.consecutiveErrors')
+    .limit(batchSize * 3) // over-fetch to score and pick top N
     .lean();
 
-  if (!incomplete.length) {
-    logger.info(`📅 Enrichment: all gyms above ${threshold}% completeness`);
+  if (!candidates.length) {
+    logger.info(`📅 Enrichment: no eligible spaces found`);
     return [];
   }
 
-  logger.info(`\n📅 Enrichment [${reason}] — ${incomplete.length} gyms below ${threshold}% completeness`);
+  // Score each candidate: higher score = higher priority
+  const scored = candidates.map(s => {
+    const isServiceable = serviceableCityIds.has(s.cityOpgId) ? 2.0 : 1.0;
+    const completenessGap = (100 - (s.dataCompleteness || 0)) / 100; // 0-1
+    const lastEnriched = s.enrichment?.lastSuccess;
+    const daysSinceEnriched = lastEnriched
+      ? (Date.now() - new Date(lastEnriched).getTime()) / 86_400_000
+      : 999; // never enriched = max staleness
+    const stalenessScore = Math.min(daysSinceEnriched / 30, 3.0); // caps at 3x
+    return { ...s, score: isServiceable * completenessGap * stalenessScore };
+  });
+
+  // Sort by score descending, take top batchSize
+  scored.sort((a, b) => b.score - a.score);
+  const toEnrich = scored.slice(0, batchSize);
+
+  logger.info(`\n📅 Enrichment [${reason}] — ${toEnrich.length} spaces selected (from ${candidates.length} candidates, scored by serviceable×completeness×staleness)`);
 
   const queued = [];
-  for (const g of incomplete) {
-    const gymName = `${g.name} ${g.areaName || ''}`.trim();
-    const jobId = uuidv4();
+  for (const s of toEnrich) {
     try {
-      await CrawlJob.create({ jobId, type: 'gym_name', input: { gymName }, status: 'queued' });
-      await addGymNameJob(jobId, gymName);
-      queued.push({ gymName, jobId, completeness: g.crawlMeta?.dataCompleteness || 0 });
+      await addEnrichmentJob(s._id, s.googleMapsUrl, s.city || s.areaName);
+      queued.push({ name: s.name, spaceId: String(s._id), completeness: s.dataCompleteness, score: s.score.toFixed(2) });
     } catch (err) {
-      logger.error(`  ❌ Failed to queue enrichment for "${gymName}": ${err.message}`);
+      logger.error(`  ❌ Failed to queue enrichment for "${s.name}": ${err.message}`);
     }
   }
 
-  logger.info(`📅 Enrichment: ${queued.length} incomplete gyms queued\n`);
+  logger.info(`📅 Enrichment: ${queued.length} spaces queued for enrichment\n`);
+  bus.publish('enrichment:batch-queued', { reason, count: queued.length, candidatesConsidered: candidates.length });
   return queued;
 }
 

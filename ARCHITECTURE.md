@@ -165,7 +165,6 @@ atlas06/
 │   └── utils/
 │       ├── logger.js            # Winston + daily rotate
 │       ├── apiUtils.js          # ok(), err(), validate() helpers
-│       ├── dedup.js             # Standalone dedup (partially deprecated)
 │       └── opgId.js             # OPG-KEYWORD-XXXX ID generator + validator
 ├── media/                       # Runtime: downloaded gym photos
 ├── logs/                        # Runtime: rotating log files
@@ -216,11 +215,21 @@ atlas06/
 | `worker.js` | (auto-starts) | Processes `city-crawl`, `batch-scrape`, `gym-name-crawl` (crawl queue) and `gym-enrichment` (enrichment queue) jobs |
 
 **Queue names:**
-- `atlas06-crawl` — city crawl, batch scrape, gym name crawl (priority 1 for active crawls)
-- `atlas06-enrichment` — per-gym enrichment jobs (priority 2, separate worker, concurrency 1)
-- `atlas06-media` — media download jobs (legacy, gated by `MEDIA_DOWNLOAD_ENABLED`)
+- `atlas-crawl` — city crawl, batch scrape, gym name crawl (priority 1)
+- `atlas-enrichment` — per-space enrichment jobs (priority 2, separate worker, concurrency 1)
+- `atlas-media` — on-demand media download (gated by `MEDIA_DOWNLOAD_ENABLED`)
 
-**Cancellation:** Redis key `atlas06:cancel:{jobId}` with 1-hour TTL
+**Queue parameters (Phase 2):**
+
+| Queue | Concurrency | Lock Duration | Lock Renew | Stalled Interval | Max Stall Retries | Backoff |
+|-------|-------------|---------------|------------|------------------|-------------------|---------|
+| `atlas-crawl` | `SCRAPER_CONCURRENCY` (default 1) | 45 min | 5 min | 15 min | 2 | exponential 5s |
+| `atlas-enrichment` | 1 | 30 min | 5 min | 10 min | 2 | exponential 8s |
+| `atlas-media` | 8 | default | default | default | default | exponential 3s |
+
+**Stuck-job protection:** If a job fails to renew its lock for `stalledInterval` ms, BullMQ marks it stalled. After `maxStalledCount` stalls, it's moved to `failed`. This prevents a crashed worker from blocking the queue indefinitely.
+
+**Cancellation:** Redis key `atlas:cancel:{jobId}` with 1-hour TTL
 
 ### Database Layer
 
@@ -289,7 +298,6 @@ name, address, contact.phone, contact.email, contact.website
 |------|---------|---------------|
 | `logger.js` | Winston logger instance | Console + daily rotating file (`app-*.log`, `error-*.log`) |
 | `apiUtils.js` | `ok()`, `err()`, `validate()` | Standardized API responses + express-validator guard |
-| `dedup.js` | `findDuplicate()`, `mergeGymData()` (deprecated), `jaccardSim()` | Legacy dedup helpers (mostly superseded by `upsertGym.js`) |
 | `opgId.js` | `generateOpgId()`, `generateUniqueOpgId()`, `isValidOpgId()` | OPG-KEYWORD-XXXX public ID generation, uniqueness guard, format validator |
 
 ### Migration Scripts
@@ -376,6 +384,31 @@ npm run migrate:opgid:prod        # prod
 | `POST` | `/schedule/trigger` | None | Manually trigger crawl by frequency |
 | `POST` | `/schedule/trigger/stale` | None | Trigger staleness re-crawl |
 | `POST` | `/schedule/trigger/enrichment` | None | Trigger enrichment re-crawl |
+
+### Chain Routes (`/api/chains`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/` | None | List all gym chains |
+| `POST` | `/` | None | Register a new chain (name, slug, aliases, website) |
+| `POST` | `/tag-existing` | None | Run chain tagger on all existing gyms |
+| `POST` | `/crawl/start` | None | Queue a chain-specific crawl job |
+| `GET` | `/crawl/queue-stats` | None | Chain crawl queue status |
+| `POST` | `/:slug/tag` | None | Tag gyms matching a specific chain |
+| `GET` | `/:slug/gyms` | None | List gyms belonging to a chain |
+
+### Event Routes (`/api/events`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/` | None | SSE stream (real-time events, 30s keepalive) |
+| `GET` | `/history` | None | Ring buffer of last N events (filterable by type) |
+| `GET` | `/stats` | None | SSE client count + event type counts |
+| `POST` | `/test` | None | Emit a test event |
+| `POST` | `/webhooks` | None | Register a webhook |
+| `GET` | `/webhooks` | None | List registered webhooks |
+| `PATCH` | `/webhooks/:id` | None | Enable/disable a webhook |
+| `DELETE` | `/webhooks/:id` | None | Remove a webhook |
 
 ---
 
@@ -510,15 +543,15 @@ If FOUND → UPDATE path:
 
 | ID | Severity | Description | File(s) |
 |----|----------|-------------|---------|
-| TD-01 | 🔴 Critical | VPS credentials in `.env` (password in plaintext) | `.env:25` |
-| TD-02 | 🟡 Medium | `.env` references `atlas06` DB but project is `atlas06` | `.env`, `config/index.js` |
-| TD-03 | 🟡 Medium | Stray `{src` directory at project root (broken mkdir) | Project root |
-| TD-04 | 🟡 Medium | `dedup.js` `mergeGymData()` is deprecated but still exported | `src/utils/dedup.js:78` |
+| TD-01 | � Mitigated | `.env` gitignored; `.env.example` documents that secrets must use proper management. VPS should use `chmod 600` or a secrets manager. | `.env.example` |
+| TD-02 | 🟡 Medium | `.env` references `atlas06` DB but naming is inconsistent — targeted for Phase 1 rename to `atlas` | `.env`, `config/index.js` |
+| TD-03 | ✅ Resolved | Stray `{src` directory no longer exists on disk | — |
+| TD-04 | ✅ Resolved | `dedup.js` deleted entirely — no function was imported anywhere; `upsertGym.js` owns its own dedup logic | — |
 | TD-05 | ✅ Resolved | `upsertGym.js` dirty-check implemented — `$set` only written when diffs/reviews/photos changed | `src/db/upsertGym.js:486` |
 | TD-06 | 🟠 Low | No API authentication — destructive endpoints are open | All route files |
 | TD-07 | ✅ Resolved | `ensureIndexes.js` collection name corrected to `gym_reviews` | `src/db/ensureIndexes.js:29` |
 | TD-08 | ✅ Resolved | Added `gym_crawl_jobs` indexes (4 indexes); all 9 modelled collections now indexed | `src/db/ensureIndexes.js:61-68` |
-| TD-09 | 🟠 Low | `POST /api/chains/crawl/start`, `/api/chains/tag-existing`, `/api/events/test`, `/api/events/stats` referenced in dashboard but not documented — may be in undocumented route files | `dashboard/src/components/SystemPanel.jsx` |
+| TD-09 | ✅ Resolved | Chain routes (`/api/chains`) and event routes (`/api/events`) documented in route inventory above | `src/api/chainRoutes.js`, `src/api/eventRoutes.js` |
 
 ---
 
@@ -577,5 +610,11 @@ router.METHOD('/path',
 | 2026-05-09 | Antigravity | **opgId rollout** — Tasks 1–6: `src/utils/opgId.js` (generator + validator); `opgId` field added to all 6 schemas (gyms unique/sparse, others plain index); `ensureIndexes.js` extended with 6 new index calls; `migration/addOpgIds.js` idempotent backfill + `npm run migrate:opgid`; `upsertGym.js` INSERT generates unique opgId before `Gym.create()`, UPDATE preserves existing opgId + backfills related docs; `gymRoutes.js` /:id → /:opgId with `resolveGym` middleware + format validator; `toJSON` transform on GymSchema strips `_id`/`__v` from API responses |
 | 2026-05-09 | Antigravity | **Enrichment session** — Tasks 1–7: `MEDIA_DOWNLOAD_ENABLED` env gate; `rawPhotoUrls[]`, `pricing`, `operationalData`, `extraAttributes`, expanded `contact` schema fields; `sourceType`+`downloaded` on gym_photos; `reviewPhotos[]`, `reviewerLocalGuideLevel`, `ownerReply.respondedAtRaw` on reviews; `scrapeEnrichmentDetail()` + `scrapeAboutTabExhaustive()`; `enrichmentProcessor.js`; `gym-enrichment` BullMQ job type + `atlas06-enrichment` queue; `scripts/enrichNCR.js` CLI; 5 new DB indexes |
 | 2026-05-09 | Antigravity | Fix `apiFetch` to throw on non-2xx HTTP; add `gym_crawl_jobs` indexes (TD-08 ✅); move `express.json()` to router-level in systemRoutes; add search retry logic to scraper; update route inventory with `force-complete` + `start-now`; mark TD-05 ✅ TD-07 ✅ TD-08 ✅; add TD-09 for undocumented chain/events routes |
+| 2026-06-27 | Copilot | **Phase 0 cleanup** — Deleted dead files: `scripts/migrate-bg.sh`, `src/utils/dedup.js`, 9 root debug/test scripts, `atlas06_upgrade_roadmap.md`. Documented chain/event routes in inventory (TD-09 ✅). Sanitized `.env.example` with security guidance + missing vars. Updated TD table: TD-01 mitigated, TD-03 ✅, TD-04 ✅, TD-09 ✅. |
+| 2026-06-27 | Copilot | **Phase 1 — v5 data model migration** — Full reshape to `opg-atlas` v5 schema. DB: `atlas06`→`atlas`. Queues: `atlas06-*`→`atlas-*`. Redis keys: `atlas06:`→`atlas:`. Model rename: `Gym`→`Space` (collection `spaces`). Routes: `/api/gyms`→`/api/spaces` (301 redirect kept). New models: `spaceModel.js`, `locationModel.js`. opgId v5 format: `{ENTITY}-{WORD}-{base32tail}` (SPC/RVW/PHT/CHN/LOC prefixes, ~70-bit entropy). Collections: `space_reviews`, `space_photos`, `space_chains`, `space_categories`, `space_amenities`, `locations`, `space_change_logs`. Crawl meta folded into `spaces.crawl{}`. Enrichment meta into `spaces.enrichment{}`. v5 compound indexes: `idx_city_cat_quality`, `idx_city_cat_display`, `idx_rank`. Migration script: `migration/migrateToV5.js` (idempotent, resumable, builds old→new id map). ⚠️ Backfill NOT yet executed — requires DB snapshot first. |
+| 2026-06-27 | Copilot | **Phase 2 — Crawl & enrichment gap closure** — Per-category yield logging on CrawlJob (`categoryYield[]`); zero-yield categories explicitly warned. `progress.blockedCount` tracks Google blocks per job. New `GET /api/crawl/coverage` endpoint surfaces per-city gap (discovered vs scraped vs blocked). `retry/failed` returns `gapSummary`. `retry/incomplete` now uses `addEnrichmentJob` (enrichment queue, not gym-name crawl). Smart enrichment selection: scores by `isServiceable × completenessGap × staleness` instead of flat threshold. Quarantine: after 5 consecutive enrichment errors, `enrichment.status='quarantined'` — excluded from future runs. Enrichment outcome deltas tracked (`result.fieldsFilled`). Queue stuck-job protection: `stalledInterval` (15min crawl, 10min enrich) + `maxStalledCount=2`. Documented final queue concurrency/backoff values in ARCHITECTURE.md. |
+| 2026-06-27 | Copilot | **Phase 3 — Image strategy: URL-first, download-on-demand** — Gutted `media/downloader.js`: removed auto-pipeline (`downloadImage`, `downloadAllMedia`), replaced with `downloadAndCreateVariants()` for explicit on-demand use only. New `media/opgMediaWriter.js`: creates `media_assets` (AST-*) + `media_variants` (VAR-*) docs, flips `space_photos.downloaded=true`, sets `assetOpgId`+`publicUrl`, updates `spaces.coverUrl` on cover photos. Rate-limited (50/space/hour). New endpoints: `POST /api/spaces/:opgId/photos/:photoOpgId/download` (single) + `POST /api/spaces/:opgId/photos/download-all` (batch). Zero image binaries during crawl/enrichment — `MEDIA_DOWNLOAD_ENABLED=false` default enforced. After download, images served from our CDN url; un-downloaded render from Google source. |
+| 2026-06-27 | Copilot | **Phase 4 — Dashboard redesign** — Removed decorative background globe from `App.jsx`. Rebuilt `GlobePage.jsx` as a clean data map: plots city markers sized by space count, sidebar with clickable cities → space list (name, rating, category, qualityScore, photo count), image gallery entry point. No glow/spin/decorative shaders. New `HealthRecommendations.jsx` component: surfaces data-driven recommendations (blocked scrapes, coverage gaps, low completeness, zero-yield categories, quarantined spaces) — each with a working action button wired to real endpoints (`/api/crawl/retry/failed`, `/api/crawl/retry/incomplete`, `/api/system/schedule/trigger`). Integrated into Overview page. New `GET /api/enrichment/stats` endpoint (quarantine count, enrichment status breakdown). Dashboard builds clean (13.7s, 0 errors). |
+| 2026-06-27 | Copilot | **Phase 5 — Disable game, keep code** — `FEATURE_GAME = false` flag in both `dashboard/src/App.jsx` (gates route) and `dashboard/src/components/TabNav.jsx` (gates tab). When false: no Simulations tab in nav, no `/simulations` route renders, navigating to it falls through to `/overview`. All game code retained 100% intact and compilable: `SimulationsPage.jsx`, `Game2048.jsx`, `XOGame.jsx`, `MovingPuzzle.jsx`, `simUI.jsx`. Set `FEATURE_GAME = true` to re-enable. Also renamed "Gym Explorer" tab → "Space Explorer". |
 | 2026-04-18 | Antigravity | Initial architecture document created |
 | | | Add new rows above this line |

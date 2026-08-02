@@ -1,16 +1,21 @@
 'use strict';
 const mongoose = require('mongoose');
 
-const GymChainSchema = new mongoose.Schema({
-  slug:           { type: String, required: true, unique: true },   // "anytime-fitness"
-  name:           { type: String, required: true },                  // "Anytime Fitness"
-  aliases:        [String],                                          // ["Anytime", "AF"]
+const SpaceChainSchema = new mongoose.Schema({
+  opgId:          { type: String, unique: true, sparse: true, trim: true, match: /^CHN-[A-Z]+-[0-9A-Z]{11,14}$/ },
+  slug:           { type: String, required: true, unique: true },
+  name:           { type: String, required: true },
+  description:    String,
+  aliases:        [String],
 
-  // Chain metadata
-  headquarters:    String,                                           // "Woodbury, Minnesota, USA"
-  foundedYear:     Number,
-  website:         String,
-  logoUrl:         String,
+  // Media
+  logoAssetOpgId: String,              // cross-DB ref to opg-media
+  logoUrl:        String,              // denorm
+  websiteUrl:     String,
+
+  // Stats (cron-reconciled)
+  totalBranches:  { type: Number, default: 0 },
+  cityOpgIds:     [String],            // ref locations.opgId[]
 
   // Store locator config (for automated crawling)
   storeLocator: {
@@ -19,21 +24,20 @@ const GymChainSchema = new mongoose.Schema({
     method:          { type: String, default: 'GET' },
     headers:         mongoose.Schema.Types.Mixed,
     bodyTemplate:    mongoose.Schema.Types.Mixed,
-    responseParser:  String,           // key into chainLocators registry
+    responseParser:  String,
   },
-
-  // Stats (auto-updated after each crawl)
-  totalLocations:   { type: Number, default: 0 },
-  countriesPresent: [String],
 
   // Crawl state
   lastCrawledAt:    Date,
   crawlFrequency:   { type: String, enum: ['weekly', 'biweekly', 'monthly', 'quarterly'], default: 'monthly' },
-  isActive:         { type: Boolean, default: true },
 
-}, { timestamps: true, collection: 'gym_chains' });
+  isActive:       { type: Boolean, default: true },
+  createdVia:     { type: String, default: 'crawler' },
+  deletedAt:      { type: Date, default: null },
+}, { timestamps: true, collection: 'space_chains' });
 
-GymChainSchema.index({ name: 1 });
-GymChainSchema.index({ isActive: 1 });
+SpaceChainSchema.index({ opgId: 1 }, { unique: true, sparse: true });
+SpaceChainSchema.index({ name: 1 });
+SpaceChainSchema.index({ isActive: 1 });
 
-module.exports = mongoose.model('GymChain', GymChainSchema);
+module.exports = mongoose.model('SpaceChain', SpaceChainSchema);

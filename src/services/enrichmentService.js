@@ -11,7 +11,7 @@
  *
  * Supports:
  *   - Pause / Resume via Redis flag  (dashboard button)
- *   - Priority Push: push a specific gymId to enrich next
+ *   - Priority Push: push a specific spaceId to enrich next
  *   - SSE events: enrichment:started, enrichment:progress, enrichment:paused, etc.
  *   - Configurable batch size and inter-gym delay
  */
@@ -21,9 +21,9 @@ const cfg = require('../../config');
 const logger = require('../utils/logger');
 const bus = require('./eventBus');
 
-const REDIS_PAUSE_KEY   = 'atlas06:enrichment:paused';
-const REDIS_PRIORITY_KEY = 'atlas06:enrichment:priority-queue';
-const REDIS_STATUS_KEY  = 'atlas06:enrichment:status';
+const REDIS_PAUSE_KEY   = 'atlas:enrichment:paused';
+const REDIS_PRIORITY_KEY = 'atlas:enrichment:priority-queue';
+const REDIS_STATUS_KEY  = 'atlas:enrichment:status';
 
 let redis = null;
 
@@ -72,7 +72,7 @@ async function isPaused() {
 // ── Priority Queue ──────────────────────────────────────────────────────────
 // LPUSH to add to front, RPOP to consume — gives LIFO for priority (latest push = next to process)
 
-async function pushPriorityGym(gymId, gymName = '', sections = ['all']) {
+async function pushPrioritySpace(spaceId, spaceName = '', sections = ['all']) {
   const r = getRedis();
   // Use LPUSH so the newest priority request runs first
   const validSections = ['all', 'reviews', 'photos', 'contact', 'hours', 'amenities', 'deep'];
@@ -80,13 +80,13 @@ async function pushPriorityGym(gymId, gymName = '', sections = ['all']) {
   if (cleanSections.length === 0) cleanSections.push('all');
 
   await r.lpush(REDIS_PRIORITY_KEY, JSON.stringify({
-    gymId, gymName, sections: cleanSections, pushedAt: new Date().toISOString(),
+    spaceId, spaceName, sections: cleanSections, pushedAt: new Date().toISOString(),
   }));
-  logger.info(`⚡ Priority enrichment queued: ${gymName || gymId} [sections: ${cleanSections.join(', ')}]`);
-  bus.publish('enrichment:priority-pushed', { gymId, gymName, sections: cleanSections });
+  logger.info(`⚡ Priority enrichment queued: ${spaceName || spaceId} [sections: ${cleanSections.join(', ')}]`);
+  bus.publish('enrichment:priority-pushed', { spaceId, spaceName, sections: cleanSections });
 }
 
-async function popPriorityGym() {
+async function popPrioritySpace() {
   try {
     const r = getRedis();
     const item = await r.rpop(REDIS_PRIORITY_KEY);
@@ -151,8 +151,8 @@ module.exports = {
   pauseEnrichment,
   resumeEnrichment,
   isPaused,
-  pushPriorityGym,
-  popPriorityGym,
+  pushPrioritySpace,
+  popPrioritySpace,
   getPriorityQueueLength,
   getPriorityQueue,
   setStatus,

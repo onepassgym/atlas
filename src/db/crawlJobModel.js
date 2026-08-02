@@ -21,27 +21,35 @@ const CrawlJobSchema = new mongoose.Schema({
   },
 
   progress: {
-    total:       { type: Number, default: 0 },
-    scraped:     { type: Number, default: 0 },
-    failed:      { type: Number, default: 0 },
-    skipped:     { type: Number, default: 0 },
-    newGyms:     { type: Number, default: 0 },
-    updatedGyms: { type: Number, default: 0 },
+    total:         { type: Number, default: 0 },
+    toScrape:      { type: Number, default: 0 },
+    scraped:       { type: Number, default: 0 },
+    failed:        { type: Number, default: 0 },
+    skipped:       { type: Number, default: 0 },
+    newSpaces:     { type: Number, default: 0 },
+    updatedSpaces: { type: Number, default: 0 },
+    blockedCount:  { type: Number, default: 0 },
   },
+
+  // Per-category discovery yield (Phase 2: crawl gap visibility)
+  categoryYield: [{
+    category: String,
+    urlsFound: { type: Number, default: 0 },
+    error: String,
+    _id: false,
+  }],
 
   queuedAt:    { type: Date, default: Date.now },
   startedAt:   Date,
   completedAt: Date,
   durationMs:  Number,
 
-  gymIds:     [{ type: mongoose.Schema.Types.ObjectId, ref: 'Gym' }],
-  // Denormalized public identifier — set when job processes a single gym target.
-  // Never used for $lookup or joins; gymIds (ObjectId array) is always the join key.
-  opgId:      { type: String, index: true, uppercase: true, trim: true },
-  jobErrors:  [{ message: String, url: String, at: Date }],  // renamed from 'errors' (reserved)
+  spaceIds:   [{ type: mongoose.Schema.Types.ObjectId, ref: 'Space' }],
+  opgId:      { type: String, index: true, trim: true },
+  jobErrors:  [{ message: String, url: String, at: Date }],
   errorCount: { type: Number, default: 0 },
 
-  queueJobId: String,
+  bullJobId: String,
 
 }, { timestamps: true, collection: 'gym_crawl_jobs' });
 

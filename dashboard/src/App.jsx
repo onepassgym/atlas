@@ -4,7 +4,6 @@ import { AppProvider, useApp } from './context/AppContext';
 import Header from './components/Header';
 import TabNav from './components/TabNav';
 import ToastContainer from './components/Toast';
-import Globe from './components/Globe';
 import Skeleton from './components/Skeleton';
 
 const Overview  = lazy(() => import('./pages/Overview'));
@@ -14,6 +13,9 @@ const Enrichment = lazy(() => import('./pages/Enrichment'));
 const DataHealth = lazy(() => import('./pages/DataHealth'));
 const Simulations = lazy(() => import('./pages/SimulationsPage'));
 const MediaStorage = lazy(() => import('./pages/MediaStorage'));
+
+// Feature flag: set to true to enable Simulations/game page
+const FEATURE_GAME = false;
 
 function PageLoader() {
   return (
@@ -28,7 +30,6 @@ function AppShell() {
 
   return (
     <>
-      <Globe />
       <Header />
       <TabNav badges={{ chainCount: chainsCache.length || 0 }} />
       <Suspense fallback={<PageLoader />}>
@@ -39,7 +40,7 @@ function AppShell() {
           <Route path="/enrichment" element={<Enrichment />} />
           <Route path="/data-health" element={<DataHealth />} />
           <Route path="/media"       element={<MediaStorage />} />
-          <Route path="/simulations" element={<Simulations />} />
+          {FEATURE_GAME && <Route path="/simulations" element={<Simulations />} />}
           <Route path="*"         element={<Navigate to="/overview" replace />} />
         </Routes>
       </Suspense>

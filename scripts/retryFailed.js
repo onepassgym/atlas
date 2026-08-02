@@ -4,7 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { connectDB, disconnectDB } = require('../src/db/connection');
 const { addCityJob, addGymNameJob } = require('../src/queue/queues');
 const CrawlJob = require('../src/db/crawlJobModel');
-const Gym      = require('../src/db/gymModel');
+const Space = require('../src/db/spaceModel');
 const logger   = require('../src/utils/logger');
 
 async function retryFailed() {
@@ -22,7 +22,7 @@ async function retryFailed() {
 
 async function retryIncomplete(threshold = 50) {
   await connectDB();
-  const gyms = await Gym.find({ 'crawlMeta.dataCompleteness': { $lt: threshold } }).select('name areaName googleMapsUrl').limit(200).lean();
+  const gyms = await Space.find({ 'crawlMeta.dataCompleteness': { $lt: threshold } }).select('name areaName googleMapsUrl').limit(200).lean();
   logger.info(`Found ${gyms.length} gyms with completeness < ${threshold}%`);
   for (const g of gyms) {
     const jobId = uuidv4();

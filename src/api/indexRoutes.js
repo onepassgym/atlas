@@ -15,7 +15,7 @@ router.get('/', (_, res) => res.redirect('/dashboard'));
 // Health check
 router.get('/health', (_, res) => res.json({
   status:  'ok',
-  service: 'Atlas06 Scraper',
+  service: 'Atlas Scraper',
   version: '1.0.0',
   uptime:  process.uptime(),
   ts:      new Date(),

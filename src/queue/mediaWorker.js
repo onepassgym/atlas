@@ -2,11 +2,11 @@
 /**
  * mediaWorker.js — Dedicated BullMQ worker for photo download + resize.
  *
- * Consumes jobs from the 'atlas06-media' queue (enqueued by gymProcessor.js).
+ * Consumes jobs from the 'atlas-media' queue (enqueued by spaceProcessor.js).
  * Does NOT use Playwright — purely HTTP downloads + Sharp image processing.
  * Can safely run at high concurrency (8-10) since it is I/O bound, not CPU bound.
  *
- * Each job payload: { gymId, slug, photoUrls }
+ * Each job payload: { spaceId, slug, photoUrls }
  * On completion:    gym document's photos[], coverPhoto, totalPhotos, and
  *                   crawlMeta.mediaStatus are updated in MongoDB.
  */
@@ -15,7 +15,7 @@ require('dotenv').config();
 const { Worker }             = require('bullmq');
 const { connectDB }          = require('../db/connection');
 const { downloadAllMedia }   = require('../media/downloader');
-const Gym                    = require('../db/gymModel');
+const Space                    = require('../db/spaceModel');
 const Photo                  = require('../db/photoModel');
 const SystemState            = require('../db/systemStateModel');
 const cfg                    = require('../../config');
@@ -43,17 +43,17 @@ async function waitIfPaused() {
 // ── Job handler ───────────────────────────────────────────────────────────────
 
 async function processMediaJob(job) {
-  const { gymId, slug, photoUrls } = job.data;
+  const { spaceId, slug, photoUrls } = job.data;
 
   // Wait indefinitely if the queue is paused or system is in standby
   await waitIfPaused();
 
   if (!photoUrls?.length) {
-    logger.info(`[media] No photos to download for gym ${gymId}`);
+    logger.info(`[media] No photos to download for gym ${spaceId}`);
     return { downloaded: 0 };
   }
 
-  logger.info(`[media] ⬇  Downloading ${photoUrls.length} photos for ${slug} (gymId: ${gymId})`);
+  logger.info(`[media] ⬇  Downloading ${photoUrls.length} photos for ${slug} (spaceId: ${spaceId})`);
 
   try {
     // Download + resize all photos (4 concurrent axios+sharp calls inside)
@@ -64,7 +64,7 @@ async function processMediaJob(job) {
 
     if (!media.length) {
       logger.warn(`[media] All downloads failed for ${slug}`);
-      await Gym.findByIdAndUpdate(gymId, {
+      await Space.findByIdAndUpdate(spaceId, {
         $set: { 'crawlMeta.mediaStatus': 'failed', updatedAt: new Date() }
       });
       return { downloaded: 0, failed: photoUrls.length };
@@ -79,7 +79,7 @@ async function processMediaJob(job) {
           filter: { publicUrl: m.publicUrl },
           update: {
             $setOnInsert: {
-              gymId,
+              spaceId,
               originalUrl:  m.originalUrl,
               localPath:    m.localPath,
               publicUrl:    m.publicUrl,
@@ -114,7 +114,7 @@ async function processMediaJob(job) {
       ? Math.round(validPhotos.reduce((sum, p) => sum + (p.appealScore || 0), 0) / validPhotos.length) 
       : 0;
 
-    await Gym.findByIdAndUpdate(gymId, {
+    await Space.findByIdAndUpdate(spaceId, {
       $set: {
         photos:      media,
         coverPhoto,
@@ -132,7 +132,7 @@ async function processMediaJob(job) {
     logger.error(`[media] ❌ Error for ${slug}: ${err.message}`);
     // Mark as failed so enrichment job can retry
     try {
-      await Gym.findByIdAndUpdate(gymId, {
+      await Space.findByIdAndUpdate(spaceId, {
         $set: { 'crawlMeta.mediaStatus': 'failed', updatedAt: new Date() }
       });
     } catch (_) {}
@@ -145,7 +145,7 @@ async function processMediaJob(job) {
 async function start() {
   await connectDB();
 
-  const worker = new Worker('atlas06-media', processMediaJob, {
+  const worker = new Worker('atlas-media', processMediaJob, {
     connection,
     concurrency: MEDIA_CONCURRENCY,
     lockDuration: 120_000, // 2 min — media jobs are fast
@@ -161,7 +161,7 @@ async function start() {
     logger.error(`[media] Worker error: ${err.message}`);
   });
 
-  logger.info(`\n📷 Atlas06 Media Worker started [concurrency: ${MEDIA_CONCURRENCY}]`);
+  logger.info(`\n📷 Atlas Media Worker started [concurrency: ${MEDIA_CONCURRENCY}]`);
 
   // ── Graceful shutdown ────────────────────────────────────────────────────
   const shutdown = async (signal) => {

@@ -3,7 +3,7 @@ const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const router = express.Router();
 
-const Gym = require('../db/gymModel');
+const Space = require('../db/spaceModel');
 const EnrichmentLog = require('../db/enrichmentLogModel');
 const logger = require('../utils/logger');
 const { ok, err, validate } = require('../utils/apiUtils');
@@ -11,7 +11,7 @@ const {
   pauseEnrichment,
   resumeEnrichment,
   isPaused,
-  pushPriorityGym,
+  pushPrioritySpace,
   getEnrichmentStats,
   getPriorityQueue,
 } = require('../services/enrichmentService');
@@ -31,20 +31,20 @@ router.get('/status', async (req, res) => {
     const stats = await getEnrichmentStats();
 
     // Also get count of gyms needing enrichment (oldest-updated first)
-    const totalGyms = await Gym.countDocuments({
+    const totalGyms = await Space.countDocuments({
       permanentlyClosed: { $ne: true },
       googleMapsUrl: { $exists: true, $ne: null },
     });
 
     // Gyms not updated in last 7 days
-    const staleCount = await Gym.countDocuments({
+    const staleCount = await Space.countDocuments({
       permanentlyClosed: { $ne: true },
       googleMapsUrl: { $exists: true, $ne: null },
       updatedAt: { $lt: new Date(Date.now() - 7 * 86_400_000) },
     });
 
     // Next gym in queue (oldest updatedAt)
-    const nextInQueue = await Gym.findOne({
+    const nextInQueue = await Space.findOne({
       permanentlyClosed: { $ne: true },
       googleMapsUrl: { $exists: true, $ne: null },
     })
@@ -117,7 +117,7 @@ router.post('/priority',
     if (validate(req, res)) return;
     try {
       const { gymId, sections } = req.body;
-      const gym = await Gym.findById(gymId).select('name areaName googleMapsUrl').lean();
+      const gym = await Space.findById(gymId).select('name areaName googleMapsUrl').lean();
       if (!gym) return err(res, 'Gym not found', 404);
       if (!gym.googleMapsUrl) return err(res, 'Gym has no Google Maps URL — cannot enrich', 400);
 
@@ -145,7 +145,7 @@ router.post('/priority/batch',
     if (validate(req, res)) return;
     try {
       const { gymIds, sections } = req.body;
-      const gyms = await Gym.find({
+      const gyms = await Space.find({
         _id: { $in: gymIds },
         googleMapsUrl: { $exists: true, $ne: null },
       }).select('_id name').lean();
@@ -181,7 +181,7 @@ router.get('/candidates', async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
 
-    const candidates = await Gym.find({
+    const candidates = await Space.find({
       permanentlyClosed: { $ne: true },
       googleMapsUrl: { $exists: true, $ne: null },
     })
@@ -290,6 +290,22 @@ router.get('/metrics', async (req, res) => {
       fieldStats,
       config: { days, since }
     });
+  } catch (e) { err(res, e.message); }
+});
+
+/**
+ * GET /api/enrichment/stats — aggregated enrichment statistics for dashboard
+ */
+router.get('/stats', async (req, res) => {
+  try {
+    const [quarantined, failed, neverEnriched, successCount] = await Promise.all([
+      Space.countDocuments({ 'enrichment.status': 'quarantined', deletedAt: null }),
+      Space.countDocuments({ 'enrichment.status': 'failed', deletedAt: null }),
+      Space.countDocuments({ 'enrichment.status': 'never', deletedAt: null }),
+      Space.countDocuments({ 'enrichment.status': 'success', deletedAt: null }),
+    ]);
+    const engineStatus = await getEnrichmentStats();
+    ok(res, { quarantined, failed, neverEnriched, successCount, engine: engineStatus });
   } catch (e) { err(res, e.message); }
 });
 

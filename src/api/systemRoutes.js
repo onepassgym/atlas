@@ -18,7 +18,7 @@ const {
   scheduleNCRCrawl,
   queueCity,
 } = require('../services/schedulerService');
-const Gym = require('../db/gymModel');
+const Space = require('../db/spaceModel');
 const { calculateQualityScore } = require('../services/intelligence/scoring');
 const { analyzeGymSentiment } = require('../services/intelligence/sentiment');
 const { Review } = require('../db/reviewModel');
@@ -527,7 +527,7 @@ router.post('/recalculate-scores', async (req, res) => {
   // Run in background
   (async () => {
     try {
-      const gyms = await Gym.find({}).limit(5000); // Sanity limit
+      const gyms = await Space.find({}).limit(5000); // Sanity limit
       logger.info(`Starting bulk recalculation for ${gyms.length} gyms...`);
       
       let processed = 0;

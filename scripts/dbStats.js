@@ -2,7 +2,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const { connectDB, disconnectDB } = require('../src/db/connection');
-const Gym      = require('../src/db/gymModel');
+const Space = require('../src/db/spaceModel');
 const CrawlJob = require('../src/db/crawlJobModel');
 const logger   = require('../src/utils/logger');
 
@@ -12,13 +12,13 @@ async function main() {
 
   const [total, byCategory, topCities, avgRating, avgComplete, totalPhotos, totalReviews, totalJobs, jobsByStatus] =
     await Promise.all([
-      Gym.countDocuments(),
-      Gym.aggregate([{ $group: { _id: '$category', count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
-      Gym.aggregate([{ $group: { _id: '$areaName', count: { $sum: 1 } } }, { $sort: { count: -1 } }, { $limit: 20 }]),
-      Gym.aggregate([{ $match: { rating: { $gt: 0 } } }, { $group: { _id: null, avg: { $avg: '$rating' } } }]),
-      Gym.aggregate([{ $group: { _id: null, avg: { $avg: '$crawlMeta.dataCompleteness' } } }]),
-      Gym.aggregate([{ $group: { _id: null, t: { $sum: '$totalPhotos' } } }]),
-      Gym.aggregate([{ $group: { _id: null, t: { $sum: '$totalReviews' } } }]),
+      Space.countDocuments(),
+      Space.aggregate([{ $group: { _id: '$category', count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
+      Space.aggregate([{ $group: { _id: '$areaName', count: { $sum: 1 } } }, { $sort: { count: -1 } }, { $limit: 20 }]),
+      Space.aggregate([{ $match: { rating: { $gt: 0 } } }, { $group: { _id: null, avg: { $avg: '$rating' } } }]),
+      Space.aggregate([{ $group: { _id: null, avg: { $avg: '$crawlMeta.dataCompleteness' } } }]),
+      Space.aggregate([{ $group: { _id: null, t: { $sum: '$totalPhotos' } } }]),
+      Space.aggregate([{ $group: { _id: null, t: { $sum: '$totalReviews' } } }]),
       CrawlJob.countDocuments(),
       CrawlJob.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
     ]);
@@ -42,7 +42,7 @@ async function main() {
 
   if (doExport) {
     logger.info('Exporting to gyms-export.json...');
-    const gyms = await Gym.find().select('-reviews -photos.localPath').lean();
+    const gyms = await Space.find().select('-reviews -photos.localPath').lean();
     fs.writeFileSync('gyms-export.json', JSON.stringify(gyms, null, 2));
     logger.info(`Exported ${gyms.length} gyms.`);
   }

@@ -4,13 +4,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: atlas06-api
+    container_name: atlas-api
     restart: unless-stopped
     ports:
       - "8747:8747"
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas06
+      - MONGODB_URI=mongodb://mongo:27017/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=${NODE_ENV:-production}
@@ -48,7 +48,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas06
+      - MONGODB_URI=mongodb://mongo:27017/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=${NODE_ENV:-production}
@@ -80,7 +80,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas06
+      - MONGODB_URI=mongodb://mongo:27017/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=${NODE_ENV:-production}
@@ -113,7 +113,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas06
+      - MONGODB_URI=mongodb://mongo:27017/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=${NODE_ENV:-production}

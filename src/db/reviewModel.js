@@ -37,39 +37,45 @@ function parseRelativeDate(raw) {
 
 const ReviewSchema = new mongoose.Schema(
   {
-    gymId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Gym', required: true },
-    // Denormalized public identifier — populated at write time from parent gym.
-    // Never used for $lookup or joins; gymId (ObjectId) is always the join key.
-    opgId:        { type: String, index: true, uppercase: true, trim: true },
+    spaceId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Space', required: true },
+    spaceOpgId:   { type: String, index: true, trim: true },
+    opgId:        { type: String, index: true, trim: true, match: /^RVW-[A-Z]+-[0-9A-Z]{11,14}$/ },
     reviewId:     { type: String, required: true },
 
+    // Author
+    source:       { type: String, enum: ['google', 'opg'], default: 'google', index: true },
+    userOpgId:    { type: String, default: null },
+    checkinOpgId: { type: String, default: null },
     authorName:   String,
     authorUrl:    String,
-    authorAvatar: String,   // reviewer avatar URL (no download)
-    reviewerLocalGuideLevel: { type: Number, default: null },  // null = not a local guide
+    authorAvatar: String,
+    reviewerLocalGuideLevel: { type: Number, default: null },
 
     rating:       { type: Number, min: 1, max: 5 },
     text:         String,
-    photos:       [String],         // legacy — kept for compat
-    reviewPhotos: [String],         // enrichment: URL-only photo list, sourceType=review_photo
+    photos:       [String],
+    reviewPhotos: [String],
 
-    // Keep the raw string Google gives us (e.g. "a month ago")
     publishedAtRaw: String,
-
-    // Parsed ISODate
     publishedAt:  Date,
 
     likes:        { type: Number, default: 0 },
 
     ownerReply: {
       text:           String,
-      respondedAtRaw: String,     // raw Google string e.g. "2 months ago"
+      respondedAtRaw: String,
       publishedAt:    Date,
     },
+
+    isVerified:   { type: Boolean, default: false },
+    isFlagged:    { type: Boolean, default: false },
+    flagReason:   String,
+    createdVia:   { type: String, default: 'crawler' },
+    deletedAt:    { type: Date, default: null },
   },
   {
-    timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },  // add updatedAt for ownerReply tracking
-    collection: 'gym_reviews',
+    timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
+    collection: 'space_reviews',
     autoIndex: false,
   }
 );
@@ -78,8 +84,10 @@ const ReviewSchema = new mongoose.Schema(
 // Primary indexes are created imperatively in ensureIndexes.js so they are
 // guaranteed to exist before the first write.  We still declare them here
 // for Mongoose's schema introspection / IDE support.
-ReviewSchema.index({ gymId: 1 });
+ReviewSchema.index({ spaceId: 1 });
 ReviewSchema.index({ reviewId: 1 }, { unique: true });
+ReviewSchema.index({ spaceOpgId: 1, publishedAt: -1 }, { name: 'idx_space_recent' });
+ReviewSchema.index({ spaceOpgId: 1, rating: 1 },       { name: 'idx_space_rating' });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -91,10 +99,12 @@ ReviewSchema.index({ reviewId: 1 }, { unique: true });
  * @param {Array}    rawReviews  — array of review objects from the scraper
  * @returns {Array}
  */
-function buildReviewDocs(gymId, rawReviews = []) {
+function buildReviewDocs(spaceId, rawReviews = [], spaceOpgId = null) {
   return rawReviews.map((r) => ({
-    gymId,
+    spaceId,
+    ...(spaceOpgId ? { spaceOpgId } : {}),
     reviewId:     r.reviewId   || r.id || String(Math.random()),
+    source:       'google',
     authorName:   r.authorName || r.author || null,
     authorUrl:    r.authorUrl   || null,
     authorAvatar: r.authorAvatar || r.avatar || null,
@@ -106,6 +116,7 @@ function buildReviewDocs(gymId, rawReviews = []) {
     publishedAtRaw: r.publishedAt || r.publishedAtRaw || null,
     publishedAt:  parseRelativeDate(r.publishedAt || r.publishedAtRaw),
     likes:        r.likes || 0,
+    createdVia:   'crawler',
     ownerReply: r.ownerReply?.text
       ? {
           text:           r.ownerReply.text || null,
@@ -127,7 +138,7 @@ function buildReviewDocs(gymId, rawReviews = []) {
  * @param {Object}   changeLogWriter — function(gymId, diffs, now) for logging ownerResponse changes
  * @returns {{ updated: number }}
  */
-async function mergeReviewEnrichment(gymId, rawReviews = [], changeLogWriter) {
+async function mergeReviewEnrichment(spaceId, rawReviews = [], changeLogWriter) {
   if (!rawReviews.length) return { updated: 0 };
   let updated = 0;
   const now = new Date();
@@ -149,9 +160,8 @@ async function mergeReviewEnrichment(gymId, rawReviews = [], changeLogWriter) {
         respondedAtRaw: r.ownerReply?.respondedAt || r.ownerReply?.publishedAt || null,
         publishedAt:    parseRelativeDate(r.ownerReply?.respondedAt || r.ownerReply?.publishedAt),
       };
-      // Log the owner response change
       if (changeLogWriter) {
-        await changeLogWriter(gymId, [{
+        await changeLogWriter(spaceId, [{
           field:    'ownerResponse',
           oldValue: oldReplyText,
           newValue: newReplyText,

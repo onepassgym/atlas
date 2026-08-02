@@ -35,17 +35,17 @@ function makeQueue(name, jobOpts = {}) {
   return q;
 }
 
-const crawlQueue      = makeQueue('atlas06-crawl');
-const chainCrawlQueue = makeQueue('atlas06-chain-crawl');
-// Phase 5: dedicated media download queue — processed by mediaWorker.js
-const mediaQueue      = makeQueue('atlas06-media', {
+const crawlQueue      = makeQueue('atlas-crawl');
+const chainCrawlQueue = makeQueue('atlas-chain-crawl');
+// Dedicated media download queue — processed by mediaWorker.js
+const mediaQueue      = makeQueue('atlas-media', {
   attempts:         3,
   backoff:          { type: 'exponential', delay: 3000 },
   removeOnComplete: 100,
   removeOnFail:     50,
 });
-// Enrichment queue — targeted per-gym enrichment jobs (Tasks 1-5)
-const enrichmentQueue = makeQueue('atlas06-enrichment', {
+// Enrichment queue — targeted per-space enrichment jobs
+const enrichmentQueue = makeQueue('atlas-enrichment', {
   attempts:         2,
   backoff:          { type: 'exponential', delay: 8000 },
   removeOnComplete: 200,
@@ -197,7 +197,7 @@ async function clearCrawlQueue() {
  * TTL of 1 hour prevents stale flags from accumulating.
  */
 async function requestCancelJob(jobId) {
-  await redis.set(`atlas06:cancel:${jobId}`, '1', 'EX', 3600);
+  await redis.set(`atlas:cancel:${jobId}`, '1', 'EX', 3600);
   logger.info(`🛑 Cancel requested for job: ${jobId}`);
 }
 
@@ -207,7 +207,7 @@ async function requestCancelJob(jobId) {
  */
 async function isJobCancelled(jobId) {
   try {
-    const flag = await redis.get(`atlas06:cancel:${jobId}`);
+    const flag = await redis.get(`atlas:cancel:${jobId}`);
     return flag === '1';
   } catch (_) {
     return false;
@@ -218,7 +218,7 @@ async function isJobCancelled(jobId) {
  * Clear the cancellation flag after the worker has handled it.
  */
 async function clearCancelFlag(jobId) {
-  await redis.del(`atlas06:cancel:${jobId}`);
+  await redis.del(`atlas:cancel:${jobId}`);
 }
 
 /**

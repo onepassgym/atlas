@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * eventBus.js — Central event emitter for Atlas06
+ * eventBus.js — Central event emitter for Atlas
  *
  * All system events flow through this singleton. Consumers:
  *   - SSE endpoint (real-time browser push)

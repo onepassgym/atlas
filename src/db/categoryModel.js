@@ -3,8 +3,15 @@ const mongoose = require('mongoose');
 
 const CategorySchema = new mongoose.Schema({
   slug:        { type: String, required: true, unique: true },
-  label:       { type: String, required: true },
+  key:         { type: String, unique: true },
+  name:        { type: String, required: true },
   description: String,
-}, { timestamps: { createdAt: 'createdAt', updatedAt: false }, collection: 'gym_categories', autoIndex: false });
+  color:       String,
+  accent:      String,
+  imageUrl:    String,
+  parentSlug:  { type: String, default: null },
+  order:       { type: Number, default: 0 },
+  isActive:    { type: Boolean, default: true },
+}, { timestamps: true, collection: 'space_categories', autoIndex: false });
 
 module.exports = mongoose.model('Category', CategorySchema);

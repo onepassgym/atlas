@@ -18,7 +18,7 @@
 
 const mongoose = require('mongoose');
 const Photo = require('../db/photoModel');
-const Gym   = require('../db/gymModel');
+const Space = require('../db/spaceModel');
 const PhotoSyncState = require('../db/photoSyncStateModel');
 const cfg    = require('../../config');
 const logger = require('../utils/logger');
@@ -61,7 +61,7 @@ async function runPhotoSync(triggeredBy = 'cron') {
 
   try {
     // ── Count total gyms for progress tracking ────────────────────────────
-    const totalGyms = await Gym.countDocuments();
+    const totalGyms = await Space.countDocuments();
 
     // ── Build query: pick up after cursor ────────────────────────────────
     const filter = {
@@ -74,7 +74,7 @@ async function runPhotoSync(triggeredBy = 'cron') {
       filter._id = { $gt: state.lastProcessedGymId };
     }
 
-    const gyms = await Gym.find(filter)
+    const gyms = await Space.find(filter)
       .select('_id slug coverPhoto rawPhotos')
       .sort({ _id: 1 })
       .limit(GYMS_PER_RUN)

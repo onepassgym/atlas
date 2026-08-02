@@ -15,7 +15,7 @@ const { v4: uuidv4 } = require('uuid');
 const { connectDB }   = require('./db/connection');
 const indexRoutes     = require('./api/indexRoutes');
 const crawlRoutes     = require('./api/crawlRoutes');
-const gymRoutes       = require('./api/gymRoutes');
+const spaceRoutes     = require('./api/spaceRoutes');
 const chainRoutes     = require('./api/chainRoutes');
 const enrichmentRoutes = require('./api/enrichmentRoutes');
 const dataHealthRoutes = require('./api/dataHealthRoutes');
@@ -65,13 +65,18 @@ app.use('/',           indexRoutes);
 app.use('/api',        authMiddleware);
 
 app.use('/api/crawl',   crawlRoutes);
-app.use('/api/gyms',    gymRoutes);
+app.use('/api/spaces',  spaceRoutes);
 app.use('/api/chains',  chainRoutes);
 app.use('/api/system',  systemRoutes);
 app.use('/api/enrichment', enrichmentRoutes);
 app.use('/api/data-health', dataHealthRoutes);
 app.use('/api/media',   mediaRoutes);
 app.use('/api/events',  require('./api/eventRoutes'));
+
+// Legacy redirect: /api/gyms/* → /api/spaces/* (301 permanent)
+app.use('/api/gyms', (req, res) => {
+  res.redirect(301, `/api/spaces${req.url}`);
+});
 
 // ── Static files + Dashboard ──────────────────────────────────────────────────
 
@@ -96,7 +101,7 @@ app.use((err, req, res, _next) => {
 
   app.listen(cfg.server.port, async () => {
     logger.info(`\n${'─'.repeat(50)}`);
-    logger.info(`🚀 Atlas06 API    →  http://localhost:${cfg.server.port}`);
+    logger.info(`🚀 Atlas API       →  http://localhost:${cfg.server.port}`);
     logger.info(`📦 Media files       →  http://localhost:${cfg.server.port}/media`);
     logger.info(`📊 Dashboard         →  http://localhost:${cfg.server.port}/dashboard`);
     logger.info(`📡 SSE events        →  http://localhost:${cfg.server.port}/api/events`);
@@ -106,20 +111,20 @@ app.use((err, req, res, _next) => {
     startScheduler();
     startWebhookService();
 
-    // Seed gym chains if not already in DB
+    // Seed space chains if not already in DB
     try {
-      const GymChain = require('./db/gymChainModel');
+      const SpaceChain = require('./db/gymChainModel');
       const chainsConfig = require('../config/chains.json');
       let seeded = 0;
       for (const chainData of chainsConfig) {
-        const result = await GymChain.findOneAndUpdate(
+        const result = await SpaceChain.findOneAndUpdate(
           { slug: chainData.slug },
           { $setOnInsert: chainData },
           { upsert: true, new: true, rawResult: true },
         );
         if (result.lastErrorObject?.updatedExisting === false) seeded++;
       }
-      if (seeded > 0) logger.info(`🌱 Seeded ${seeded} new gym chain(s)`);
+      if (seeded > 0) logger.info(`🌱 Seeded ${seeded} new space chain(s)`);
     } catch (seedErr) {
       logger.warn(`Chain seed skipped: ${seedErr.message}`);
     }

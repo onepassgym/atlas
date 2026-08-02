@@ -6,10 +6,10 @@
  * Usage:  npm run worker:chain
  *
  * Architecture:
- *   - Listens on queue: 'atlas06-chain-crawl'
+ *   - Listens on queue: 'atlas-chain-crawl'
  *   - Each chain job: fetches all locations from store locator, then
  *     enriches via Google Maps in parallel using p-limit.
- *   - Reuses existing processGym() + upsertGym() pipeline for DB writes.
+ *   - Reuses existing processSpace() + upsertGym() pipeline for DB writes.
  *   - Skip-if-fresh: gyms crawled within 7 days are skipped.
  */
 
@@ -21,10 +21,10 @@ const { connectDB }     = require('../db/connection');
 const { getLocator }    = require('../scraper/chainLocators');
 const { fetchByBrand }  = require('../scraper/chainLocators/osmFallback');
 const { BrowserManager, scrapeGymDetail } = require('../scraper/googleMapsScraper');
-const { processGym }    = require('../scraper/gymProcessor');
+const { processSpace }  = require('../scraper/spaceProcessor');
 const CrawlJob          = require('../db/crawlJobModel');
-const Gym               = require('../db/gymModel');
-const GymChain          = require('../db/gymChainModel');
+const Space             = require('../db/spaceModel');
+const SpaceChain        = require('../db/gymChainModel');
 const SystemState       = require('../db/systemStateModel');
 const { isJobCancelled, clearCancelFlag } = require('./queues');
 const cfg               = require('../../config');
@@ -185,7 +185,7 @@ async function enrichViaGoogleMaps(page, location, chainId, chainSlug, chainName
     }
 
     // Inject chain identity into scraped data
-    const result = await processGym(scraped, areaName, jobId, true);
+    const result = await processSpace(scraped, areaName, jobId, true);
 
     // Tag with chain regardless of processGym result
     if (result.gymId) {
@@ -213,7 +213,7 @@ async function enrichViaGoogleMaps(page, location, chainId, chainSlug, chainName
       placeId: null,
     };
 
-    const result = await processGym(fallbackData, areaName, jobId, false);
+    const result = await processSpace(fallbackData, areaName, jobId, false);
     if (result.gymId) {
       await tagWithChain(result.gymId, chainId, chainSlug, chainName);
     }
@@ -232,10 +232,10 @@ async function processChainJob(job) {
   await updateJob(jobId, { status: 'running', startedAt: new Date(), bullJobId: String(job.id) });
   bus.publish('job:started', { jobId, type: 'chain', chainSlug: slug, chainName });
 
-  // Resolve or create the GymChain record
-  let chain = await GymChain.findOne({ slug });
+  // Resolve or create the SpaceChain record
+  let chain = await SpaceChain.findOne({ slug });
   if (!chain) {
-    chain = await GymChain.create({ slug, name: chainName, isActive: true });
+    chain = await SpaceChain.create({ slug, name: chainName, isActive: true });
     logger.info(`[ChainWorker] Created new chain record: ${chainName}`);
   }
   const chainId = chain._id;
@@ -448,7 +448,7 @@ async function updateChainStats(chainId, chainSlug) {
     const count = await Gym.countDocuments({ chainSlug, isChainMember: true });
     const countries = await Gym.distinct('addressParts.country', { chainSlug, isChainMember: true });
 
-    await GymChain.findByIdAndUpdate(chainId, {
+    await SpaceChain.findByIdAndUpdate(chainId, {
       $set: {
         totalLocations: count,
         countriesPresent: countries.filter(Boolean),
@@ -471,7 +471,7 @@ async function start() {
   try {
     const chainsConfig = require('../../config/chains.json');
     for (const chainData of chainsConfig) {
-      await GymChain.findOneAndUpdate(
+      await SpaceChain.findOneAndUpdate(
         { slug: chainData.slug },
         { $setOnInsert: chainData },
         { upsert: true, new: true },
@@ -482,7 +482,7 @@ async function start() {
     logger.warn(`Chain seed skipped: ${err.message}`);
   }
 
-  const worker = new Worker('atlas06-chain-crawl', async (job) => {
+  const worker = new Worker('atlas-chain-crawl', async (job) => {
     logger.info(`⚙️  Processing chain job: ${job.name} [${job.id}]`);
     if (job.name === 'chain-crawl') return processChainJob(job);
     throw new Error(`Unknown chain job name: ${job.name}`);
@@ -496,7 +496,7 @@ async function start() {
   worker.on('failed',    (job, err) => logger.error(`❌ Chain job failed: ${job?.id} — ${err.message}`));
   worker.on('error',     (err) => logger.error(`Chain worker error: ${err.message}`));
 
-  logger.info(`\n🏋️  Atlas06 Chain Worker started  [concurrency: ${CHAIN_CONCURRENCY}, enrich: ${ENRICH_CONCURRENCY}, freshness: ${FRESHNESS_DAYS}d]`);
+  logger.info(`\n🏋️  Atlas Chain Worker started  [concurrency: ${CHAIN_CONCURRENCY}, enrich: ${ENRICH_CONCURRENCY}, freshness: ${FRESHNESS_DAYS}d]`);
 
   // ── Graceful shutdown ────────────────────────────────────────────────────
   const shutdown = async (signal) => {

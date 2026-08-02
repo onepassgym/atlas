@@ -2,63 +2,42 @@
 const mongoose = require('mongoose');
 
 const PhotoSchema = new mongoose.Schema({
-  gymId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Gym', index: true },
-  // Denormalized public identifier — populated at write time from parent gym.
-  // Never used for $lookup or joins; gymId (ObjectId) is always the join key.
-  opgId:        { type: String, index: true, uppercase: true, trim: true },
-  originalUrl:  String,
-  localPath:    String,
-  publicUrl:    { type: String, sparse: true },
+  opgId:        { type: String, index: true, trim: true, match: /^PHT-[A-Z]+-[0-9A-Z]{11,14}$/ },
+  spaceId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Space', index: true },
+  spaceOpgId:   { type: String, index: true, trim: true },
+  assetOpgId:   { type: String, default: null },         // cross-DB ref to opg-media AST-*
+  publicUrl:    { type: String, sparse: true },          // denorm rendered url (ours after download)
+  originalUrl:  String,                                  // source URL (Google CDN)
   thumbnailUrl: String,
-  // Source classification — enrichment adds more granular types
+  // Source classification
   sourceType: {
     type: String,
-    enum: ['user', 'owner', 'cover', 'video_thumb', 'streetview', 'review_photo'],
-    default: 'user',
+    enum: ['user', 'owner', 'cover', 'video_thumb', 'streetview', 'review_photo', 'google'],
+    default: 'google',
     index: true,
   },
-  // Download tracking — false = URL captured only, true = file exists on disk
+  // Download tracking — false = URL captured only, true = owned by opg-media
   downloaded:   { type: Boolean, default: false },
-  capturedAt:   { type: Date, default: Date.now },
-  type:         { type: String, enum: ['photo', 'video', 'thumbnail', 'cover'], default: 'photo', index: true },
-  caption:      String,
-  filename:     String,           // basename of stored file
-  folder:       String,           // relative sub-folder e.g. "photos/gym-slug"
+  type:         { type: String, enum: ['cover', 'interior', 'exterior', 'equipment', 'general', 'photo', 'video', 'thumbnail'], default: 'general', index: true },
   width:        Number,
   height:       Number,
-  sizeBytes:    Number,
-  mimeType:     String,
-  appealScore:  { type: Number, default: 0 },
-  brightness:   Number,
-  contrast:     Number,
-  tags:         [{ type: String, index: true }],
+  order:        { type: Number, index: true },
   isCover:      { type: Boolean, default: false },
-  isOrphaned:   { type: Boolean, default: false }, // file on disk but no gym match
-  downloadedAt: Date,
-  downloadError: String,
-  // Sync tracking
-  fsVerifiedAt: Date,             // last time file existence was confirmed on disk
-  fsExists:     { type: Boolean, default: true },
+  createdVia:   { type: String, default: 'crawler' },
+  deletedAt:    { type: Date, default: null },
 }, {
   timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
-  collection: 'gym_photos',
+  collection: 'space_photos',
   autoIndex: false,
 });
 
-// ── Compound indexes for scalable queries ──────────────────────────────────────
+// ── Indexes ────────────────────────────────────────────────────────────────────
 PhotoSchema.index({ publicUrl: 1 }, { unique: true, sparse: true });
-PhotoSchema.index({ gymId: 1, type: 1 });
-PhotoSchema.index({ gymId: 1, sourceType: 1 });               // Task 7 index
-PhotoSchema.index({ downloaded: 1, gymId: 1 });               // Task 7 index — future download queue
-PhotoSchema.index({ gymId: 1, createdAt: -1 });
-PhotoSchema.index({ type: 1, createdAt: -1 });
-PhotoSchema.index({ createdAt: -1 });
-PhotoSchema.index({ sizeBytes: -1 });
-PhotoSchema.index({ appealScore: -1 });
-PhotoSchema.index({ folder: 1 });
-PhotoSchema.index({ fsExists: 1 });
-PhotoSchema.index({ tags: 1 });
-// Text search index
-PhotoSchema.index({ caption: 'text', filename: 'text', folder: 'text' });
+PhotoSchema.index({ originalUrl: 1, spaceId: 1 }, { sparse: true, name: 'photos_originalUrl_spaceId' });
+PhotoSchema.index({ spaceId: 1, type: 1 });
+PhotoSchema.index({ spaceId: 1, sourceType: 1 });
+PhotoSchema.index({ downloaded: 1, spaceId: 1 });
+PhotoSchema.index({ spaceId: 1, createdAt: -1 });
+PhotoSchema.index({ spaceOpgId: 1, order: 1 }, { name: 'idx_space_order' });
 
 module.exports = mongoose.model('Photo', PhotoSchema);

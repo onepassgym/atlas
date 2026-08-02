@@ -16,7 +16,7 @@
 require('dotenv').config();
 
 const { connectDB } = require('../db/connection');
-const Gym = require('../db/gymModel');
+const Space = require('../db/spaceModel');
 const SystemState = require('../db/systemStateModel');
 const EnrichmentLog = require('../db/enrichmentLogModel');
 const { BrowserManager, scrapeGymDetail, scrapeSelective } = require('../scraper/googleMapsScraper');
@@ -24,7 +24,7 @@ const { scrapeWebsitePhotos } = require('../scraper/websiteScraper');
 const { processGym } = require('../scraper/gymProcessor');
 const {
   isPaused,
-  popPriorityGym,
+  popPrioritySpace,
   setStatus,
   getStatus,
 } = require('../services/enrichmentService');
@@ -68,7 +68,7 @@ async function getNextGym() {
   // 1. Check priority queue
   const priority = await popPriorityGym();
   if (priority) {
-    const gym = await Gym.findById(priority.gymId).lean();
+    const gym = await Space.findById(priority.gymId).lean();
     if (gym) {
       return { gym, source: 'priority', gymName: priority.gymName, sections: priority.sections || ['all'] };
     }
@@ -76,7 +76,7 @@ async function getNextGym() {
   }
 
   // 2. Pick oldest-updated gym that isn't permanently closed
-  const gym = await Gym.findOne({
+  const gym = await Space.findOne({
     permanentlyClosed: { $ne: true },
     googleMapsUrl: { $exists: true, $ne: null },
   })
@@ -139,7 +139,7 @@ async function enrichGym(browser, gym, source, sections = ['all']) {
 
     // ── Update Gym Meta ──
     try {
-      await Gym.findByIdAndUpdate(gymId, {
+      await Space.findByIdAndUpdate(gymId, {
         $set: {
           'enrichmentMeta.lastAttempt': new Date(startTime),
           'enrichmentMeta.lastSuccess': new Date(),
@@ -185,7 +185,7 @@ async function enrichGym(browser, gym, source, sections = ['all']) {
 
     // ── Update Gym Meta (Fail) ──
     try {
-      await Gym.findByIdAndUpdate(gymId, {
+      await Space.findByIdAndUpdate(gymId, {
         $set: {
           'enrichmentMeta.lastAttempt': new Date(startTime),
           'enrichmentMeta.status': 'failed',
@@ -217,7 +217,7 @@ async function enrichGym(browser, gym, source, sections = ['all']) {
 
     // Touch updatedAt so this gym goes to the back of the queue
     try {
-      await Gym.findByIdAndUpdate(gym._id, { $set: { updatedAt: new Date() } });
+      await Space.findByIdAndUpdate(gym._id, { $set: { updatedAt: new Date() } });
     } catch (_) {}
 
     return { success: false, error: err.message, duration };

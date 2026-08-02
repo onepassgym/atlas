@@ -2,7 +2,7 @@
 /**
  * mediaRoutes.js — Dedicated production-grade media management API
  *
- * Queries the `gym_photos` collection (Photo model) — NOT rawPhotos embedded in Gym.
+ * Queries the `gym_photos` collection (Photo model) — NOT rawPhotos embedded in Space.
  * This is the correct source for all 26k+ downloaded media files.
  *
  * Endpoints:
@@ -24,7 +24,7 @@ const mongoose = require('mongoose');
 const { param, query, body, validationResult } = require('express-validator');
 const router   = express.Router();
 const Photo    = require('../db/photoModel');
-const Gym      = require('../db/gymModel');
+const Space = require('../db/spaceModel');
 const cfg      = require('../../config');
 const logger   = require('../utils/logger');
 const { ok, err } = require('../utils/apiUtils');
@@ -203,7 +203,7 @@ router.get('/stats', async (req, res) => {
       }
     ]);
 
-    const gymPhotoSum = await Gym.aggregate([{ $group: { _id: null, total: { $sum: '$totalPhotos' } } }]);
+    const gymPhotoSum = await Space.aggregate([{ $group: { _id: null, total: { $sum: '$totalPhotos' } } }]);
 
     const totals = facetResult.totals[0] || { totalCount: 0, totalSize: 0, avgSize: 0 };
 
@@ -263,22 +263,22 @@ router.get('/scan', async (req, res) => {
   }
 });
 
-// ── POST /api/media/migrate-from-gyms — bulk-populate gym_photos from Gym.photos arrays ──
+// ── POST /api/media/migrate-from-gyms — bulk-populate gym_photos from Space.photos arrays ──
 // This is the PRIMARY fix for the 26k discrepancy — gyms store downloaded photo data
-// embedded in Gym.photos field; this migrates all of them into the Photo collection.
+// embedded in Space.photos field; this migrates all of them into the Photo collection.
 router.post('/migrate-from-gyms', async (req, res) => {
   res.status(202).json({ success: true, message: 'Migration started in background. Check /api/media/stats for progress.' });
 
   (async () => {
     try {
-      logger.info('[media-migrate] Starting Gym.photos → gym_photos migration...');
+      logger.info('[media-migrate] Starting Space.photos → gym_photos migration...');
 
-      const gymSlugs = await Gym.find({}).select('_id slug').lean();
+      const gymSlugs = await Space.find({}).select('_id slug').lean();
       const slugMap  = new Map(gymSlugs.map(g => [g.slug, g._id]));
       logger.info(`[media-migrate] Loaded ${slugMap.size} gym slugs`);
 
       // Fetch every gym that has coverPhoto.publicUrl OR a non-empty rawPhotos array
-      const gyms = await Gym.find({
+      const gyms = await Space.find({
         $or: [
           { 'coverPhoto.publicUrl': { $exists: true, $ne: null } },
           { rawPhotos: { $exists: true, $type: 'array', $ne: [] } },
@@ -357,7 +357,7 @@ router.post('/sync', async (req, res) => {
       logger.info('[media-sync] Starting filesystem → DB sync...');
       setProgress('sync', { status: 'running', phase: 'Scanning filesystem…', done: 0, total: 0 });
 
-      const gymSlugs = await Gym.find({}).select('_id slug').lean();
+      const gymSlugs = await Space.find({}).select('_id slug').lean();
       const slugMap  = new Map(gymSlugs.map(g => [g.slug, g._id]));
 
       const allFiles   = await walkDir(basePath);
@@ -450,7 +450,7 @@ router.post('/sync', async (req, res) => {
 router.post('/relink-gyms', async (req, res) => {
   try {
     setProgress('relink', { status: 'running', phase: 'Loading gym slugs…', done: 0, total: 0 });
-    const gymSlugs = await Gym.find({}).select('_id slug').lean();
+    const gymSlugs = await Space.find({}).select('_id slug').lean();
     const slugMap  = new Map(gymSlugs.map(g => [g.slug, g._id]));
 
     const unlinked = await Photo.find({ gymId: null, folder: { $regex: /^photos\// } })

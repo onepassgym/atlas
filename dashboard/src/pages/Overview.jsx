@@ -5,6 +5,7 @@ import { Building2, MessageCircle, Camera, Zap, Target, Link2, Activity, Trendin
 import StatCard from '../components/StatCard';
 import CrawlActivity from '../components/CrawlActivity';
 import EnrichmentPanel from '../components/EnrichmentPanel';
+import HealthRecommendations from '../components/HealthRecommendations';
 import Skeleton from '../components/Skeleton';
 import GymRow from '../components/GymRow';
 import GymDrawer from '../components/GymDrawer';
@@ -280,6 +281,17 @@ export default function Overview() {
             {isGlobalPaused ? 'System Resumed' : 'System Standby'}
           </button>
         </div>
+      </div>
+
+      {/* ── Health Recommendations (Phase 4) ────── */}
+      <div style={{
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 8,
+        marginBottom: 'var(--spacing-lg)',
+        overflow: 'hidden',
+      }}>
+        <HealthRecommendations />
       </div>
 
       {/* ── System Activity (Live Crawler & Enrichment) ────── */}

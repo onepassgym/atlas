@@ -2,7 +2,7 @@
 const express = require('express');
 const { query, validationResult } = require('express-validator');
 const router  = express.Router();
-const Gym     = require('../db/gymModel');
+const Space = require('../db/spaceModel');
 const GymChangeLog = require('../db/gymChangeLogModel');
 const { Review }   = require('../db/reviewModel');
 const { ok, err, validate } = require('../utils/apiUtils');
@@ -39,10 +39,10 @@ router.get('/overview', async (req, res) => {
       reviewCoverage,
     ] = await Promise.all([
       // Total count
-      Gym.countDocuments(),
+      Space.countDocuments(),
 
       // Missing fields aggregation
-      Gym.aggregate([{
+      Space.aggregate([{
         $group: {
           _id: null,
           total: { $sum: 1 },
@@ -79,7 +79,7 @@ router.get('/overview', async (req, res) => {
       }]),
 
       // Staleness buckets
-      Gym.aggregate([{
+      Space.aggregate([{
         $group: {
           _id: null,
           fresh:     { $sum: { $cond: [{ $gte: ['$updatedAt', new Date(now - 7 * DAY_MS)] }, 1, 0] } },
@@ -90,7 +90,7 @@ router.get('/overview', async (req, res) => {
       }]),
 
       // Quality score distribution (5 buckets) — using $group for robustness
-      Gym.aggregate([{
+      Space.aggregate([{
         $group: {
           _id: null,
           b0:  { $sum: { $cond: [{ $and: [{ $gte: [{ $ifNull: ['$qualityScore', 0] }, 0] },  { $lt: [{ $ifNull: ['$qualityScore', 0] }, 20] }] }, 1, 0] } },
@@ -102,7 +102,7 @@ router.get('/overview', async (req, res) => {
       }]),
 
       // Sentiment distribution (5 buckets)
-      Gym.aggregate([{
+      Space.aggregate([{
         $group: {
           _id: null,
           veryNeg:  { $sum: { $cond: [{ $lt:  [{ $ifNull: ['$sentimentScore', 0] }, -0.5] }, 1, 0] } },
@@ -114,7 +114,7 @@ router.get('/overview', async (req, res) => {
       }]),
 
       // Rating distribution (6 buckets)
-      Gym.aggregate([{
+      Space.aggregate([{
         $match: { rating: { $gt: 0 } },
       }, {
         $group: {
@@ -129,7 +129,7 @@ router.get('/overview', async (req, res) => {
       }]),
 
       // Closed gyms stats
-      Gym.aggregate([{
+      Space.aggregate([{
         $group: {
           _id: null,
           permanentlyClosed: { $sum: { $cond: ['$permanentlyClosed', 1, 0] } },
@@ -138,7 +138,7 @@ router.get('/overview', async (req, res) => {
       }]),
 
       // Enrichment status breakdown
-      Gym.aggregate([{
+      Space.aggregate([{
         $group: {
           _id: { $ifNull: ['$enrichmentMeta.status', 'never'] },
           count: { $sum: 1 },
@@ -233,7 +233,7 @@ router.get('/worst',
     if (validate(req, res)) return;
     const limit = parseInt(req.query.limit || '20', 10);
     try {
-      const gyms = await Gym.find({
+      const gyms = await Space.find({
         permanentlyClosed: { $ne: true },
         googleMapsUrl: { $exists: true, $ne: null },
       })
@@ -272,7 +272,7 @@ router.get('/stale',
     const limit = parseInt(req.query.limit || '20', 10);
     try {
       const cutoff = new Date(Date.now() - days * 86_400_000);
-      const gyms = await Gym.find({
+      const gyms = await Space.find({
         updatedAt: { $lt: cutoff },
         permanentlyClosed: { $ne: true },
       })
@@ -281,7 +281,7 @@ router.get('/stale',
         .limit(limit)
         .lean();
 
-      const total = await Gym.countDocuments({
+      const total = await Space.countDocuments({
         updatedAt: { $lt: cutoff },
         permanentlyClosed: { $ne: true },
       });

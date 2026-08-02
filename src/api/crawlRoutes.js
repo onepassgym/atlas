@@ -11,7 +11,7 @@ const {
 } = require('../queue/queues');
 const { FITNESS_CATEGORIES } = require('../scraper/googleMapsScraper');
 const CrawlJob = require('../db/crawlJobModel');
-const Gym      = require('../db/gymModel');
+const Space = require('../db/spaceModel');
 const logger   = require('../utils/logger');
 
 const { ok, err, validate } = require('../utils/apiUtils');
@@ -451,6 +451,16 @@ router.post('/retry/failed', async (req, res) => {
     const failed = await CrawlJob.find({ status: { $in: ['failed','partial'] }, type: 'city' }).lean();
     if (!failed.length) return ok(res, { message: 'No failed or partial jobs found' });
     
+    // Surface the coverage gap per city
+    const gapSummary = failed.map(j => ({
+      cityName: j.input.cityName,
+      discovered: j.progress?.total || 0,
+      scraped: j.progress?.scraped || 0,
+      failed: j.progress?.failed || 0,
+      blocked: j.progress?.blockedCount || 0,
+      gap: (j.progress?.total || 0) - (j.progress?.scraped || 0) - (j.progress?.skipped || 0),
+    }));
+
     const jobs = [];
     for (const j of failed) {
       const jobId = uuidv4();
@@ -459,7 +469,7 @@ router.post('/retry/failed', async (req, res) => {
       jobs.push({ cityName: j.input.cityName, jobId });
     }
     logger.info(`Re-queued ${failed.length} failed jobs via API`);
-    ok(res, { message: `Re-queued ${failed.length} failed jobs`, jobs });
+    ok(res, { message: `Re-queued ${failed.length} failed jobs`, jobs, gapSummary });
   } catch (e) { err(res, e.message); }
 });
 
@@ -470,20 +480,51 @@ router.post('/retry/incomplete',
     if (validate(req, res)) return;
     const threshold = req.body.threshold || 50;
     try {
-      const gyms = await Gym.find({ 'crawlMeta.dataCompleteness': { $lt: threshold } }).select('name areaName').limit(200).lean();
-      if (!gyms.length) return ok(res, { message: `No gyms found with completeness < ${threshold}%` });
+      const { addEnrichmentJob } = require('../queue/queues');
+      const spaces = await Space.find({
+        deletedAt: null,
+        dataCompleteness: { $lt: threshold },
+        'enrichment.status': { $ne: 'quarantined' },
+        googleMapsUrl: { $exists: true, $ne: null },
+      }).select('name areaName city googleMapsUrl dataCompleteness').sort({ dataCompleteness: 1 }).limit(200).lean();
+
+      if (!spaces.length) return ok(res, { message: `No spaces found with completeness < ${threshold}%` });
 
       const jobs = [];
-      for (const g of gyms) {
-        const jobId = uuidv4();
-        const gymName = `${g.name} ${g.areaName || ''}`.trim();
-        await CrawlJob.create({ jobId, type: 'gym_name', input: { gymName }, status: 'queued' });
-        await addGymNameJob(jobId, gymName);
-        jobs.push({ gymName, jobId });
+      for (const s of spaces) {
+        await addEnrichmentJob(s._id, s.googleMapsUrl, s.city || s.areaName);
+        jobs.push({ name: s.name, spaceId: String(s._id), completeness: s.dataCompleteness });
       }
-      logger.info(`Re-queued ${gyms.length} incomplete gyms via API`);
-      ok(res, { message: `Re-queued ${gyms.length} incomplete gyms`, jobs });
+      logger.info(`Queued ${spaces.length} incomplete spaces for enrichment via API`);
+      ok(res, { message: `Queued ${spaces.length} incomplete spaces for enrichment`, jobs });
     } catch (e) { err(res, e.message); }
+});
+
+// GET /api/crawl/coverage — Phase 2: crawl gap visibility endpoint
+router.get('/coverage', async (req, res) => {
+  try {
+    // Per-city gap: URLs found vs scraped vs blocked
+    const recentJobs = await CrawlJob.find({ type: 'city', status: { $in: ['completed', 'partial', 'failed'] } })
+      .sort({ completedAt: -1 })
+      .limit(50)
+      .select('input.cityName status progress categoryYield completedAt')
+      .lean();
+
+    const coverage = recentJobs.map(j => ({
+      city: j.input?.cityName,
+      status: j.status,
+      discovered: j.progress?.total || 0,
+      scraped: j.progress?.scraped || 0,
+      failed: j.progress?.failed || 0,
+      blocked: j.progress?.blockedCount || 0,
+      skipped: j.progress?.skipped || 0,
+      gap: (j.progress?.total || 0) - (j.progress?.scraped || 0) - (j.progress?.skipped || 0),
+      zeroYieldCategories: (j.categoryYield || []).filter(c => c.urlsFound === 0).map(c => c.category),
+      completedAt: j.completedAt,
+    }));
+
+    ok(res, { coverage });
+  } catch (e) { err(res, e.message); }
 });
 
 // GET /api/crawl/categories

@@ -6,8 +6,8 @@
  * Matches gyms by name patterns using chain name + aliases from the GymChain collection.
  */
 
-const Gym      = require('../db/gymModel');
-const GymChain = require('../db/gymChainModel');
+const Space = require('../db/spaceModel');
+const SpaceChain = require('../db/gymChainModel');
 const logger   = require('../utils/logger');
 
 /**
@@ -28,7 +28,7 @@ function buildPatterns(chain) {
  * @returns {Object} Summary of tagging results per chain
  */
 async function tagExistingGyms() {
-  const chains = await GymChain.find({ isActive: true }).lean();
+  const chains = await SpaceChain.find({ isActive: true }).lean();
 
   if (!chains.length) {
     logger.info('[ChainTagger] No active chains found. Nothing to tag.');
@@ -48,7 +48,7 @@ async function tagExistingGyms() {
 
     try {
       // Only tag gyms that aren't already tagged for this chain
-      const result = await Gym.updateMany(
+      const result = await Space.updateMany(
         {
           $or: orConditions,
           $or: [
@@ -93,10 +93,10 @@ async function tagExistingGyms() {
   // Update chain stats after tagging
   for (const chain of chains) {
     try {
-      const count = await Gym.countDocuments({ chainSlug: chain.slug, isChainMember: true });
-      const countries = await Gym.distinct('addressParts.country', { chainSlug: chain.slug, isChainMember: true });
+      const count = await Space.countDocuments({ chainSlug: chain.slug, isChainMember: true });
+      const countries = await Space.distinct('addressParts.country', { chainSlug: chain.slug, isChainMember: true });
 
-      await GymChain.findByIdAndUpdate(chain._id, {
+      await SpaceChain.findByIdAndUpdate(chain._id, {
         $set: {
           totalLocations: count,
           countriesPresent: countries.filter(Boolean),
@@ -115,7 +115,7 @@ async function tagExistingGyms() {
  * @param {string} chainSlug - The slug of the chain to tag for
  */
 async function tagChain(chainSlug) {
-  const chain = await GymChain.findOne({ slug: chainSlug }).lean();
+  const chain = await SpaceChain.findOne({ slug: chainSlug }).lean();
   if (!chain) {
     throw new Error(`Chain not found: ${chainSlug}`);
   }
@@ -123,7 +123,7 @@ async function tagChain(chainSlug) {
   const patterns = buildPatterns(chain);
   const orConditions = patterns.map(p => ({ name: p }));
 
-  const result = await Gym.updateMany(
+  const result = await Space.updateMany(
     {
       $or: orConditions,
       chainSlug: { $ne: chain.slug },
@@ -141,8 +141,8 @@ async function tagChain(chainSlug) {
   const tagged = result.modifiedCount || 0;
 
   // Update chain stats
-  const count = await Gym.countDocuments({ chainSlug: chain.slug, isChainMember: true });
-  await GymChain.findByIdAndUpdate(chain._id, {
+  const count = await Space.countDocuments({ chainSlug: chain.slug, isChainMember: true });
+  await SpaceChain.findByIdAndUpdate(chain._id, {
     $set: { totalLocations: count },
   });
 
