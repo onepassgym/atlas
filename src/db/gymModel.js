@@ -185,8 +185,8 @@ const GymSchema = new mongoose.Schema({
     negative: [String]
   },
 
-  // Atlas06 platform fields
-  atlas06: {
+  // atlas platform fields
+  atlas: {
     isListed:   { type: Boolean, default: false },
     isVerified: { type: Boolean, default: false },
     isPartner:  { type: Boolean, default: false },
@@ -264,7 +264,7 @@ GymSchema.index({ rating: -1 });
 GymSchema.index({ qualityScore: -1 });
 GymSchema.index({ sentimentScore: -1 });
 GymSchema.index({ 'crawlMeta.crawlStatus': 1 });
-GymSchema.index({ 'atlas06.isListed': 1 });
+GymSchema.index({ 'atlas.isListed': 1 });
 GymSchema.index({ chainSlug: 1 });
 GymSchema.index({ isChainMember: 1 });
 

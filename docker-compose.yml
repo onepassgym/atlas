@@ -135,7 +135,7 @@ services:
 
   mongo:
     image: mongo:7.0
-    container_name: atlas06-mongo
+    container_name: atlas-mongo
     restart: unless-stopped
     ports:
       - "27328:27017"
@@ -155,7 +155,7 @@ services:
 
   redis:
     image: redis:7.2-alpine
-    container_name: atlas06-redis
+    container_name: atlas-redis
     restart: unless-stopped
     ports:
       - "6847:6379"
@@ -175,7 +175,7 @@ services:
 
   dashboard:
     image: node:20-slim
-    container_name: atlas06-dashboard
+    container_name: atlas-dashboard
     working_dir: /app
     ports:
       - "5173:5173"

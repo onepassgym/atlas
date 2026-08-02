@@ -1,6 +1,6 @@
 # 🚀 Deployment Guide — atlas.onepassgym.com
 
-Step-by-step guide to deploy Atlas06 Scraper on your Hostinger VPS
+Step-by-step guide to deploy atlas Scraper on your Hostinger VPS
 and map it to `atlas.onepassgym.com`.
 
 ---
@@ -9,7 +9,7 @@ and map it to `atlas.onepassgym.com`.
 
 | Service | External Port | Notes |
 |---------|--------------|-------|
-| Atlas06 API | **8747** | Nginx proxies → this |
+| atlas API | **8747** | Nginx proxies → this |
 | MongoDB | **27327** | Non-default, avoids conflicts |
 | Redis | **6847** | Non-default, avoids conflicts |
 
@@ -85,7 +85,7 @@ docker compose version
 ufw allow OpenSSH
 ufw allow 80/tcp      # HTTP (for Certbot + redirect)
 ufw allow 443/tcp     # HTTPS
-ufw allow 8747/tcp    # Atlas06 API (Nginx will proxy this)
+ufw allow 8747/tcp    # atlas API (Nginx will proxy this)
 ufw enable
 ufw status
 ```
@@ -98,13 +98,13 @@ ufw status
 
 ```bash
 # Create app directory
-mkdir -p /var/www/atlas06
-cd /var/www/atlas06
+mkdir -p /var/www/atlas
+cd /var/www/atlas
 
 # Clone / upload your project
 git clone <YOUR_REPO_URL> .
 # OR use scp from your local machine:
-# scp -r ./atlas06-scraper root@<VPS_IP>:/var/www/atlas06/
+# scp -r ./atlas-scraper root@<VPS_IP>:/var/www/atlas/
 
 # Set production env
 cp .env.example .env
@@ -116,7 +116,7 @@ Edit these values in `.env` for production:
 ```env
 PORT=8747
 NODE_ENV=production
-MONGODB_URI=mongodb://127.0.0.1:27327/atlas06
+MONGODB_URI=mongodb://127.0.0.1:27327/atlas
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6847
 MEDIA_BASE_URL=https://atlas.onepassgym.com/media
@@ -130,7 +130,7 @@ LOG_LEVEL=info
 ## Step 5 — Start with Docker Compose
 
 ```bash
-cd /var/www/atlas06
+cd /var/www/atlas
 
 # Build and start all services
 docker compose up -d --build
@@ -146,16 +146,16 @@ docker compose logs -f worker
 Expected output:
 ```
 NAME                    STATUS
-atlas06-api          running (healthy)
-atlas06-worker       running
-atlas06-mongo        running (healthy)
-atlas06-redis        running (healthy)
+atlas-api          running (healthy)
+atlas-worker       running
+atlas-mongo        running (healthy)
+atlas-redis        running (healthy)
 ```
 
 Test that the API is responding:
 ```bash
 curl http://localhost:8747/health
-# { "status": "ok", "service": "Atlas06 Scraper", ... }
+# { "status": "ok", "service": "atlas Scraper", ... }
 ```
 
 ---
@@ -193,7 +193,7 @@ server {
 
     # Serve media files directly via Nginx (faster than Node)
     location /media/ {
-        alias /var/www/atlas06/media/;
+        alias /var/www/atlas/media/;
         expires 7d;
         add_header Cache-Control "public, immutable";
         try_files $uri $uri/ =404;
@@ -288,7 +288,7 @@ Optionally add a cron to auto-start compose if VPS reboots:
 ```bash
 crontab -e
 # Add this line:
-@reboot cd /var/www/atlas06 && docker compose up -d
+@reboot cd /var/www/atlas && docker compose up -d
 ```
 
 ---
@@ -325,7 +325,7 @@ curl -X POST https://atlas.onepassgym.com/api/crawl/city \
   -d '{"cityName": "Mumbai, India"}'
 
 # Pull latest code + redeploy
-cd /var/www/atlas06
+cd /var/www/atlas
 git pull origin main
 docker compose up -d --build
 
@@ -340,7 +340,7 @@ docker compose down -v
 
 ## Media File Access
 
-Photos are stored at `/var/www/atlas06/media/` on the VPS
+Photos are stored at `/var/www/atlas/media/` on the VPS
 and served at `https://atlas.onepassgym.com/media/`.
 
 Example URL:
@@ -357,10 +357,10 @@ Nginx serves these directly (bypasses Node.js) for maximum speed.
 
 ```bash
 # Connect to MongoDB inside Docker
-docker compose exec mongo mongosh atlas06
+docker compose exec mongo mongosh atlas
 
 # From VPS host (using mapped port 27327)
-mongosh mongodb://127.0.0.1:27327/atlas06
+mongosh mongodb://127.0.0.1:27327/atlas
 
 # Useful queries
 db.gyms.countDocuments()
@@ -379,7 +379,7 @@ db.crawl_jobs.find({ status: 'running' }).pretty()
 | MongoDB connection failed | Check `docker compose ps` — mongo container healthy? |
 | SSL cert fails | Make sure port 80 is open in UFW and DNS resolves correctly |
 | Worker not processing jobs | Redis not healthy? `docker compose restart redis worker` |
-| Photos not serving | Check `/var/www/atlas06/media/` permissions: `chmod -R 755 media/` |
+| Photos not serving | Check `/var/www/atlas/media/` permissions: `chmod -R 755 media/` |
 | Job stuck in `queued` | Worker crashed — `docker compose logs worker` to diagnose |
 
 ---
@@ -394,7 +394,7 @@ Nginx :443 (HTTPS)
 atlas.onepassgym.com
     │
     ├─ /api/*    → proxy → Node.js API :8747
-    ├── /media/* → static → /var/www/atlas06/media/
+    ├── /media/* → static → /var/www/atlas/media/
     └─ /health   → proxy → Node.js API :8747
 
 Node.js API :8747
@@ -411,7 +411,7 @@ Queue Worker (Node.js)
     └─ MongoDB writer
 
 MongoDB :27327
-    └─ atlas06 DB
+    └─ atlas DB
          ├─ gyms collection
          └─ crawl_jobs collection
 ```

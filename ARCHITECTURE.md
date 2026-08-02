@@ -1,4 +1,4 @@
-# 🏗️ Atlas06 — Architecture Reference
+# 🏗️ atlas — Architecture Reference
 
 > **Living document.** Keep this updated as modules change.  
 > Run `node scripts/genArchSnapshot.js` to auto-regenerate the inventory sections.  
@@ -33,7 +33,7 @@
 
 ## System Overview
 
-Atlas06 is an **API-first Google Maps fitness venue scraper** that operates as two separate Node.js processes backed by MongoDB and Redis.
+atlas is an **API-first Google Maps fitness venue scraper** that operates as two separate Node.js processes backed by MongoDB and Redis.
 
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
@@ -72,7 +72,7 @@ Atlas06 is an **API-first Google Maps fitness venue scraper** that operates as t
 │  node-cron scheduler (5 cron jobs)                                 │
 │  └── Produces BullMQ jobs → Redis                                  │
 └──────────────────┬──────────────────────────────────────────────────┘
-                   │  BullMQ Queue (atlas06-crawl)
+                   │  BullMQ Queue (atlas-crawl)
                    │  Redis 7 (:6847)
 ┌──────────────────▼──────────────────────────────────────────────────┐
 │                       WORKER (queue/worker.js)                      │
@@ -90,7 +90,7 @@ Atlas06 is an **API-first Google Maps fitness venue scraper** that operates as t
 └──────────────────┬──────────────────────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────────────────────┐
-│                    MONGODB 7 (atlas06 / atlas06 DB)                 │
+│                    MONGODB 7 (atlas / atlas DB)                 │
 │                                                                     │
 │  Collections:                                                       │
 │  ├── gyms              Main venue records (194-line schema)         │
@@ -110,7 +110,7 @@ Atlas06 is an **API-first Google Maps fitness venue scraper** that operates as t
 ## Directory Map
 
 ```
-atlas06/
+atlas/
 ├── config/
 │   ├── index.js                 # Centralized config (env-aware dev/prod)
 │   └── schedule.json            # City crawl schedule + staleness thresholds
@@ -235,7 +235,7 @@ atlas06/
 
 | Model | Collection | Key Fields | Indexes |
 |-------|-----------|-----------|---------|
-| `Gym` | `gyms` | name, slug, placeId, geoLocation, location, rating, contact, openingHours, atlas06 platform fields | 11 indexes incl. 2dsphere, text search |
+| `Gym` | `gyms` | name, slug, placeId, geoLocation, location, rating, contact, openingHours, atlas platform fields | 11 indexes incl. 2dsphere, text search |
 | `Review` | `gym_reviews` | gymId, reviewId (unique), authorName, rating, text, publishedAt | gymId, reviewId |
 | `Photo` | `gym_photos` | gymId, publicUrl (unique), localPath, thumbnailUrl, dimensions | gymId, publicUrl |
 | `CrawlMeta` | `gym_crawl_meta` | gymId (unique), firstCrawledAt, lastCrawledAt, dataCompleteness | gymId, jobId |
@@ -368,7 +368,7 @@ npm run migrate:opgid:prod        # prod
 | `GET` | `/stats` | None | Aggregate stats (total, by category, top cities, avg rating) |
 | `GET` | `/export` | None | Stream all gyms as JSON (cursor-based) |
 | `GET` | `/:opgId` | None | Full gym detail by public OPG ID (resolves via `opgId`, queries by `_id`) |
-| `PATCH` | `/:opgId` | None | Update `atlas06` platform fields only (resolves via `opgId`, queries by `_id`) |
+| `PATCH` | `/:opgId` | None | Update `atlas` platform fields only (resolves via `opgId`, queries by `_id`) |
 
 
 ### System Routes (`/api/system`)
@@ -484,8 +484,8 @@ If FOUND → UPDATE path:
 |----------|--------------|----------------|-------------|
 | `NODE_ENV` | `development` | `production` | Environment mode |
 | `PORT` | `8747` | `8747` | API server port |
-| `DEV_MONGODB_URI` | `mongodb://127.0.0.1:27328/atlas06` | — | Dev MongoDB URI |
-| `PROD_MONGODB_URI` | — | `mongodb://147.79.71.238:27328/atlas06` | Prod MongoDB URI |
+| `DEV_MONGODB_URI` | `mongodb://127.0.0.1:27328/atlas` | — | Dev MongoDB URI |
+| `PROD_MONGODB_URI` | — | `mongodb://147.79.71.238:27328/atlas` | Prod MongoDB URI |
 | `DEV_REDIS_HOST` | `127.0.0.1` | — | Dev Redis host |
 | `DEV_REDIS_PORT` | `6847` | — | Dev Redis port |
 | `SCRAPER_CONCURRENCY` | `2` | `3` | Parallel scrape jobs |
@@ -544,7 +544,7 @@ If FOUND → UPDATE path:
 | ID | Severity | Description | File(s) |
 |----|----------|-------------|---------|
 | TD-01 | � Mitigated | `.env` gitignored; `.env.example` documents that secrets must use proper management. VPS should use `chmod 600` or a secrets manager. | `.env.example` |
-| TD-02 | 🟡 Medium | `.env` references `atlas06` DB but naming is inconsistent — targeted for Phase 1 rename to `atlas` | `.env`, `config/index.js` |
+| TD-02 | 🟡 Medium | `.env` references `atlas` DB but naming is inconsistent — targeted for Phase 1 rename to `atlas` | `.env`, `config/index.js` |
 | TD-03 | ✅ Resolved | Stray `{src` directory no longer exists on disk | — |
 | TD-04 | ✅ Resolved | `dedup.js` deleted entirely — no function was imported anywhere; `upsertGym.js` owns its own dedup logic | — |
 | TD-05 | ✅ Resolved | `upsertGym.js` dirty-check implemented — `$set` only written when diffs/reviews/photos changed | `src/db/upsertGym.js:486` |
@@ -608,10 +608,10 @@ router.METHOD('/path',
 | 2026-05-09 | Antigravity | **Migration scheduler refactor** — `migration/index.js` rewritten as multi-job cron scheduler; `runOpgIdMigration()` added at **04:00 IST daily** (idempotent sweep); both jobs share persistent DB connection; timezone-aware via `Asia/Kolkata`; `npm run migration` / `npm run migration:prod` to start; bg scripts removed; ARCHITECTURE.md Migration Scripts section updated |
 | 2026-05-09 | Antigravity | **Background migration** — `scripts/migrate-bg.sh` nohup wrapper (superseded by scheduler) |
 | 2026-05-09 | Antigravity | **opgId rollout** — Tasks 1–6: `src/utils/opgId.js` (generator + validator); `opgId` field added to all 6 schemas (gyms unique/sparse, others plain index); `ensureIndexes.js` extended with 6 new index calls; `migration/addOpgIds.js` idempotent backfill + `npm run migrate:opgid`; `upsertGym.js` INSERT generates unique opgId before `Gym.create()`, UPDATE preserves existing opgId + backfills related docs; `gymRoutes.js` /:id → /:opgId with `resolveGym` middleware + format validator; `toJSON` transform on GymSchema strips `_id`/`__v` from API responses |
-| 2026-05-09 | Antigravity | **Enrichment session** — Tasks 1–7: `MEDIA_DOWNLOAD_ENABLED` env gate; `rawPhotoUrls[]`, `pricing`, `operationalData`, `extraAttributes`, expanded `contact` schema fields; `sourceType`+`downloaded` on gym_photos; `reviewPhotos[]`, `reviewerLocalGuideLevel`, `ownerReply.respondedAtRaw` on reviews; `scrapeEnrichmentDetail()` + `scrapeAboutTabExhaustive()`; `enrichmentProcessor.js`; `gym-enrichment` BullMQ job type + `atlas06-enrichment` queue; `scripts/enrichNCR.js` CLI; 5 new DB indexes |
+| 2026-05-09 | Antigravity | **Enrichment session** — Tasks 1–7: `MEDIA_DOWNLOAD_ENABLED` env gate; `rawPhotoUrls[]`, `pricing`, `operationalData`, `extraAttributes`, expanded `contact` schema fields; `sourceType`+`downloaded` on gym_photos; `reviewPhotos[]`, `reviewerLocalGuideLevel`, `ownerReply.respondedAtRaw` on reviews; `scrapeEnrichmentDetail()` + `scrapeAboutTabExhaustive()`; `enrichmentProcessor.js`; `gym-enrichment` BullMQ job type + `atlas-enrichment` queue; `scripts/enrichNCR.js` CLI; 5 new DB indexes |
 | 2026-05-09 | Antigravity | Fix `apiFetch` to throw on non-2xx HTTP; add `gym_crawl_jobs` indexes (TD-08 ✅); move `express.json()` to router-level in systemRoutes; add search retry logic to scraper; update route inventory with `force-complete` + `start-now`; mark TD-05 ✅ TD-07 ✅ TD-08 ✅; add TD-09 for undocumented chain/events routes |
-| 2026-06-27 | Copilot | **Phase 0 cleanup** — Deleted dead files: `scripts/migrate-bg.sh`, `src/utils/dedup.js`, 9 root debug/test scripts, `atlas06_upgrade_roadmap.md`. Documented chain/event routes in inventory (TD-09 ✅). Sanitized `.env.example` with security guidance + missing vars. Updated TD table: TD-01 mitigated, TD-03 ✅, TD-04 ✅, TD-09 ✅. |
-| 2026-06-27 | Copilot | **Phase 1 — v5 data model migration** — Full reshape to `opg-atlas` v5 schema. DB: `atlas06`→`atlas`. Queues: `atlas06-*`→`atlas-*`. Redis keys: `atlas06:`→`atlas:`. Model rename: `Gym`→`Space` (collection `spaces`). Routes: `/api/gyms`→`/api/spaces` (301 redirect kept). New models: `spaceModel.js`, `locationModel.js`. opgId v5 format: `{ENTITY}-{WORD}-{base32tail}` (SPC/RVW/PHT/CHN/LOC prefixes, ~70-bit entropy). Collections: `space_reviews`, `space_photos`, `space_chains`, `space_categories`, `space_amenities`, `locations`, `space_change_logs`. Crawl meta folded into `spaces.crawl{}`. Enrichment meta into `spaces.enrichment{}`. v5 compound indexes: `idx_city_cat_quality`, `idx_city_cat_display`, `idx_rank`. Migration script: `migration/migrateToV5.js` (idempotent, resumable, builds old→new id map). ⚠️ Backfill NOT yet executed — requires DB snapshot first. |
+| 2026-06-27 | Copilot | **Phase 0 cleanup** — Deleted dead files: `scripts/migrate-bg.sh`, `src/utils/dedup.js`, 9 root debug/test scripts, `atlas_upgrade_roadmap.md`. Documented chain/event routes in inventory (TD-09 ✅). Sanitized `.env.example` with security guidance + missing vars. Updated TD table: TD-01 mitigated, TD-03 ✅, TD-04 ✅, TD-09 ✅. |
+| 2026-06-27 | Copilot | **Phase 1 — v5 data model migration** — Full reshape to `opg-atlas` v5 schema. DB: `atlas`→`atlas`. Queues: `atlas-*`→`atlas-*`. Redis keys: `atlas:`→`atlas:`. Model rename: `Gym`→`Space` (collection `spaces`). Routes: `/api/gyms`→`/api/spaces` (301 redirect kept). New models: `spaceModel.js`, `locationModel.js`. opgId v5 format: `{ENTITY}-{WORD}-{base32tail}` (SPC/RVW/PHT/CHN/LOC prefixes, ~70-bit entropy). Collections: `space_reviews`, `space_photos`, `space_chains`, `space_categories`, `space_amenities`, `locations`, `space_change_logs`. Crawl meta folded into `spaces.crawl{}`. Enrichment meta into `spaces.enrichment{}`. v5 compound indexes: `idx_city_cat_quality`, `idx_city_cat_display`, `idx_rank`. Migration script: `migration/migrateToV5.js` (idempotent, resumable, builds old→new id map). ⚠️ Backfill NOT yet executed — requires DB snapshot first. |
 | 2026-06-27 | Copilot | **Phase 2 — Crawl & enrichment gap closure** — Per-category yield logging on CrawlJob (`categoryYield[]`); zero-yield categories explicitly warned. `progress.blockedCount` tracks Google blocks per job. New `GET /api/crawl/coverage` endpoint surfaces per-city gap (discovered vs scraped vs blocked). `retry/failed` returns `gapSummary`. `retry/incomplete` now uses `addEnrichmentJob` (enrichment queue, not gym-name crawl). Smart enrichment selection: scores by `isServiceable × completenessGap × staleness` instead of flat threshold. Quarantine: after 5 consecutive enrichment errors, `enrichment.status='quarantined'` — excluded from future runs. Enrichment outcome deltas tracked (`result.fieldsFilled`). Queue stuck-job protection: `stalledInterval` (15min crawl, 10min enrich) + `maxStalledCount=2`. Documented final queue concurrency/backoff values in ARCHITECTURE.md. |
 | 2026-06-27 | Copilot | **Phase 3 — Image strategy: URL-first, download-on-demand** — Gutted `media/downloader.js`: removed auto-pipeline (`downloadImage`, `downloadAllMedia`), replaced with `downloadAndCreateVariants()` for explicit on-demand use only. New `media/opgMediaWriter.js`: creates `media_assets` (AST-*) + `media_variants` (VAR-*) docs, flips `space_photos.downloaded=true`, sets `assetOpgId`+`publicUrl`, updates `spaces.coverUrl` on cover photos. Rate-limited (50/space/hour). New endpoints: `POST /api/spaces/:opgId/photos/:photoOpgId/download` (single) + `POST /api/spaces/:opgId/photos/download-all` (batch). Zero image binaries during crawl/enrichment — `MEDIA_DOWNLOAD_ENABLED=false` default enforced. After download, images served from our CDN url; un-downloaded render from Google source. |
 | 2026-06-27 | Copilot | **Phase 4 — Dashboard redesign** — Removed decorative background globe from `App.jsx`. Rebuilt `GlobePage.jsx` as a clean data map: plots city markers sized by space count, sidebar with clickable cities → space list (name, rating, category, qualityScore, photo count), image gallery entry point. No glow/spin/decorative shaders. New `HealthRecommendations.jsx` component: surfaces data-driven recommendations (blocked scrapes, coverage gaps, low completeness, zero-yield categories, quarantined spaces) — each with a working action button wired to real endpoints (`/api/crawl/retry/failed`, `/api/crawl/retry/incomplete`, `/api/system/schedule/trigger`). Integrated into Overview page. New `GET /api/enrichment/stats` endpoint (quarantine count, enrichment status breakdown). Dashboard builds clean (13.7s, 0 errors). |

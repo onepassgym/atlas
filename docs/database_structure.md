@@ -1,6 +1,6 @@
 # Database Structure
 
-The `atlas06` database has been normalized for scale and performance. We have moved from a single massive `gyms` document to a relational model using MongoDB references and `$lookup`s.
+The `atlas` database has been normalized for scale and performance. We have moved from a single massive `gyms` document to a relational model using MongoDB references and `$lookup`s.
 
 This prevents the `gyms` collection from hitting MongoDB's 16MB document size limits, improves query performance across indexable sub-records (like Photos or Reviews), and normalizes identical static data (Amenities and Categories) across thousands of gyms.
 

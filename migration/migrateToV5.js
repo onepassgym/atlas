@@ -146,13 +146,13 @@ async function migrateSpaces(db, state) {
         crawl,
         // Rename geoLocation → location if not already set
         ...(doc.geoLocation && !doc.location ? { location: doc.geoLocation } : {}),
-        // Map atlas06{} → opg{}
+        // Map atlas{} → opg{}
         opg: {
-          isListed: doc.atlas06?.isListed || false,
-          isVerified: doc.atlas06?.isVerified || false,
-          isPartner: doc.atlas06?.isPartner || false,
+          isListed: doc.atlas?.isListed || false,
+          isVerified: doc.atlas?.isVerified || false,
+          isPartner: doc.atlas?.isPartner || false,
           isFeatured: false,
-          planSlugs: doc.atlas06?.planIds || [],
+          planSlugs: doc.atlas?.planIds || [],
         },
         // Map enrichmentMeta → enrichment
         enrichment: {
@@ -172,7 +172,7 @@ async function migrateSpaces(db, state) {
       };
 
       const $unset = {
-        atlas06: '',
+        atlas: '',
         enrichmentMeta: '',
         geoLocation: '',
         categoryId: '',

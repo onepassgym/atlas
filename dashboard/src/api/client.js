@@ -1,66 +1,55 @@
-/**
- * API Client — fetch wrapper with auth + base URL
- */
-
-let currentEnv = 'local';
-let apiKey = '';
-
 const ENV_CONFIG = {
-  local: '',          // same-origin in dev (Vite proxy), same-origin in prod
-  prod: '',           // set dynamically
+  local: "",
+  release: "",
 };
 
-export function setEnv(env, prodUrl = '') {
+let currentEnv = "local";
+let apiKey = "";
+
+export function setEnv(env, url = "") {
   currentEnv = env;
-  if (prodUrl) ENV_CONFIG.prod = prodUrl;
+  if (url) ENV_CONFIG[env] = url;
 }
 
-export function getEnv() { return currentEnv; }
+export function getEnv() {
+  return currentEnv;
+}
 
-export function setApiKey(key) { apiKey = key; }
-export function getApiKey() { return apiKey; }
+export function setApiKey(key) {
+  apiKey = key;
+}
 
 export function getBaseUrl() {
-  return ENV_CONFIG[currentEnv] || '';
+  return ENV_CONFIG[currentEnv] || "";
 }
 
 export async function apiFetch(path, options = {}) {
   const base = getBaseUrl();
   const url = `${base}${path}`;
+  const headers = { ...options.headers };
 
-  const headers = {
-    ...options.headers,
-  };
+  if (apiKey) headers["X-API-Key"] = apiKey;
 
-  if (apiKey) {
-    headers['X-API-Key'] = apiKey;
-  }
-
-  if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
-    headers['Content-Type'] = 'application/json';
+  if (options.body && typeof options.body === "object" && !(options.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(options.body);
   }
 
   const res = await fetch(url, { ...options, headers });
-  
-  if (!res.ok && res.status === 401) {
-    throw new Error('Unauthorized — check API key');
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`${res.status}: ${text}`);
   }
 
-  // Handle non-JSON responses (e.g., log tails)
-  const ct = res.headers.get('content-type') || '';
-  if (ct.includes('text/plain')) {
-    return { success: true, text: await res.text() };
-  }
-
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("text/plain")) return { success: true, text: await res.text() };
   return res.json();
 }
 
-// Shorthand helpers
 export const api = {
-  get:    (path) => apiFetch(path),
-  post:   (path, body) => apiFetch(path, { method: 'POST', body }),
-  put:    (path, body) => apiFetch(path, { method: 'PUT', body }),
-  patch:  (path, body) => apiFetch(path, { method: 'PATCH', body }),
-  delete: (path) => apiFetch(path, { method: 'DELETE' }),
+  get: (path) => apiFetch(path),
+  post: (path, body) => apiFetch(path, { method: "POST", body }),
+  patch: (path, body) => apiFetch(path, { method: "PATCH", body }),
+  delete: (path) => apiFetch(path, { method: "DELETE" }),
 };

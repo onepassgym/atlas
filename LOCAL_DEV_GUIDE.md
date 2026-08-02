@@ -1,6 +1,6 @@
-# Atlas06 Local Development Guide
+# atlas Local Development Guide
 
-This guide will walk you through setting up and running the Atlas06 Google Maps Scraper and Mission Control Dashboard on your local machine for development.
+This guide will walk you through setting up and running the atlas Google Maps Scraper and Mission Control Dashboard on your local machine for development.
 
 ## Prerequisites
 - **Node.js**: v20 or higher
@@ -56,13 +56,13 @@ This is the most seamless way to develop. It runs the entire infrastructure (API
    docker compose up --build
    ```
    *This starts 7 containers in total:*
-   - `atlas06-api`: The backend server (Port 8747)
-   - `atlas06-dashboard`: The React SPA (Port 5173 with HMR!)
-   - `atlas06-worker`: The main scraper
+   - `atlas-api`: The backend server (Port 8747)
+   - `atlas-dashboard`: The React SPA (Port 5173 with HMR!)
+   - `atlas-worker`: The main scraper
    - `atlas05-enrichment-worker`: The enrichment engine
    - `atlas05-media-worker`: Media processor
-   - `atlas06-mongo`: Database (Port 27328)
-   - `atlas06-redis`: Cache/Queue (Port 6847)
+   - `atlas-mongo`: Database (Port 27328)
+   - `atlas-redis`: Cache/Queue (Port 6847)
 
 **Why use this?** Any changes you make to your code (in `./src` or `./dashboard/src`) will be instantly detected by the containers, and they will restart/reload automatically.
 

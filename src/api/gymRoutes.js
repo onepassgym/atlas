@@ -578,7 +578,7 @@ router.patch('/:opgId',
   resolveGym,
   async (req, res) => {
     if (validate(req, res)) return;
-    const allowed = ['atlas06'];
+    const allowed = ['atlas'];
     const set = {};
     for (const k of allowed) if (req.body[k]) set[k] = req.body[k];
     try {

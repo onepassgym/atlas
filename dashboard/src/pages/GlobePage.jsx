@@ -31,7 +31,7 @@ export default function GlobePage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await api('/api/spaces/stats');
+        const res = await api.get('/api/spaces/stats');
         const topCities = (res.stats?.topCities || []).filter(c => c.lat && c.lng);
         setCities(topCities);
       } catch (e) {
@@ -82,7 +82,7 @@ export default function GlobePage() {
     setSelectedCity(cityName);
     setCitySpaces([]);
     try {
-      const res = await api(`/api/spaces?city=${encodeURIComponent(cityName)}&limit=50&sortBy=qualityScore`);
+      const res = await api.get(`/api/spaces?city=${encodeURIComponent(cityName)}&limit=50&sortBy=qualityScore`);
       setCitySpaces(res.spaces || []);
     } catch (e) {
       console.error('Failed to load city spaces:', e);

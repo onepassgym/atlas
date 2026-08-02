@@ -91,7 +91,7 @@
   background: transparent;
   color: var(--text-muted);
   transition: all 0.2s;
-  font-family: var(--font);
+  font-family: var(--font-sans);
 }
 
 .envBtn.active {

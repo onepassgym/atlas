@@ -1,6 +1,6 @@
-# 🚀 Production Release Guide — Atlas06 Scraper
+# 🚀 Production Release Guide — atlas Scraper
 
-This guide details the steps to publish the Atlas06 API-first scraper specifically for a production environment (`NODE_ENV=production`).
+This guide details the steps to publish the atlas API-first scraper specifically for a production environment (`NODE_ENV=production`).
 
 ---
 
@@ -17,14 +17,14 @@ When `NODE_ENV=production` is set in the environment:
 
 ## 2. Server Deployment Variables (`.env`)
 
-Before restarting or applying updates, verify that your `/var/www/atlas06/.env` file is properly configured with production defaults:
+Before restarting or applying updates, verify that your `/var/www/atlas/.env` file is properly configured with production defaults:
 
 ```env
 PORT=8747
 NODE_ENV=production
 
 # The application respects these PROD_ variables automatically in production mode:
-PROD_MONGODB_URI="mongodb://147.79.71.238:27328/atlas06?directConnection=true"
+PROD_MONGODB_URI="mongodb://147.79.71.238:27328/atlas?directConnection=true"
 PROD_REDIS_HOST=127.0.0.1
 PROD_REDIS_PORT=6847
 PROD_MEDIA_BASE_URL=https://atlas.onepassgym.com/media
@@ -48,7 +48,7 @@ Run the following routine on the Hostinger VPS to deploy new changes without dow
 ssh root@147.79.71.238
 
 # 2. Navigate to the installation directory
-cd /var/www/atlas06
+cd /var/www/atlas
 
 # 3. Pull latest changes from the master/main branch
 git pull origin main

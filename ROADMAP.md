@@ -1,4 +1,4 @@
-# 🗺️ Atlas06 — Feature Upgrade Roadmap
+# 🗺️ atlas — Feature Upgrade Roadmap
 
 > **Living document.** Updated as features are completed or priorities change.  
 > Last review: **2026-04-18**
@@ -75,7 +75,7 @@ These are foundational improvements that de-risk the existing system before addi
 
 **Scope:**
 - Remove VPS credentials from `.env`
-- Fix `atlas06`/`atlas06` DB name mismatch
+- Fix `atlas`/`atlas` DB name mismatch
 - Delete stray `{src` directory
 - Clean up deprecated `mergeGymData()` in `dedup.js`
 - Fix `ensureIndexes.js` collection name mismatch
@@ -230,7 +230,7 @@ Build on top of the data platform for end-user products.
 
 ### ⬜ 4.2 Gym Owner Portal API
 
-**Problem:** `atlas06.isPartner` fields exist in the schema but no partner-facing features.
+**Problem:** `atlas.isPartner` fields exist in the schema but no partner-facing features.
 
 **Scope:**
 - Partner registration flow

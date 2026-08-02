@@ -1,213 +1,366 @@
-import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import { setEnv, setApiKey, getApiKey, getBaseUrl, api, getEnv } from '../api/client';
-import { useSSE } from '../hooks/useSSE';
-import ApiKeyModal from '../components/ApiKeyModal';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { api, getBaseUrl, getEnv, setEnv } from '../api/client';
 
 const AppContext = createContext(null);
 
-export function useApp() {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error('useApp must be inside AppProvider');
-  return ctx;
+const MAX_EVENTS = 200;
+const MAX_LOGS = 200;
+const MAX_ACTIONS = 60;
+const TOAST_TTL_MS = 3600;
+
+const DEFAULT_CRAWL_ACTIVITY = {
+  status: 'idle',
+  throttle: 1,
+  currentGym: null,
+  batch: null,
+  recentActions: [],
+};
+
+function coerceEvent(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (raw.type && raw.timestamp) return raw;
+  return {
+    id: raw.id || `${Date.now()}-${Math.random()}`,
+    type: raw.type || 'unknown',
+    data: raw.data || {},
+    timestamp: raw.timestamp || new Date().toISOString(),
+  };
+}
+
+function toAction(evt) {
+  const data = evt?.data || {};
+  const t = evt?.timestamp || new Date().toISOString();
+
+  switch (evt?.type) {
+    case 'crawl:gym-start':
+      return { type: 'gym-start', url: data.url, urlIndex: data.urlIndex || 0, total: data.total || 0, timestamp: t };
+    case 'crawl:gym-done':
+      return { type: 'gym-done', name: data.gymName || 'Unknown', url: data.url, duration: data.duration || 0, timestamp: t };
+    case 'crawl:gym-failed':
+      return {
+        type: 'gym-failed',
+        url: data.url,
+        error: data.error || 'Failed',
+        attempt: data.attempt || 1,
+        isBlock: Boolean(data.isBlock),
+        timestamp: t,
+      };
+    case 'crawl:batch-start':
+      return {
+        type: 'batch-start',
+        batch: data.batchIndex || 0,
+        city: data.cityName || 'Unknown',
+        urls: data.urlCount || 0,
+        timestamp: t,
+      };
+    case 'crawl:batch-done':
+      return {
+        type: 'batch-done',
+        batch: data.batchIndex || 0,
+        city: data.cityName || 'Unknown',
+        stats: data.stats || {},
+        duration: data.duration || 0,
+        timestamp: t,
+      };
+    case 'crawl:search-start':
+      return {
+        type: 'search-start',
+        city: data.cityName || 'Unknown',
+        category: data.category || 'unknown',
+        categoryIndex: data.categoryIndex || 0,
+        totalCategories: data.totalCategories || 0,
+        timestamp: t,
+      };
+    case 'crawl:search-done':
+      return {
+        type: 'search-done',
+        city: data.cityName || 'Unknown',
+        category: data.category || 'unknown',
+        found: data.urlsFound || 0,
+        total: data.totalUnique || 0,
+        timestamp: t,
+      };
+    case 'crawl:throttle':
+      return {
+        type: 'throttle',
+        multiplier: Number(data.multiplier || 1),
+        direction: data.direction || 'slower',
+        reason: data.reason,
+        timestamp: t,
+      };
+    case 'crawl:block':
+      return { type: 'block', reason: data.reason, cooldown: data.cooldownMs || 0, timestamp: t };
+    case 'crawl:human-pause':
+      return { type: 'pause', duration: data.pauseMs || 0, timestamp: t };
+    default:
+      return null;
+  }
+}
+
+function reduceCrawlActivity(prev, evt) {
+  const data = evt?.data || {};
+  let next = prev;
+
+  switch (evt?.type) {
+    case 'crawl:search-start':
+      next = {
+        ...prev,
+        status: 'searching',
+        currentGym: {
+          url: data.category || '',
+          urlIndex: data.categoryIndex || 0,
+          total: data.totalCategories || 0,
+        },
+      };
+      break;
+    case 'crawl:gym-start':
+      next = {
+        ...prev,
+        status: 'scraping',
+        currentGym: {
+          url: data.url || '',
+          urlIndex: data.urlIndex || 0,
+          total: data.total || 0,
+        },
+      };
+      break;
+    case 'crawl:batch-start':
+      next = {
+        ...prev,
+        status: 'scraping',
+        batch: {
+          cityName: data.cityName || 'Unknown',
+          batchIndex: data.batchIndex || 0,
+          urlCount: data.urlCount || 0,
+        },
+      };
+      break;
+    case 'crawl:human-pause':
+      next = { ...prev, status: 'paused' };
+      break;
+    case 'crawl:block':
+      next = { ...prev, status: 'blocked' };
+      break;
+    case 'crawl:throttle':
+      next = {
+        ...prev,
+        throttle: Number(data.multiplier || prev.throttle || 1),
+        status: data.reason === 'google_block' ? 'blocked' : prev.status,
+      };
+      break;
+    case 'job:started':
+      next = { ...prev, status: 'searching' };
+      break;
+    case 'job:completed':
+    case 'job:failed':
+    case 'job:cancelled':
+      next = {
+        ...prev,
+        status: 'idle',
+        currentGym: null,
+        batch: null,
+      };
+      break;
+    default:
+      break;
+  }
+
+  const action = toAction(evt);
+  if (!action) return next;
+
+  return {
+    ...next,
+    recentActions: [action, ...next.recentActions].slice(0, MAX_ACTIONS),
+  };
+}
+
+function resolveSseUrl() {
+  const base = getBaseUrl() || window.location.origin;
+  const url = new URL('/api/events', base);
+
+  const candidates = ['atlas_api_key', 'api_key', 'apiKey', 'x-api-key'];
+  for (const key of candidates) {
+    const value = window.localStorage.getItem(key);
+    if (value) {
+      url.searchParams.set('api_key', value);
+      break;
+    }
+  }
+
+  return url.toString();
 }
 
 export function AppProvider({ children }) {
-  const isProdHost = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-  const storedEnv = isProdHost ? 'prod' : (localStorage.getItem('atlas_env') || 'local');
-
-  const [env, setEnvState] = useState(storedEnv);
-  const [showKeyModalForEnv, setShowKeyModalForEnv] = useState(null);
-  const [apiKeySet, setApiKeySet] = useState(false);
+  const [env, setEnvState] = useState(() => getEnv());
   const [connected, setConnected] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    const saved = window.localStorage.getItem('atlas_theme');
+    return saved === 'light' || saved === 'dark' ? saved : 'dark';
+  });
+
   const [events, setEvents] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [chainsCache, setChainsCache] = useState([]);
   const [toasts, setToasts] = useState([]);
-  const toastIdRef = useRef(0);
+  const [chainsCache, setChainsCacheState] = useState([]);
+  const [crawlActivity, setCrawlActivity] = useState(DEFAULT_CRAWL_ACTIVITY);
 
-  // Live crawler activity state — derived from crawl:* events
-  const [crawlActivity, setCrawlActivity] = useState({
-    currentGym: null,    // { url, urlIndex, total, startedAt }
-    batch: null,         // { cityName, batchIndex, urlCount, startedAt }
-    throttle: 1.0,       // Current throttle multiplier
-    recentActions: [],   // Last 15 actions for timeline
-    status: 'idle',      // 'idle' | 'searching' | 'scraping' | 'paused' | 'blocked'
-  });
+  const sourceRef = useRef(null);
 
-  // ── Theme ──────────────────────────────────────────────────
-  const [theme, setThemeState] = useState(() => {
-    const saved = localStorage.getItem('atlas_theme');
-    if (saved) return saved;
-    return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  });
+  const isProdHost = useMemo(() => {
+    const host = window.location.hostname.toLowerCase();
+    return !(host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local'));
+  }, []);
 
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('atlas_theme', theme);
-  }, [theme]);
+  const switchEnv = useCallback((nextEnv) => {
+    setEnv(nextEnv);
+    setEnvState(nextEnv);
+  }, []);
+
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+  }, []);
+
+  const setChainsCache = useCallback((items) => {
+    setChainsCacheState(Array.isArray(items) ? items : []);
+  }, []);
+
+  const toast = useCallback((msg, type = 'info') => {
+    if (!msg) return;
+
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const entry = { id, msg: String(msg), type };
+
+    setToasts((prev) => [entry, ...prev].slice(0, 6));
+
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, TOAST_TTL_MS);
+  }, []);
 
   const toggleTheme = useCallback(() => {
-    setThemeState(prev => prev === 'dark' ? 'light' : 'dark');
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   }, []);
 
-  // Init API env
   useEffect(() => {
-    const prodUrl = isProdHost ? window.location.origin : 'https://atlas.onepassgym.com';
-    setEnv(env, prodUrl);
+    window.localStorage.setItem('atlas_theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
-    const keyName = `atlas_api_key_${env}`;
-    let key = localStorage.getItem(keyName);
-    if (!key) {
-      setShowKeyModalForEnv(env);
-      setApiKeySet(false);
-    } else {
-      setApiKey(key);
-      setApiKeySet(true);
-      setShowKeyModalForEnv(null);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadHistory() {
+      try {
+        const res = await api.get('/api/events/history?limit=100');
+        if (!res?.success || cancelled) return;
+
+        const history = Array.isArray(res.events) ? res.events.map(coerceEvent).filter(Boolean) : [];
+        const ordered = history.reverse();
+
+        setEvents(ordered.slice(0, MAX_EVENTS));
+        setCrawlActivity(() => ordered.reduce((state, evt) => reduceCrawlActivity(state, evt), DEFAULT_CRAWL_ACTIVITY));
+
+        const initialLogs = ordered
+          .filter((e) => e.type === 'system:log')
+          .map((e) => ({ timestamp: e.data?.timestamp || e.timestamp, level: e.data?.level || 'info', message: e.data?.message || '', stack: e.data?.stack }))
+          .slice(0, MAX_LOGS);
+
+        setLogs(initialLogs);
+      } catch {
+        // Ignore history bootstrap errors; live stream can still recover.
+      }
     }
-  }, [env, isProdHost]);
 
-  // Toast system
-  const toast = useCallback((msg, type = 'info') => {
-    const id = ++toastIdRef.current;
-    setToasts(prev => [...prev, { id, msg, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
-  }, []);
+    loadHistory();
 
-  // Events
-  const handleEvent = useCallback((event) => {
-    setEvents(prev => {
-      const next = [event, ...prev];
-      return next.length > 200 ? next.slice(0, 200) : next;
-    });
+    return () => {
+      cancelled = true;
+    };
+  }, [env]);
 
-    // Update crawl activity state from crawl:* events
-    const d = event.data || {};
-    const addAction = (action) => {
-      setCrawlActivity(prev => ({
-        ...prev,
-        recentActions: [{ ...action, timestamp: event.timestamp }, ...prev.recentActions].slice(0, 15),
-      }));
+  useEffect(() => {
+    const url = resolveSseUrl();
+    const source = new EventSource(url);
+    sourceRef.current = source;
+
+    source.onopen = () => {
+      setConnected(true);
     };
 
-    switch (event.type) {
-      case 'crawl:gym-start':
-        setCrawlActivity(prev => ({ ...prev, currentGym: { url: d.url, urlIndex: d.urlIndex, total: d.total, startedAt: event.timestamp }, status: 'scraping' }));
-        addAction({ type: 'gym-start', url: d.url, index: `${d.urlIndex}/${d.total}` });
-        break;
-      case 'crawl:gym-done':
-        addAction({ type: 'gym-done', name: d.gymName, duration: d.duration });
-        break;
-      case 'crawl:gym-failed':
-        addAction({ type: 'gym-failed', url: d.url, error: d.error, attempt: d.attempt, isBlock: d.isBlock });
-        break;
-      case 'crawl:batch-start':
-        setCrawlActivity(prev => ({ ...prev, batch: { cityName: d.cityName, batchIndex: d.batchIndex, urlCount: d.urlCount, startedAt: event.timestamp }, status: 'scraping' }));
-        addAction({ type: 'batch-start', city: d.cityName, batch: d.batchIndex, urls: d.urlCount });
-        break;
-      case 'crawl:batch-done':
-        setCrawlActivity(prev => ({ ...prev, batch: null, currentGym: null, status: 'idle' }));
-        addAction({ type: 'batch-done', city: d.cityName, batch: d.batchIndex, stats: d.stats });
-        break;
-      case 'crawl:search-start':
-        setCrawlActivity(prev => ({ ...prev, status: 'searching', currentGym: { url: d.category, urlIndex: d.categoryIndex, total: d.totalCategories, startedAt: event.timestamp } }));
-        addAction({ type: 'search-start', city: d.cityName, category: d.category });
-        break;
-      case 'crawl:search-done':
-        addAction({ type: 'search-done', category: d.category, found: d.urlsFound, total: d.totalUnique });
-        break;
-      case 'crawl:throttle':
-        setCrawlActivity(prev => ({ ...prev, throttle: d.multiplier }));
-        addAction({ type: 'throttle', multiplier: d.multiplier, direction: d.direction });
-        break;
-      case 'crawl:block':
-        setCrawlActivity(prev => ({ ...prev, status: 'blocked' }));
-        addAction({ type: 'block', reason: d.reason, cooldown: d.cooldownMs });
-        break;
-      case 'crawl:human-pause':
-        setCrawlActivity(prev => ({ ...prev, status: 'paused' }));
-        addAction({ type: 'pause', duration: d.pauseMs });
-        break;
-      default:
-        break;
-    }
-  }, []);
+    source.onerror = () => {
+      setConnected(false);
+    };
 
-  const handleLog = useCallback((log) => {
-    setLogs(prev => {
-      const next = [log, ...prev];
-      return next.length > 200 ? next.slice(0, 200) : next;
-    });
-  }, []);
+    source.onmessage = (event) => {
+      if (!event?.data) return;
 
-  const handleConnection = useCallback((c) => setConnected(c), []);
+      try {
+        const parsed = coerceEvent(JSON.parse(event.data));
+        if (!parsed) return;
 
-  // SSE connection
-  const { reconnect } = useSSE(handleEvent, handleLog, handleConnection, [env, apiKeySet]);
+        setEvents((prev) => [parsed, ...prev].slice(0, MAX_EVENTS));
+        setCrawlActivity((prev) => reduceCrawlActivity(prev, parsed));
 
-  // Env switching  
-  const switchEnv = useCallback((newEnv) => {
-    const prodUrl = isProdHost ? window.location.origin : 'https://atlas.onepassgym.com';
-    setEnv(newEnv, prodUrl);
-    setEnvState(newEnv);
-    localStorage.setItem('atlas_env', newEnv);
-    setEvents([]);
-    setLogs([]);
-
-    toast(`Switched to ${newEnv.toUpperCase()}`, 'info');
-  }, [toast, isProdHost]);
-
-  // Load event history on mount
-  useEffect(() => {
-    if (!apiKeySet) return;
-    api.get('/api/events/history?limit=150')
-      .then(res => {
-        if (res?.success && res.events?.length) {
-          const all = res.events.reverse();
-          setEvents(all.filter(e => e.type !== 'system:log'));
-          setLogs(all.filter(e => e.type === 'system:log').map(e => e.data));
+        if (parsed.type === 'system:log') {
+          const log = {
+            timestamp: parsed.data?.timestamp || parsed.timestamp,
+            level: parsed.data?.level || 'info',
+            message: parsed.data?.message || '',
+            stack: parsed.data?.stack,
+          };
+          setLogs((prev) => [log, ...prev].slice(0, MAX_LOGS));
         }
-      })
-      .catch(() => {});
-  }, [env, apiKeySet]);
+      } catch {
+        // Ignore malformed SSE payloads.
+      }
+    };
 
-  const clearLogs = useCallback(() => setLogs([]), []);
-  const clearEvents = useCallback(() => setEvents([]), []);
+    return () => {
+      source.close();
+      sourceRef.current = null;
+      setConnected(false);
+    };
+  }, [env]);
 
-  const value = {
+  const value = useMemo(() => ({
     env,
     switchEnv,
-    isProdHost,
     connected,
+    isProdHost,
+    theme,
+    toggleTheme,
     events,
     logs,
     clearLogs,
-    clearEvents,
+    toasts,
+    toast,
     chainsCache,
     setChainsCache,
-    toast,
-    toasts,
-    reconnect,
+    crawlActivity,
+  }), [
+    env,
+    switchEnv,
+    connected,
+    isProdHost,
     theme,
     toggleTheme,
+    events,
+    logs,
+    clearLogs,
+    toasts,
+    toast,
+    chainsCache,
+    setChainsCache,
     crawlActivity,
-  };
+  ]);
 
-  return (
-    <AppContext.Provider value={value}>
-      {children}
-      {showKeyModalForEnv && (
-        <ApiKeyModal 
-          env={showKeyModalForEnv} 
-          onSave={(key) => {
-            const keyName = `atlas_api_key_${showKeyModalForEnv}`;
-            localStorage.setItem(keyName, key);
-            setApiKey(key);
-            setApiKeySet(true);
-            setShowKeyModalForEnv(null);
-          }} 
-        />
-      )}
-    </AppContext.Provider>
-  );
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+}
+
+export function useApp() {
+  const ctx = useContext(AppContext);
+  if (!ctx) {
+    throw new Error('useApp must be used within AppProvider');
+  }
+  return ctx;
 }

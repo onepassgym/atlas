@@ -4,7 +4,7 @@
 /**
  * genArchSnapshot.js
  * 
- * Generates an auto-updated snapshot of the Atlas06 architecture:
+ * Generates an auto-updated snapshot of the atlas architecture:
  *   - File tree with sizes
  *   - Route inventory (extracted from source)
  *   - Model field counts
@@ -148,7 +148,7 @@ function generate() {
   const now = new Date().toISOString().replace('T', ' ').split('.')[0];
   const lines = [];
 
-  lines.push(`# 📸 Atlas06 — Architecture Snapshot`);
+  lines.push(`# 📸 atlas — Architecture Snapshot`);
   lines.push(``);
   lines.push(`> **Auto-generated** by \`node scripts/genArchSnapshot.js\``);
   lines.push(`> Last generated: **${now} UTC**`);

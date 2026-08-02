@@ -1,7 +1,7 @@
 {
-  "name": "atlas06-dashboard",
+  "name": "atlas-dashboard",
   "private": true,
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,16 +9,26 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.62.0",
+    "@tanstack/react-router": "^1.92.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.0.4",
+    "cobe": "^2.0.1",
+    "framer-motion": "^12.42.2",
+    "lucide-react": "^0.468.0",
+    "maplibre-gl": "^4.7.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.1.0",
-    "recharts": "^2.15.0",
-    "framer-motion": "^11.15.0",
-    "lucide-react": "^0.468.0",
-    "cobe": "^0.6.3"
+    "react-router-dom": "^7.18.1",
+    "recharts": "^3.9.1",
+    "tailwind-merge": "^2.6.0",
+    "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.0.0",
     "vite": "^6.0.0"
   }
 }

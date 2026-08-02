@@ -64,9 +64,9 @@ export default function HealthRecommendations() {
   const fetchData = useCallback(async () => {
     try {
       const [statsRes, coverageRes, enrichStatsRes] = await Promise.all([
-        api('/api/spaces/stats'),
-        api('/api/crawl/coverage').catch(() => ({ coverage: [] })),
-        api('/api/enrichment/stats').catch(() => ({})),
+        api.get('/api/spaces/stats'),
+        api.get('/api/crawl/coverage').catch(() => ({ coverage: [] })),
+        api.get('/api/enrichment/stats').catch(() => ({})),
       ]);
 
       const stats = statsRes.stats || {};
@@ -87,7 +87,7 @@ export default function HealthRecommendations() {
           count: totalBlocked,
           description: `Across ${blockedJobs.length} city jobs`,
           actionLabel: 'Retry Failed',
-          action: () => api('/api/crawl/retry/failed', { method: 'POST' }),
+          action: () => api.post('/api/crawl/retry/failed'),
         });
       }
 
@@ -103,7 +103,7 @@ export default function HealthRecommendations() {
           count: totalGap,
           description: `${gapJobs.length} cities have unscraped URLs`,
           actionLabel: 'Retry Failed',
-          action: () => api('/api/crawl/retry/failed', { method: 'POST' }),
+          action: () => api.post('/api/crawl/retry/failed'),
         });
       }
 
@@ -118,7 +118,7 @@ export default function HealthRecommendations() {
           count: Math.round(stats.total * 0.2) || '?',
           description: 'Prioritized by serviceable city × staleness',
           actionLabel: 'Re-enrich These',
-          action: () => api('/api/crawl/retry/incomplete', { method: 'POST', body: JSON.stringify({ threshold: 80 }) }),
+          action: () => api.post('/api/crawl/retry/incomplete', { threshold: 80 }),
         });
       }
 
@@ -135,7 +135,7 @@ export default function HealthRecommendations() {
           count: uniqueCats.length,
           description: uniqueCats.slice(0, 4).join(', ') + (uniqueCats.length > 4 ? '...' : ''),
           actionLabel: 'Recrawl Cities',
-          action: () => api('/api/system/schedule/trigger', { method: 'POST', body: JSON.stringify({ frequency: 'weekly' }) }),
+          action: () => api.post('/api/system/schedule/trigger', { frequency: 'weekly' }),
         });
       }
 
