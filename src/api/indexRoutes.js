@@ -9,9 +9,6 @@ const cfg = require('../../config');
 // Base properties to avoid reading config again if not needed
 const SERVER_PORT = cfg.server?.port || process.env.PORT || 3000;
 
-// Root redirect to dashboard
-router.get('/', (_, res) => res.redirect('/dashboard'));
-
 // Health check
 router.get('/health', (_, res) => res.json({
   status:  'ok',

@@ -1,620 +1,434 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Search, X, Download, Filter, ChevronDown, ChevronUp,
-  MapPin, Star, MessageCircle, Target, Clock, Zap,
-  Building2, Tag, BarChart3, SlidersHorizontal, Sparkles,
-  ArrowUpDown, TrendingUp, Hash
+  Search, X, Download, Star, MapPin, Target, Zap,
+  ChevronLeft, ChevronRight, SlidersHorizontal, Database,
 } from 'lucide-react';
-import GymRow from '../components/GymRow';
 import GymDrawer from '../components/GymDrawer';
-import Pagination from '../components/Pagination';
-import Skeleton from '../components/Skeleton';
 import { api, getBaseUrl } from '../api/client';
 import { useApp } from '../context/AppContext';
 
-function formatCategory(cat) {
-  if (!cat || cat === 'undefined' || cat === 'unknown') return 'Unknown';
-  return String(cat).split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+const LIMIT = 25;
+const SORT_OPTIONS = [
+  { value: 'qualityScore', label: 'Quality' },
+  { value: 'rating',       label: 'Rating'  },
+  { value: 'totalReviews', label: 'Reviews' },
+  { value: 'createdAt',    label: 'Newest'  },
+  { value: 'name',         label: 'Name'    },
+];
+
+const SOURCE_COLORS = {
+  google_maps:      '#4285F4',
+  justdial:         '#F05A28',
+  osm:              '#7EBC6F',
+  yelp:             '#D32323',
+  official_website: '#8B5CF6',
+};
+const SOURCE_SHORT = {
+  google_maps: 'G', justdial: 'JD', osm: 'OSM', yelp: 'Y', official_website: 'W',
+};
+
+function QualityDot({ score }) {
+  const color = score >= 80 ? '#10B981' : score >= 60 ? '#7C3AED' : score >= 40 ? '#F59E0B' : '#EF4444';
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      fontSize: 12, fontFamily: 'var(--mono)', color, fontWeight: 700,
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
+      {score ?? '—'}
+    </span>
+  );
 }
 
-const LIMIT = 20;
-const RECENT_SEARCHES_KEY = 'atlas_recent_searches';
+function StageBar({ stage }) {
+  const s = stage ?? 0;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div style={{ display: 'flex', gap: 2 }}>
+        {Array.from({ length: 7 }, (_, i) => (
+          <span key={i} style={{
+            width: 4, height: 10, borderRadius: 2,
+            background: i < s ? '#7C3AED' : '#1A1A1A',
+            transition: 'background 0.2s',
+          }} />
+        ))}
+      </div>
+      <span style={{ fontSize: 10, color: '#52525B', fontFamily: 'var(--mono)' }}>{s}/7</span>
+    </div>
+  );
+}
 
-function getRecentSearches() {
-  try { return JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY) || '[]').slice(0, 8); }
-  catch { return []; }
-}
-function saveRecentSearch(term) {
-  if (!term || term.length < 2) return;
-  const recent = getRecentSearches().filter(s => s !== term);
-  recent.unshift(term);
-  localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(recent.slice(0, 8)));
-}
-function clearRecentSearches() {
-  localStorage.removeItem(RECENT_SEARCHES_KEY);
+function SourceTags({ sources = [] }) {
+  if (!sources.length) return null;
+  return (
+    <div style={{ display: 'flex', gap: 3 }}>
+      {sources.slice(0, 3).map(s => (
+        <span key={s} title={s} style={{
+          width: 18, height: 18, borderRadius: 4, fontSize: 9, fontWeight: 800,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: (SOURCE_COLORS[s] || '#3F3F46') + '22',
+          color: SOURCE_COLORS[s] || '#71717A',
+          border: `1px solid ${(SOURCE_COLORS[s] || '#3F3F46')}44`,
+        }}>
+          {SOURCE_SHORT[s] || '?'}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 export default function Explorer() {
   const { toast, chainsCache } = useApp();
-  
-  // ── Search State ──
-  const [search, setSearch] = useState('');
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [suggestions, setSuggestions] = useState([]);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [recentSearches, setRecentSearches] = useState(getRecentSearches);
-  
-  // ── Filter State ──
-  const [city, setCity] = useState('');
-  const [category, setCategory] = useState('');
-  const [chain, setChain] = useState('');
-  const [rating, setRating] = useState('');
-  const [sort, setSort] = useState('qualityScore');
-  const [minReviews, setMinReviews] = useState('');
-  const [chainOnly, setChainOnly] = useState(false);
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
 
-  // ── Data State ──
-  const [gyms, setGyms] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pages, setPages] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [selectedGym, setSelectedGym] = useState(null);
+  const [search, setSearch]           = useState('');
+  const [city, setCity]               = useState('');
+  const [category, setCategory]       = useState('');
+  const [rating, setRating]           = useState('');
+  const [sort, setSort]               = useState('qualityScore');
+  const [showFilters, setShowFilters] = useState(false);
+
+  const [spaces, setSpaces]         = useState([]);
+  const [total, setTotal]           = useState(0);
+  const [page, setPage]             = useState(1);
+  const [pages, setPages]           = useState(1);
+  const [loading, setLoading]       = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [cities, setCities]         = useState([]);
   const [categories, setCategories] = useState([]);
-  const [cities, setCities] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const [searchTime, setSearchTime] = useState(null);
-  const [searchMode, setSearchMode] = useState(null);
+  const [searchMs, setSearchMs]     = useState(null);
 
-  const searchInputRef = useRef(null);
-  const suggestionsRef = useRef(null);
-  const searchAbortRef = useRef(null);
+  const debounceRef = useRef(null);
 
-  // ── Active filter count ──
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (city) count++;
-    if (category) count++;
-    if (chain) count++;
-    if (rating) count++;
-    if (minReviews) count++;
-    if (chainOnly) count++;
-    if (sort !== 'qualityScore') count++;
-    return count;
-  }, [city, category, chain, rating, minReviews, chainOnly, sort]);
-
-  // ── Active filter chips ──
-  const activeFilters = useMemo(() => {
-    const chips = [];
-    if (city) chips.push({ key: 'city', label: `City: ${city}`, clear: () => setCity('') });
-    if (category) chips.push({ key: 'category', label: `Category: ${formatCategory(category)}`, clear: () => setCategory('') });
-    if (chain) {
-      const chainObj = chainsCache.find(c => c.slug === chain);
-      chips.push({ key: 'chain', label: `Chain: ${chainObj?.name || chain}`, clear: () => setChain('') });
-    }
-    if (rating) chips.push({ key: 'rating', label: `Rating: ${rating}+`, clear: () => setRating('') });
-    if (minReviews) chips.push({ key: 'minReviews', label: `Min ${minReviews} reviews`, clear: () => setMinReviews('') });
-    if (chainOnly) chips.push({ key: 'chainOnly', label: 'Chain Only', clear: () => setChainOnly(false) });
-    return chips;
-  }, [city, category, chain, rating, minReviews, chainOnly, chainsCache]);
-
-  // ── Fetch gyms ──
-  const searchGyms = useCallback(async (p = 1) => {
+  const fetchSpaces = useCallback(async (p = 1) => {
     setLoading(true);
-    const params = new URLSearchParams();
-    params.set('limit', LIMIT);
-    params.set('page', p);
-    if (search) params.set('search', search);
-    if (city) params.set('city', city);
+    const params = new URLSearchParams({ limit: LIMIT, page: p });
+    if (search)   params.set('search', search);
+    if (city)     params.set('city', city);
     if (category) params.set('category', category);
-    if (chain) params.set('chainSlug', chain);
-    if (rating) params.set('minRating', rating);
-    if (sort) params.set('sortBy', sort);
-    if (minReviews) params.set('minReviews', minReviews);
-    if (chainOnly) params.set('isChainMember', 'true');
+    if (rating)   params.set('minRating', rating);
+    if (sort)     params.set('sortBy', sort);
 
     try {
-      const res = await api.get(`/api/gyms?${params.toString()}`);
+      const res = await api.get(`/api/spaces?${params}`);
       if (res?.success) {
-        setGyms(res.gyms || []);
+        setSpaces(res.spaces || res.gyms || []);
         setTotal(res.total || 0);
         setPage(res.page || 1);
         setPages(res.pages || 1);
-        setSearchTime(res.searchTime || null);
-        setSearchMode(res.searchMode || null);
+        setSearchMs(res.searchTime ?? null);
       }
     } catch (e) {
-      toast('Failed to fetch gyms', 'error');
+      toast('Failed to fetch spaces', 'error');
     } finally {
       setLoading(false);
     }
-  }, [search, city, category, chain, rating, sort, minReviews, chainOnly, toast]);
+  }, [search, city, category, rating, sort, toast]);
 
-  // ── Fetch suggestions ──
-  const fetchSuggestions = useCallback(async (query) => {
-    if (query.length < 2) { setSuggestions([]); return; }
-    
-    if (searchAbortRef.current) searchAbortRef.current.abort();
-    const controller = new AbortController();
-    searchAbortRef.current = controller;
-    
-    setSuggestionsLoading(true);
-    try {
-      const res = await api.get(`/api/gyms/suggestions?q=${encodeURIComponent(query)}`);
-      if (!controller.signal.aborted && res?.success) {
-        setSuggestions(res.suggestions || []);
-      }
-    } catch (e) {
-      if (!controller.signal.aborted) setSuggestions([]);
-    } finally {
-      if (!controller.signal.aborted) setSuggestionsLoading(false);
-    }
+  // Debounced fetch on filter change
+  useEffect(() => {
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchSpaces(1), 350);
+    return () => clearTimeout(debounceRef.current);
+  }, [fetchSpaces]);
+
+  // Load filter options once
+  useEffect(() => {
+    api.get('/api/spaces/cities').then(r => r?.success && setCities(r.cities || [])).catch(() => {});
+    api.get('/api/spaces/stats').then(r => r?.success && setCategories(r.categories || [])).catch(() => {});
   }, []);
-
-  // ── Load filter options once ──
-  useEffect(() => {
-    if (loaded) return;
-    setLoaded(true);
-    api.get('/api/gyms/stats').then(res => {
-      if (res?.success) {
-        setCategories(res.stats?.byCategory || []);
-        setCities((res.stats?.topCities || []).map(c => ({ name: c._id, count: c.count })));
-      }
-    }).catch(() => {});
-    // Also load all cities
-    api.get('/api/gyms/cities').then(res => {
-      if (res?.success) setCities(res.cities || []);
-    }).catch(() => {});
-    searchGyms(1);
-  }, [loaded, searchGyms]);
-
-  // ── Debounced search + suggestions ──
-  const searchRef = useRef(search);
-  useEffect(() => {
-    if (search === searchRef.current) return;
-    searchRef.current = search;
-
-    // Fetch suggestions immediately (debounced shorter)
-    const sugHandler = setTimeout(() => fetchSuggestions(search), 200);
-    
-    // Trigger main search with longer debounce
-    if (search.length >= 2 || search.length === 0) {
-      const handler = setTimeout(() => searchGyms(1), 500);
-      return () => { clearTimeout(handler); clearTimeout(sugHandler); };
-    }
-    return () => clearTimeout(sugHandler);
-  }, [search, searchGyms, fetchSuggestions]);
-
-  // ── Close suggestions on outside click ──
-  useEffect(() => {
-    function handleClick(e) {
-      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target) &&
-          searchInputRef.current && !searchInputRef.current.contains(e.target)) {
-        setShowSuggestions(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
-  // ── Handlers ──
-  const handleSearchSubmit = (term) => {
-    const value = term || search;
-    if (value) saveRecentSearch(value);
-    setRecentSearches(getRecentSearches());
-    setShowSuggestions(false);
-    if (term) setSearch(term);
-    setTimeout(() => searchGyms(1), 0);
-  };
-
-  const handleSuggestionClick = (suggestion) => {
-    if (suggestion.type === 'gym') {
-      setSelectedGym(suggestion.id);
-      setShowSuggestions(false);
-    } else if (suggestion.type === 'area') {
-      setCity(suggestion.name);
-      setSearch('');
-      setShowSuggestions(false);
-      setTimeout(() => searchGyms(1), 0);
-    } else if (suggestion.type === 'chain') {
-      setChain(suggestion.slug || '');
-      setSearch('');
-      setShowSuggestions(false);
-      setTimeout(() => searchGyms(1), 0);
-    }
-  };
-
-  const clearFilters = () => {
-    setSearch(''); setCity(''); setCategory(''); setChain(''); setRating('');
-    setSort('qualityScore'); setMinReviews(''); setChainOnly(false);
-    setTimeout(() => searchGyms(1), 0);
-  };
-
-  const removeFilter = (key) => {
-    const chip = activeFilters.find(f => f.key === key);
-    if (chip) { chip.clear(); setTimeout(() => searchGyms(1), 50); }
-  };
 
   const handleExport = () => {
     const a = document.createElement('a');
-    a.href = `${getBaseUrl()}/api/gyms/export`;
-    a.download = 'gyms-export.json';
+    a.href = `${getBaseUrl()}/api/spaces/export`;
+    a.download = 'spaces-export.json';
     a.click();
     toast('Export started…', 'info');
   };
 
-  const handleFilterChange = (setter) => (value) => {
-    setter(value);
-    setTimeout(() => searchGyms(1), 0);
+  const clearAll = () => {
+    setSearch(''); setCity(''); setCategory(''); setRating(''); setSort('qualityScore');
   };
 
+  const hasFilters = search || city || category || rating || sort !== 'qualityScore';
+
+  const COL = { name: '32%', quality: '8%', rating: '9%', reviews: '9%', city: '14%', category: '12%', stage: '9%', sources: '7%' };
+
   return (
-    <motion.div className="container" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-      
-      {/* ═══════════════════════════════════════════════════════
-          SEARCH HERO BAR
-          ═══════════════════════════════════════════════════════ */}
-      <div className="explorer-search-hero">
-        <div className="explorer-search-header">
-          <div className="explorer-search-title">
-            <Sparkles size={20} className="explorer-search-icon" />
-            <span>Gym Explorer</span>
-          </div>
-          <div className="explorer-search-actions">
-            <button className="btn sm" onClick={handleExport} id="export-btn">
-              <Download size={13} /> Export
-            </button>
-          </div>
+    <div className="container">
+      {/* ── Header ── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Database size={18} style={{ color: '#7C3AED' }} />
+          <h1 style={{ fontSize: 18, fontWeight: 800, margin: 0, letterSpacing: '-0.3px' }}>
+            Space Explorer
+          </h1>
+          <span style={{ fontSize: 12, color: '#52525B', fontFamily: 'var(--mono)', background: '#111', border: '1px solid #222', padding: '2px 8px', borderRadius: 6 }}>
+            {total.toLocaleString()} spaces
+          </span>
         </div>
-
-        <div className="explorer-search-container" ref={searchInputRef}>
-          <div className="explorer-search-input-wrap">
-            <Search size={18} className="explorer-search-lens" />
-            <input
-              className="explorer-search-input"
-              type="text"
-              placeholder="Search gyms by name, area, chain, or address…"
-              value={search}
-              onChange={e => { setSearch(e.target.value); setShowSuggestions(true); }}
-              onFocus={() => setShowSuggestions(true)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') handleSearchSubmit();
-                if (e.key === 'Escape') setShowSuggestions(false);
-              }}
-              id="gym-search-input"
-              autoComplete="off"
-            />
-            {search && (
-              <button className="explorer-search-clear" onClick={() => { setSearch(''); searchInputRef.current?.querySelector('input')?.focus(); }}>
-                <X size={14} />
-              </button>
-            )}
-            <button className="explorer-search-btn" onClick={() => handleSearchSubmit()}>
-              <Zap size={14} /> Search
-            </button>
-          </div>
-
-          {/* ── Suggestions Dropdown ── */}
-          <AnimatePresence>
-            {showSuggestions && (search.length >= 2 || recentSearches.length > 0) && (
-              <motion.div
-                className="explorer-suggestions"
-                ref={suggestionsRef}
-                initial={{ opacity: 0, y: -8, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -8, scale: 0.98 }}
-                transition={{ duration: 0.2 }}
-              >
-                {/* Recent Searches */}
-                {search.length < 2 && recentSearches.length > 0 && (
-                  <div className="suggestion-section">
-                    <div className="suggestion-section-header">
-                      <span><Clock size={12} /> Recent Searches</span>
-                      <button className="suggestion-clear-btn" onClick={() => { clearRecentSearches(); setRecentSearches([]); }}>Clear</button>
-                    </div>
-                    {recentSearches.map((term, i) => (
-                      <div key={i} className="suggestion-item recent" onClick={() => { setSearch(term); handleSearchSubmit(term); }}>
-                        <Clock size={13} className="suggestion-item-icon" />
-                        <span>{term}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Live Suggestions */}
-                {search.length >= 2 && (
-                  <>
-                    {suggestionsLoading && (
-                      <div className="suggestion-loading">
-                        <div className="suggestion-loading-dot" />
-                        <div className="suggestion-loading-dot" />
-                        <div className="suggestion-loading-dot" />
-                      </div>
-                    )}
-                    {!suggestionsLoading && suggestions.length === 0 && (
-                      <div className="suggestion-empty">No suggestions found</div>
-                    )}
-                    {!suggestionsLoading && suggestions.filter(s => s.type === 'gym').length > 0 && (
-                      <div className="suggestion-section">
-                        <div className="suggestion-section-header"><span><Building2 size={12} /> Gyms</span></div>
-                        {suggestions.filter(s => s.type === 'gym').map((s, i) => (
-                          <div key={i} className="suggestion-item gym" onClick={() => handleSuggestionClick(s)}>
-                            {s.thumbnail ? (
-                              <img src={s.thumbnail} alt="" className="suggestion-thumb" />
-                            ) : (
-                              <div className="suggestion-thumb-placeholder"><Building2 size={14} /></div>
-                            )}
-                            <div className="suggestion-item-content">
-                              <div className="suggestion-item-name">{s.name}</div>
-                              <div className="suggestion-item-meta">
-                                {s.area && <span><MapPin size={10} /> {s.area}</span>}
-                                {s.rating && <span><Star size={10} /> {s.rating?.toFixed(1)}</span>}
-                                {s.reviews > 0 && <span><MessageCircle size={10} /> {s.reviews}</span>}
-                              </div>
-                            </div>
-                            {s.quality > 0 && (
-                              <div className="suggestion-quality">
-                                <Target size={10} /> {s.quality}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {!suggestionsLoading && suggestions.filter(s => s.type === 'area').length > 0 && (
-                      <div className="suggestion-section">
-                        <div className="suggestion-section-header"><span><MapPin size={12} /> Areas</span></div>
-                        {suggestions.filter(s => s.type === 'area').map((s, i) => (
-                          <div key={i} className="suggestion-item area" onClick={() => handleSuggestionClick(s)}>
-                            <MapPin size={14} className="suggestion-item-icon" />
-                            <div className="suggestion-item-content">
-                              <div className="suggestion-item-name">{s.name}</div>
-                              <div className="suggestion-item-meta">
-                                <span>{s.count} gyms</span>
-                                {s.avgRating && <span><Star size={10} /> {s.avgRating} avg</span>}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {!suggestionsLoading && suggestions.filter(s => s.type === 'chain').length > 0 && (
-                      <div className="suggestion-section">
-                        <div className="suggestion-section-header"><span><Building2 size={12} /> Chains</span></div>
-                        {suggestions.filter(s => s.type === 'chain').map((s, i) => (
-                          <div key={i} className="suggestion-item chain" onClick={() => handleSuggestionClick(s)}>
-                            <Building2 size={14} className="suggestion-item-icon" />
-                            <div className="suggestion-item-content">
-                              <div className="suggestion-item-name">{s.name}</div>
-                              <div className="suggestion-item-meta"><span>{s.count} locations</span></div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* ── Search Stats Line ── */}
-        <div className="explorer-search-stats">
-          <div className="explorer-search-stats-left">
-            <span className="explorer-result-count">
-              <Hash size={12} />
-              <strong>{total.toLocaleString()}</strong> gyms found
-            </span>
-            {searchTime != null && (
-              <span className="explorer-search-time">
-                <Zap size={11} /> {searchTime}ms
-              </span>
-            )}
-            {searchMode && search && (
-              <span className={`explorer-search-mode ${searchMode}`}>
-                {searchMode === 'text' ? 'Relevance' : searchMode === 'fuzzy' ? 'Fuzzy' : 'Filter'}
-              </span>
-            )}
-          </div>
-          <div className="explorer-search-stats-right">
-            <span className="explorer-page-info">
-              Page {page} / {pages}
-            </span>
-          </div>
-        </div>
+        <button className="btn sm" onClick={handleExport}>
+          <Download size={12} /> Export
+        </button>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════
-          ACTIVE FILTER CHIPS
-          ═══════════════════════════════════════════════════════ */}
-      {activeFilters.length > 0 && (
-        <motion.div
-          className="explorer-active-filters"
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
-          exit={{ opacity: 0, height: 0 }}
-        >
-          {activeFilters.map(f => (
-            <motion.button
-              key={f.key}
-              className="explorer-filter-chip"
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              onClick={() => removeFilter(f.key)}
-            >
-              {f.label}
-              <X size={11} />
-            </motion.button>
-          ))}
-          <button className="explorer-filter-chip clear" onClick={clearFilters}>
-            <X size={12} /> Clear All
-          </button>
-        </motion.div>
-      )}
+      {/* ── Search + Filter bar ── */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+        {/* Search input */}
+        <div style={{ flex: 1, position: 'relative' }}>
+          <Search size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: '#52525B', pointerEvents: 'none' }} />
+          <input
+            style={{
+              width: '100%', padding: '9px 36px', borderRadius: 8, fontSize: 13,
+              border: '1px solid #222', background: '#0A0A0A', color: '#FAFAFA',
+              outline: 'none', transition: 'border-color 0.15s',
+            }}
+            placeholder="Search spaces by name, area, or address…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            onKeyDown={e => e.key === 'Escape' && setSearch('')}
+            onFocus={e => e.target.style.borderColor = '#7C3AED'}
+            onBlur={e => e.target.style.borderColor = '#222'}
+          />
+          {search && (
+            <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#52525B', padding: 2 }}>
+              <X size={13} />
+            </button>
+          )}
+        </div>
 
-      {/* ═══════════════════════════════════════════════════════
-          FILTERS PANEL
-          ═══════════════════════════════════════════════════════ */}
-      <div className="explorer-filters-bar">
-        <button className="explorer-filters-toggle" onClick={() => setFiltersExpanded(!filtersExpanded)}>
-          <SlidersHorizontal size={14} />
-          <span>Filters</span>
-          {activeFilterCount > 0 && <span className="explorer-filter-count">{activeFilterCount}</span>}
-          {filtersExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        {/* Sort */}
+        <select
+          value={sort}
+          onChange={e => setSort(e.target.value)}
+          style={{ padding: '9px 10px', borderRadius: 8, fontSize: 12, border: '1px solid #222', background: '#0A0A0A', color: '#A1A1AA', cursor: 'pointer' }}
+        >
+          {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+
+        {/* Filter toggle */}
+        <button
+          className={`btn sm${showFilters ? ' accent' : ''}`}
+          onClick={() => setShowFilters(v => !v)}
+          style={showFilters ? { borderColor: 'rgba(124,58,237,0.5)', color: '#A78BFA', background: 'rgba(124,58,237,0.12)' } : {}}
+        >
+          <SlidersHorizontal size={13} />
+          Filters
+          {hasFilters && !showFilters && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#7C3AED', marginLeft: 2 }} />}
         </button>
 
-        {/* Quick sort — always visible */}
-        <div className="explorer-quick-sort">
-          <ArrowUpDown size={12} />
-          <select
-            className="explorer-sort-select"
-            value={sort}
-            onChange={e => { setSort(e.target.value); setTimeout(() => searchGyms(1), 0); }}
-          >
-            <option value="qualityScore">Quality Score</option>
-            <option value="rating">Rating</option>
-            <option value="totalReviews">Reviews</option>
-            <option value="sentimentScore">Sentiment</option>
-            <option value="createdAt">Newest</option>
-            <option value="name">Name</option>
-          </select>
-        </div>
+        {hasFilters && (
+          <button className="btn sm" onClick={clearAll} title="Clear all filters">
+            <X size={12} />
+          </button>
+        )}
       </div>
 
+      {/* ── Expanded filter panel ── */}
       <AnimatePresence>
-        {filtersExpanded && (
+        {showFilters && (
           <motion.div
-            className="explorer-filters-panel"
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.25 }}
+            transition={{ duration: 0.2 }}
+            style={{ overflow: 'hidden', marginBottom: 12 }}
           >
-            <div className="explorer-filters-grid">
-              <FilterGroup label="City / Area" icon={<MapPin size={12} />}>
-                <select
-                  className="input explorer-filter-input"
-                  value={city}
-                  onChange={e => { setCity(e.target.value); setTimeout(() => searchGyms(1), 0); }}
-                >
+            <div style={{ display: 'flex', gap: 10, padding: '12px 16px', background: '#0A0A0A', borderRadius: 8, border: '1px solid #1A1A1A' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 10, color: '#52525B', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>City / Area</label>
+                <select value={city} onChange={e => setCity(e.target.value)} style={selectStyle}>
                   <option value="">All Areas</option>
                   {cities.map(c => <option key={c.name} value={c.name}>{c.name} ({c.count})</option>)}
                 </select>
-              </FilterGroup>
-
-              <FilterGroup label="Category" icon={<Tag size={12} />}>
-                <select
-                  className="input explorer-filter-input"
-                  value={category}
-                  onChange={e => { setCategory(e.target.value); setTimeout(() => searchGyms(1), 0); }}
-                >
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 10, color: '#52525B', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>Category</label>
+                <select value={category} onChange={e => setCategory(e.target.value)} style={selectStyle}>
                   <option value="">All Categories</option>
-                  {categories.map(c => <option key={c._id} value={c._id}>{formatCategory(c._id)} ({c.count})</option>)}
+                  {categories.map(c => <option key={c._id} value={c._id}>{c._id} ({c.count})</option>)}
                 </select>
-              </FilterGroup>
-
-              <FilterGroup label="Chain" icon={<Building2 size={12} />}>
-                <select
-                  className="input explorer-filter-input"
-                  value={chain}
-                  onChange={e => { setChain(e.target.value); setTimeout(() => searchGyms(1), 0); }}
-                >
-                  <option value="">All Chains</option>
-                  {chainsCache.map(c => <option key={c.slug} value={c.slug}>{c.name} ({c.totalLocations || 0})</option>)}
-                </select>
-              </FilterGroup>
-
-              <FilterGroup label="Min Rating" icon={<Star size={12} />}>
-                <div className="explorer-rating-group">
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 10, color: '#52525B', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>Min Rating</label>
+                <div style={{ display: 'flex', gap: 4 }}>
                   {['', '3', '3.5', '4', '4.5'].map(r => (
-                    <button
-                      key={r}
-                      className={`explorer-rating-btn ${rating === r ? 'active' : ''}`}
-                      onClick={() => { setRating(r); setTimeout(() => searchGyms(1), 0); }}
-                    >
-                      {r ? `${r}+` : 'Any'}
-                    </button>
+                    <button key={r} onClick={() => setRating(r)} style={{
+                      padding: '5px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                      border: `1px solid ${rating === r ? '#7C3AED' : '#222'}`,
+                      background: rating === r ? 'rgba(124,58,237,0.15)' : '#111',
+                      color: rating === r ? '#A78BFA' : '#71717A',
+                    }}>{r ? `${r}+` : 'Any'}</button>
                   ))}
                 </div>
-              </FilterGroup>
-
-              <FilterGroup label="Min Reviews" icon={<MessageCircle size={12} />}>
-                <input
-                  className="input explorer-filter-input"
-                  type="number" placeholder="0" min="0"
-                  value={minReviews}
-                  onChange={e => setMinReviews(e.target.value)}
-                  onBlur={() => searchGyms(1)}
-                  onKeyDown={e => e.key === 'Enter' && searchGyms(1)}
-                />
-              </FilterGroup>
-
-              <FilterGroup label="Chain Only" icon={<Building2 size={12} />}>
-                <div className="explorer-toggle-wrap">
-                  <div
-                    className={`explorer-toggle ${chainOnly ? 'active' : ''}`}
-                    onClick={() => { setChainOnly(!chainOnly); setTimeout(() => searchGyms(1), 0); }}
-                  >
-                    <div className="explorer-toggle-knob" />
-                  </div>
-                  <span className="explorer-toggle-label">{chainOnly ? 'Yes' : 'No'}</span>
-                </div>
-              </FilterGroup>
+              </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ═══════════════════════════════════════════════════════
-          RESULTS TABLE
-          ═══════════════════════════════════════════════════════ */}
-      <div className="explorer-results-card">
-        <div className="explorer-results-body">
-          {loading ? (
-            <Skeleton count={8} height={56} style={{ margin: '6px 14px' }} />
-          ) : gyms.length > 0 ? (
-            gyms.map((g, i) => (
-              <motion.div
-                key={g._id}
-                initial={{ opacity: 0, x: -12 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.2, delay: i * 0.02 }}
-              >
-                <GymRow gym={g} onClick={setSelectedGym} searchTerm={search} />
-              </motion.div>
-            ))
-          ) : (
-            <div className="explorer-empty">
-              <div className="explorer-empty-icon">
-                <Search size={40} />
-              </div>
-              <div className="explorer-empty-title">No gyms match your search</div>
-              <div className="explorer-empty-desc">Try adjusting your filters or search terms</div>
-              {(search || activeFilterCount > 0) && (
-                <button className="btn primary" onClick={clearFilters} style={{ marginTop: 16 }}>
-                  <X size={14} /> Clear All Filters
-                </button>
-              )}
-            </div>
-          )}
+      {/* ── Table ── */}
+      <div style={{ border: '1px solid #1A1A1A', borderRadius: 10, overflow: 'hidden' }}>
+        {/* Table header */}
+        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', background: '#0A0A0A', borderBottom: '1px solid #1A1A1A' }}>
+          <ColHead label="Name"     width={COL.name} />
+          <ColHead label="Quality"  width={COL.quality} />
+          <ColHead label="Rating"   width={COL.rating} />
+          <ColHead label="Reviews"  width={COL.reviews} />
+          <ColHead label="City"     width={COL.city} />
+          <ColHead label="Category" width={COL.category} />
+          <ColHead label="Stage"    width={COL.stage} />
+          <ColHead label="Sources"  width={COL.sources} />
         </div>
-        <Pagination current={page} total={pages} onPage={p => searchGyms(p)} />
+
+        {/* Rows */}
+        {loading ? (
+          <div style={{ padding: '32px 14px' }}>
+            {Array.from({ length: 8 }, (_, i) => (
+              <div key={i} style={{ height: 40, background: '#0A0A0A', borderRadius: 6, marginBottom: 6, opacity: 1 - i * 0.1 }} />
+            ))}
+          </div>
+        ) : spaces.length === 0 ? (
+          <div style={{ padding: '48px 14px', textAlign: 'center', color: '#52525B', fontSize: 13 }}>
+            No spaces found{hasFilters ? ' — try clearing filters' : ''}
+          </div>
+        ) : (
+          <div>
+            {spaces.map((space, idx) => (
+              <SpaceRow
+                key={space._id || space.opgId || idx}
+                space={space}
+                onClick={() => setSelectedId(space._id || space.opgId)}
+                COL={COL}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      {selectedGym && <GymDrawer gymId={selectedGym} onClose={() => setSelectedGym(null)} />}
-    </motion.div>
-  );
-}
+      {/* ── Footer ── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, padding: '0 2px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, color: '#52525B' }}>
+          <span style={{ fontFamily: 'var(--mono)' }}>{total.toLocaleString()} total</span>
+          {searchMs != null && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Zap size={10} style={{ color: '#7C3AED' }} />
+              {searchMs}ms
+            </span>
+          )}
+        </div>
+        {pages > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button className="btn sm" onClick={() => fetchSpaces(page - 1)} disabled={page <= 1}>
+              <ChevronLeft size={13} />
+            </button>
+            <span style={{ fontSize: 12, color: '#71717A', fontFamily: 'var(--mono)', minWidth: 70, textAlign: 'center' }}>
+              {page} / {pages}
+            </span>
+            <button className="btn sm" onClick={() => fetchSpaces(page + 1)} disabled={page >= pages}>
+              <ChevronRight size={13} />
+            </button>
+          </div>
+        )}
+      </div>
 
-function FilterGroup({ label, icon, children }) {
-  return (
-    <div className="explorer-filter-group">
-      <span className="explorer-filter-label">{icon} {label}</span>
-      {children}
+      {/* ── Drawer ── */}
+      {selectedId && <GymDrawer gymId={selectedId} onClose={() => setSelectedId(null)} />}
     </div>
   );
 }
+
+function ColHead({ label, width }) {
+  return (
+    <div style={{ width, flexShrink: 0, fontSize: 10, fontWeight: 700, color: '#52525B', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+      {label}
+    </div>
+  );
+}
+
+function SpaceRow({ space, onClick, COL }) {
+  const [hov, setHov] = useState(false);
+
+  const rating = space.rating ?? null;
+  const stage  = space.enrichment?.stage ?? 0;
+
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        display: 'flex', alignItems: 'center', padding: '10px 14px',
+        background: hov ? '#0D0D0D' : 'transparent',
+        borderBottom: '1px solid #111',
+        cursor: 'pointer', transition: 'background 0.1s',
+      }}
+    >
+      {/* Name */}
+      <div style={{ width: COL.name, paddingRight: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#FAFAFA', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {space.name || '—'}
+        </div>
+        {space.primaryCategorySlug && (
+          <div style={{ fontSize: 10, color: '#52525B', marginTop: 1 }}>{space.primaryCategorySlug.replace(/-/g, ' ')}</div>
+        )}
+      </div>
+
+      {/* Quality */}
+      <div style={{ width: COL.quality }}>
+        <QualityDot score={space.qualityScore} />
+      </div>
+
+      {/* Rating */}
+      <div style={{ width: COL.rating, display: 'flex', alignItems: 'center', gap: 4 }}>
+        {rating != null ? (
+          <>
+            <Star size={11} style={{ color: '#F59E0B', fill: '#F59E0B', flexShrink: 0 }} />
+            <span style={{ fontSize: 12, fontFamily: 'var(--mono)', color: '#E4E4E7' }}>{rating.toFixed(1)}</span>
+          </>
+        ) : <span style={{ fontSize: 12, color: '#3F3F46' }}>—</span>}
+      </div>
+
+      {/* Reviews */}
+      <div style={{ width: COL.reviews }}>
+        <span style={{ fontSize: 12, fontFamily: 'var(--mono)', color: '#71717A' }}>
+          {space.totalReviews ? space.totalReviews.toLocaleString() : '—'}
+        </span>
+      </div>
+
+      {/* City */}
+      <div style={{ width: COL.city, paddingRight: 8 }}>
+        {space.city || space.areaName ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#71717A', overflow: 'hidden' }}>
+            <MapPin size={10} style={{ flexShrink: 0 }} />
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {space.city || space.areaName}
+            </span>
+          </div>
+        ) : <span style={{ fontSize: 12, color: '#3F3F46' }}>—</span>}
+      </div>
+
+      {/* Category */}
+      <div style={{ width: COL.category, paddingRight: 8 }}>
+        <span style={{ fontSize: 11, color: '#71717A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
+          {space.primaryCategorySlug?.replace(/-/g, ' ') || space.category || '—'}
+        </span>
+      </div>
+
+      {/* Enrichment stage */}
+      <div style={{ width: COL.stage }}>
+        <StageBar stage={stage} />
+      </div>
+
+      {/* Sources */}
+      <div style={{ width: COL.sources }}>
+        <SourceTags sources={space.sources || []} />
+      </div>
+    </div>
+  );
+}
+
+const selectStyle = {
+  width: '100%', padding: '7px 10px', borderRadius: 7, fontSize: 12,
+  border: '1px solid #222', background: '#111', color: '#A1A1AA', cursor: 'pointer',
+};

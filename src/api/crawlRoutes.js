@@ -4,9 +4,11 @@ const { body, param, query, validationResult } = require('express-validator');
 const { v4: uuidv4 } = require('uuid');
 const router   = express.Router();
 
-const { 
-  addCityJob, addGymNameJob, getQueueStats, getMediaQueueStats, getQueueJobStatus, 
-  clearCrawlQueue, requestCancelJob, removeBullJob, promoteJobToFront,
+const {
+  addCityJob, addGymNameJob, addSpaceNameJob, addSpaceUrlJob,
+  getQueueStats, getMediaQueueStats, getQueueJobStatus,
+  clearCrawlQueue, pauseCrawlQueues, resumeCrawlQueues, getCrawlQueuePausedState,
+  requestCancelJob, removeBullJob, promoteJobToFront,
   removeJobAndBatches
 } = require('../queue/queues');
 const { FITNESS_CATEGORIES } = require('../scraper/googleMapsScraper');
@@ -435,6 +437,30 @@ router.post('/queue/clear', async (req, res) => {
   } catch (e) { err(res, e.message); }
 });
 
+// POST /api/crawl/queue/pause — pause both crawl queues (workers stop picking new jobs)
+router.post('/queue/pause', async (req, res) => {
+  try {
+    await pauseCrawlQueues();
+    ok(res, { message: 'Crawl queues paused. Workers will finish current jobs but not start new ones.' });
+  } catch (e) { err(res, e.message); }
+});
+
+// POST /api/crawl/queue/resume — resume paused crawl queues
+router.post('/queue/resume', async (req, res) => {
+  try {
+    await resumeCrawlQueues();
+    ok(res, { message: 'Crawl queues resumed.' });
+  } catch (e) { err(res, e.message); }
+});
+
+// GET /api/crawl/queue/paused — returns whether queues are paused
+router.get('/queue/paused', async (req, res) => {
+  try {
+    const state = await getCrawlQueuePausedState();
+    ok(res, state);
+  } catch (e) { err(res, e.message); }
+});
+
 /**
  * @swagger
  * /api/crawl/retry/failed:
@@ -537,5 +563,83 @@ router.delete('/jobs/:jobId', async (req, res) => {
     ok(res, { message: 'Job deleted' });
   } catch (e) { err(res, e.message); }
 });
+
+// ── Phase 3: Smart entry points ───────────────────────────────────────────────
+
+// POST /api/crawl/by-name
+// Scrape a specific fitness space by name, fanning out to all sources.
+// Body: { name, location?, categories?, deepCrossRef? }
+router.post('/by-name',
+  body('name').notEmpty().trim().isLength({ min: 2, max: 200 }),
+  body('location').optional().trim(),
+  body('categories').optional().isArray(),
+  body('deepCrossRef').optional().isBoolean(),
+  async (req, res) => {
+    if (validate(req, res)) return;
+    const { name, location = null, deepCrossRef = true } = req.body;
+    const categories = Array.isArray(req.body.categories) ? req.body.categories : [];
+    try {
+      const jobId = uuidv4();
+      await CrawlJob.create({
+        jobId,
+        type: 'space_name',
+        input: { name, location, categories, deepCrossRef },
+        status: 'queued',
+      });
+      await addSpaceNameJob(jobId, name, location, categories, deepCrossRef);
+      bus.publish('job:queued', { jobId, type: 'space_name', name, location });
+      ok(res, { message: `Multi-source name search queued for "${name}"`, jobId, trackAt: `/api/crawl/status/${jobId}` }, 202);
+    } catch (e) { logger.error(e.message); err(res, e.message); }
+  }
+);
+
+// POST /api/crawl/by-url
+// Scrape a fitness space from a direct URL (Google Maps, JustDial, Yelp, website, etc.)
+// Body: { url, deepCrossRef? }
+router.post('/by-url',
+  body('url').notEmpty().isURL({ require_protocol: true }),
+  body('deepCrossRef').optional().isBoolean(),
+  async (req, res) => {
+    if (validate(req, res)) return;
+    const { url, deepCrossRef = true } = req.body;
+    try {
+      const jobId = uuidv4();
+      await CrawlJob.create({
+        jobId,
+        type: 'space_url',
+        input: { url, deepCrossRef },
+        status: 'queued',
+      });
+      await addSpaceUrlJob(jobId, url, deepCrossRef);
+      bus.publish('job:queued', { jobId, type: 'space_url', url });
+      ok(res, { message: `URL scrape queued for ${url.slice(0, 80)}`, jobId, trackAt: `/api/crawl/status/${jobId}` }, 202);
+    } catch (e) { logger.error(e.message); err(res, e.message); }
+  }
+);
+
+// POST /api/crawl/by-area
+// Enhanced area crawl — fans out to all sources for a given area/city.
+// Body: { area, categories? }
+router.post('/by-area',
+  body('area').notEmpty().trim().isLength({ min: 2, max: 200 }),
+  body('categories').optional().isArray(),
+  async (req, res) => {
+    if (validate(req, res)) return;
+    const { area } = req.body;
+    const categories = Array.isArray(req.body.categories) ? req.body.categories : FITNESS_CATEGORIES;
+    try {
+      const jobId = uuidv4();
+      await CrawlJob.create({
+        jobId,
+        type: 'city',
+        input: { cityName: area, categories, multiSource: true },
+        status: 'queued',
+      });
+      await addCityJob(jobId, area, categories);
+      bus.publish('job:queued', { jobId, type: 'city', cityName: area, multiSource: true });
+      ok(res, { message: `Multi-source area crawl queued for "${area}"`, jobId, trackAt: `/api/crawl/status/${jobId}` }, 202);
+    } catch (e) { logger.error(e.message); err(res, e.message); }
+  }
+);
 
 module.exports = router;

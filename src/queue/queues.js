@@ -153,6 +153,39 @@ async function getMediaQueueStats() {
   return { waiting, active, completed, failed };
 }
 
+// Phase 3: scrape a fitness space by name (fan-out to all sources)
+async function addSpaceNameJob(jobId, name, location, categories, deepCrossRef) {
+  const job = await crawlQueue.add(
+    'space-name-crawl',
+    { type: 'space_name', jobId, input: { name, location, categories, deepCrossRef } },
+    { jobId, priority: 1 }
+  );
+  logger.info(`📥 Queued space-name: "${name}" (BullMQ #${job.id})`);
+  return job;
+}
+
+// Phase 3: scrape a fitness space from a direct URL (with optional cross-ref)
+async function addSpaceUrlJob(jobId, url, deepCrossRef) {
+  const job = await crawlQueue.add(
+    'space-url-crawl',
+    { type: 'space_url', jobId, input: { url, deepCrossRef } },
+    { jobId, priority: 1 }
+  );
+  logger.info(`📥 Queued space-url: ${url.slice(0, 80)} (BullMQ #${job.id})`);
+  return job;
+}
+
+// Phase 4: enqueue an enrichment graph stage advance for one space
+async function addEnrichmentStageJob(spaceOpgId, targetStage) {
+  const jobId = `enrich-stage:${spaceOpgId}:s${targetStage}`;
+  const job = await enrichmentQueue.add(
+    'enrichment-stage',
+    { type: 'enrichment_stage', spaceOpgId, targetStage },
+    { jobId, priority: 3, removeOnComplete: true }
+  );
+  return job;
+}
+
 // Phase 9: Enqueue a batch of URLs as a standalone scrape job.
 // Multiple batches from the same city compete for any available worker replica.
 async function addBatchScrapeJob(parentJobId, cityName, urls, batchIndex, mode) {
@@ -188,6 +221,27 @@ async function clearCrawlQueue() {
   await crawlQueue.obliterate({ force: true });
   await chainCrawlQueue.pause();
   await chainCrawlQueue.obliterate({ force: true });
+  // Always resume so new jobs aren't stuck in the paused list
+  await crawlQueue.resume();
+  await chainCrawlQueue.resume();
+}
+
+async function pauseCrawlQueues() {
+  await crawlQueue.pause();
+  await chainCrawlQueue.pause();
+}
+
+async function resumeCrawlQueues() {
+  await crawlQueue.resume();
+  await chainCrawlQueue.resume();
+}
+
+async function getCrawlQueuePausedState() {
+  const [crawlPaused, chainPaused] = await Promise.all([
+    crawlQueue.isPaused(),
+    chainCrawlQueue.isPaused(),
+  ]);
+  return { crawlPaused, chainPaused };
 }
 
 // ── Cancellation system (Redis-backed for fast polling) ──────────────────────
@@ -293,9 +347,12 @@ module.exports = {
   enrichmentQueue,
   addCityJob,
   addGymNameJob,
+  addSpaceNameJob,
+  addSpaceUrlJob,
   addChainJob,
   addMediaJob,
   addEnrichmentJob,
+  addEnrichmentStageJob,
   addBatchScrapeJob,
   getQueueStats,
   getChainQueueStats,
@@ -304,6 +361,9 @@ module.exports = {
   getQueueJobStatus,
   getBullJobStatus: getQueueJobStatus,
   clearCrawlQueue,
+  pauseCrawlQueues,
+  resumeCrawlQueues,
+  getCrawlQueuePausedState,
   requestCancelJob,
   isJobCancelled,
   clearCancelFlag,

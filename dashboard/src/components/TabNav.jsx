@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Search, Link2, ClipboardList, Settings, Globe2, Zap, HeartPulse, Gamepad2, Image as ImageIcon } from 'lucide-react';
+import { LayoutDashboard, Search, Link2, ClipboardList, Settings, Globe2, Zap, HeartPulse, Gamepad2, Image as ImageIcon, Target } from 'lucide-react';
 
 // Feature flag: set to true to show Simulations tab
 const FEATURE_GAME = false;
 
 const tabs = [
   { to: '/overview',     icon: LayoutDashboard, label: 'Overview' },
+  { to: '/scrape',       icon: Target,          label: 'Scrape' },
   { to: '/explorer',     icon: Search,          label: 'Space Explorer' },
   { to: '/data-health',  icon: HeartPulse,      label: 'Data Health' },
   { to: '/enrichment',   icon: Zap,             label: 'Enrichment' },

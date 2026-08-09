@@ -28,19 +28,20 @@ function calculateQualityScore(gymData) {
   }
 
   // 3. Completeness (Max 20 points, 12 checks)
+  // Handles both raw crawl format (lat/lng/photos/category) and Space document format.
   const checks = [
     gymData.name,
-    gymData.lat,
-    gymData.lng,
+    gymData.lat != null || gymData.location?.coordinates?.length >= 2,
     gymData.address,
     gymData.contact?.phone,
     gymData.contact?.website,
-    gymData.rating,
-    gymData.totalReviews,
-    gymData.openingHours?.length > 0,
-    (gymData.photos?.length || gymData.totalPhotos > 0),
+    (gymData.rating || 0) > 0,
+    (gymData.totalReviews || 0) > 0,
+    (gymData.openingHours?.length || 0) > 0,
+    (gymData.rawPhotoUrls?.length || gymData.photos?.length || gymData.totalPhotos || 0) > 0 || !!gymData.coverUrl,
     gymData.description,
-    gymData.category || gymData.categoryId
+    gymData.primaryCategorySlug || gymData.category || gymData.categoryId || (gymData.categorySlugs?.length || 0) > 0,
+    (gymData.amenitySlugs?.length || gymData.amenities?.length || 0) > 0,
   ];
   const filled = checks.filter(Boolean).length;
   breakdown.completeness = Math.round((filled / checks.length) * 20);

@@ -79,17 +79,17 @@ app.use('/api/gyms', (req, res) => {
 });
 
 // ── Static files + Dashboard ──────────────────────────────────────────────────
-
-
-// Serve Vite-built dashboard SPA
+// Served from root to match vite base:'/'
 const dashboardPath = path.join(__dirname, '..', 'dashboard', 'dist');
-app.use('/dashboard', express.static(dashboardPath, { maxAge: '7d' }));
-app.get('/dashboard/*', (_, res) => res.sendFile(path.join(dashboardPath, 'index.html')));
+app.use(express.static(dashboardPath, { maxAge: '7d' }));
 
 // ── Error handlers ────────────────────────────────────────────────────────────
-app.use((req, res) =>
+// API 404 must be before SPA catch-all so unmatched /api/* returns JSON, not HTML
+app.use('/api', (req, res) =>
   res.status(404).json({ success: false, error: `Route not found: ${req.method} ${req.path}` })
 );
+// SPA fallback — HashRouter only ever requests '/' so this never intercepts API calls
+app.get('*', (_, res) => res.sendFile(path.join(dashboardPath, 'index.html')));
 app.use((err, req, res, _next) => {
   logger.error('Unhandled:', err);
   res.status(500).json({ success: false, error: 'Internal server error' });

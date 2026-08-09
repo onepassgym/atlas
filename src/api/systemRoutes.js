@@ -596,5 +596,33 @@ router.get('/media/photo-sync/status', async (req, res) => {
   }
 });
 
+// ── GET /api/system/sources/health — SourceRegistry health stats ──────────────
+router.get('/sources/health', (req, res) => {
+  try {
+    const registry = require('../scraper/SourceRegistry');
+    ok(res, { sources: registry.getHealth() });
+  } catch (e) {
+    err(res, e.message);
+  }
+});
+
+// ── POST /api/system/sources/toggle — enable/disable a source ────────────────
+router.post('/sources/toggle', express.json(),
+  body('sourceId').notEmpty().trim(),
+  body('enable').isBoolean(),
+  async (req, res) => {
+    if (validate(req, res)) return;
+    const { sourceId, enable } = req.body;
+    try {
+      const registry = require('../scraper/SourceRegistry');
+      if (enable) registry.enableSource(sourceId);
+      else        registry.disableSource(sourceId);
+      ok(res, { sourceId, enabled: enable });
+    } catch (e) {
+      err(res, e.message);
+    }
+  }
+);
+
 module.exports = router;
 

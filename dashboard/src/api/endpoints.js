@@ -14,15 +14,21 @@ export const crawlsApi = {
   jobs: (params) => api.get(`/api/crawl/jobs?${new URLSearchParams(params)}`),
   status: (jobId) => api.get(`/api/crawl/status/${jobId}`),
   queueStats: () => api.get(`/api/crawl/queue/stats`),
+  queuePaused: () => api.get(`/api/crawl/queue/paused`),
   coverage: () => api.get(`/api/crawl/coverage`),
   categories: () => api.get(`/api/crawl/categories`),
   queueCity: (data) => api.post("/api/crawl/city", data),
   queueBatch: (data) => api.post("/api/crawl/batch", data),
+  scrapeByName: (data) => api.post("/api/crawl/by-name", data),
+  scrapeByUrl: (data) => api.post("/api/crawl/by-url", data),
+  scrapeByArea: (data) => api.post("/api/crawl/by-area", data),
   cancel: (jobId) => api.post(`/api/crawl/cancel/${jobId}`),
   retryFailed: () => api.post("/api/crawl/retry/failed"),
   retryIncomplete: () => api.post("/api/crawl/retry/incomplete"),
   startNow: (jobId) => api.post(`/api/crawl/start-now/${jobId}`),
   deleteJob: (jobId) => api.delete(`/api/crawl/jobs/${jobId}`),
+  pauseQueue: () => api.post("/api/crawl/queue/pause"),
+  resumeQueue: () => api.post("/api/crawl/queue/resume"),
 };
 
 // Enrichment

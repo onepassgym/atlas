@@ -68,6 +68,31 @@ module.exports = {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
     max:      parseInt(process.env.RATE_LIMIT_MAX        || '100', 10),
   },
+  // ── AI / LLM provider config ──────────────────────────────────────────────
+  // Used by Stage 6 enrichment (amenity extraction, category classification,
+  // description generation, sentiment analysis, embedding generation).
+  ai: {
+    provider:       process.env.AI_PROVIDER || 'openai',   // openai | anthropic
+    openaiKey:      process.env.OPENAI_API_KEY || '',
+    anthropicKey:   process.env.ANTHROPIC_API_KEY || '',
+    // Model routing by task tier
+    modelFast:      process.env.AI_MODEL_FAST    || 'gpt-4o-mini',  // high-volume tasks
+    modelSmart:     process.env.AI_MODEL_SMART   || 'gpt-4o',       // complex extraction
+    modelProse:     process.env.AI_MODEL_PROSE   || 'gpt-4o-mini',  // description generation
+    // Safety caps per space per enrichment cycle
+    maxCostPerSpace: parseFloat(process.env.AI_MAX_COST_PER_SPACE || '0.05'),
+    cacheTtlSec:    parseInt(process.env.AI_CACHE_TTL_SEC || '86400', 10), // 24h Redis cache
+    enabled:        process.env.AI_ENABLED !== 'false',
+  },
+  // ── External data source API keys ─────────────────────────────────────────
+  sources: {
+    yelpApiKey:    process.env.YELP_API_KEY || '',
+    serpApiKey:    process.env.SERP_API_KEY || '',   // SerpAPI for Google Search
+    serperKey:     process.env.SERPER_API_KEY || '', // Serper.dev alternative
+    fbAccessToken: process.env.FB_ACCESS_TOKEN || '',
+    // Proxy list for Google Maps scraping (comma-separated ip:port:user:pass)
+    proxyList:     (process.env.PROXY_LIST || '').split(',').map(p => p.trim()).filter(Boolean),
+  },
   log: {
     level: process.env.LOG_LEVEL || (isProd ? 'warn' : 'info'),
     dir:   process.env.LOG_DIR   || './logs',

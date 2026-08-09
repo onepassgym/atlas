@@ -135,14 +135,34 @@ const SpaceSchema = new mongoose.Schema({
     sourceUrl:      String,
   },
 
-  // Enrichment (v5: embedded object)
+  // Multi-source tracking — which data sources contributed to this record
+  sources: {
+    type: [String],
+    default: [],
+    index: true,
+  }, // e.g. ['google_maps', 'justdial', 'osm', 'official_website', 'yelp']
+
+  // Enrichment (v5 + graph pipeline: stage 0–7)
   enrichment: {
     status:            { type: String, enum: ['success', 'failed', 'never', 'quarantined'], default: 'never' },
+    // Graph pipeline stage: 0=base crawl, 1=multi-source, 2=website deep,
+    // 3=social signals, 4=review mining, 5=media harvest, 6=AI intelligence, 7=quality lock
+    stage:             { type: Number, default: 0, min: 0, max: 7, index: true },
+    stageCompletedAt:  { type: [Date], default: [] }, // one entry per completed stage
+    stageErrors:       { type: [String], default: [] }, // error message per stage or null
+    nextEnrichAt:      { type: Date, default: null, index: true }, // scheduled re-enrichment
     lastSuccess:       Date,
     lastAttempt:       Date,
     consecutiveErrors: { type: Number, default: 0 },
     error:             String,
   },
+
+  // OPG marketplace flags (v5)
+  acceptsWalkIn: { type: Boolean, default: false },
+  hasClasses:    { type: Boolean, default: false },
+
+  // Typesense semantic index text (generated in Stage 6 by LLM)
+  embedText: String,
 
   // Pipeline state
   parsed: { type: Boolean, default: false },

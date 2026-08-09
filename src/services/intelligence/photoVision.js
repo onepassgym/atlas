@@ -74,4 +74,25 @@ async function analyzePhotoBuffer(buffer) {
   }
 }
 
-module.exports = { analyzePhotoBuffer };
+/**
+ * Downloads an image from a URL and runs analyzePhotoBuffer on it.
+ * Returns { score, tags } — the format expected by Stage 5 enrichment.
+ */
+async function analyzePhotoAppeal(url) {
+  try {
+    const axios = require('axios');
+    const resp = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: 12000,
+      headers: { 'User-Agent': 'Mozilla/5.0 Atlas-Media-Analyzer/1.0' },
+      maxContentLength: 15 * 1024 * 1024,
+    });
+    const buffer = Buffer.from(resp.data);
+    const { appealScore, tags } = await analyzePhotoBuffer(buffer);
+    return { score: appealScore, tags };
+  } catch (_) {
+    return { score: 50, tags: ['download_error'] };
+  }
+}
+
+module.exports = { analyzePhotoBuffer, analyzePhotoAppeal };

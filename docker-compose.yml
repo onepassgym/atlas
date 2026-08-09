@@ -1,5 +1,19 @@
+# ATLAS — Fitness Intelligence Scraper
+# ─────────────────────────────────────────────────────────────────
+# Container roles:
+#   api               REST API + SSE + dashboard SPA (port 8747)
+#   worker            BullMQ crawl jobs — Playwright/Chromium heavy
+#   enrichment-worker Graph enrichment loop (stages 1-7)
+#   media-worker      Photo download + Sharp resize
+#   mongo             MongoDB 7.0  (host port 27328)
+#   redis             Redis 7.2    (host port 6847)
+# Removed:
+#   dashboard         Redundant — API serves built SPA from root /
+# ─────────────────────────────────────────────────────────────────
+
 services:
 
+  # ── API server ──────────────────────────────────────────────────
   api:
     build:
       context: .
@@ -13,34 +27,28 @@ services:
       - MONGODB_URI=mongodb://mongo:27017/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - NODE_ENV=${NODE_ENV:-production}
+      - NODE_ENV=production
     volumes:
       - .:/app
       - /app/node_modules
-      - /app/dashboard/dist
       - ./media:/app/media
       - ./logs:/app/logs
     depends_on:
       mongo: { condition: service_healthy }
       redis: { condition: service_healthy }
-    networks: [ opg ]
-    # Detect NODE_ENV. If production, run standard node. If dev, run with --watch for hot-reloading.
-    command: >
-      sh -c "if [ \"$$NODE_ENV\" = \"production\" ]; then 
-               node src/server.js; 
-             else 
-               node --watch src/server.js; 
-             fi"
+    networks: [opg]
+    command: node src/server.js
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 512M
     healthcheck:
-      test: [ "CMD", "node", "-e", "require('http').get('http://localhost:8747/health', r => process.exit(r.statusCode === 200 ? 0 : 1))" ]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8747/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
       interval: 30s
       timeout: 10s
       retries: 3
 
+  # ── Crawl worker — Playwright-heavy, keep 1 replica per machine ─
   worker:
     build:
       context: .
@@ -51,7 +59,10 @@ services:
       - MONGODB_URI=mongodb://mongo:27017/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - NODE_ENV=${NODE_ENV:-production}
+      - NODE_ENV=production
+      - SCRAPER_CONCURRENCY=1
+      - SCRAPER_PAGE_POOL=3
+      - SCRAPER_HEADLESS=true
     volumes:
       - .:/app
       - /app/node_modules
@@ -60,19 +71,15 @@ services:
     depends_on:
       mongo: { condition: service_healthy }
       redis: { condition: service_healthy }
-    networks: [ opg ]
-    command: >
-      sh -c "if [ \"$$NODE_ENV\" = \"production\" ]; then 
-               node src/queue/worker.js; 
-             else 
-               node --watch src/queue/worker.js; 
-             fi"
+    networks: [opg]
+    command: node src/queue/worker.js
     deploy:
       replicas: 1
       resources:
         limits:
-          memory: 2G
+          memory: 2G   # Chromium requires headroom; do not lower
 
+  # ── Enrichment worker — graph loop, low CPU except LLM stages ───
   enrichment-worker:
     build:
       context: .
@@ -83,9 +90,8 @@ services:
       - MONGODB_URI=mongodb://mongo:27017/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - NODE_ENV=${NODE_ENV:-production}
-      - ENRICHMENT_DELAY=3000
-      - ENRICHMENT_BATCH_SIZE=10
+      - NODE_ENV=production
+      - ENRICHMENT_DELAY=2000
     volumes:
       - .:/app
       - /app/node_modules
@@ -94,18 +100,14 @@ services:
     depends_on:
       mongo: { condition: service_healthy }
       redis: { condition: service_healthy }
-    networks: [ opg ]
-    command: >
-      sh -c "if [ \"$$NODE_ENV\" = \"production\" ]; then 
-               node src/queue/enrichmentWorker.js; 
-             else 
-               node --watch src/queue/enrichmentWorker.js; 
-             fi"
+    networks: [opg]
+    command: node src/queue/enrichmentWorker.js
     deploy:
       resources:
         limits:
           memory: 1G
 
+  # ── Media worker — Sharp image processing, only when downloads on ─
   media-worker:
     build:
       context: .
@@ -116,23 +118,24 @@ services:
       - MONGODB_URI=mongodb://mongo:27017/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - NODE_ENV=${NODE_ENV:-production}
+      - NODE_ENV=production
+      - MEDIA_DOWNLOAD_ENABLED=true
       - MEDIA_WORKER_CONCURRENCY=8
     volumes:
       - .:/app
       - /app/node_modules
       - ./media:/app/media
-      - ./logs:/app/logs
     depends_on:
       mongo: { condition: service_healthy }
       redis: { condition: service_healthy }
-    networks: [ opg ]
+    networks: [opg]
     command: node src/queue/mediaWorker.js
     deploy:
       resources:
         limits:
           memory: 512M
 
+  # ── MongoDB ─────────────────────────────────────────────────────
   mongo:
     image: mongo:7.0
     container_name: atlas-mongo
@@ -147,12 +150,14 @@ services:
         limits:
           memory: 2G
     healthcheck:
-      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks: [ opg ]
+    networks: [opg]
 
+  # ── Redis ────────────────────────────────────────────────────────
+  # noeviction is required by BullMQ — allkeys-lru would silently drop queue jobs
   redis:
     image: redis:7.2-alpine
     container_name: atlas-redis
@@ -161,32 +166,17 @@ services:
       - "6847:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --save 60 1 --loglevel warning --maxmemory 200mb --maxmemory-policy allkeys-lru
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 256mb --maxmemory-policy noeviction
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 300M
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
-    networks: [ opg ]
-
-  dashboard:
-    image: node:20-slim
-    container_name: atlas-dashboard
-    working_dir: /app
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./dashboard:/app
-      - /app/node_modules
-    environment:
-      - NODE_ENV=${NODE_ENV:-development}
-      - VITE_API_URL=http://api:8747
-    command: sh -c "if [ \"$$NODE_ENV\" = \"production\" ]; then echo 'Dashboard built-in API'; else npm install && npm run dev -- --host; fi"
-    networks: [ opg ]
+    networks: [opg]
 
 volumes:
   mongo_data:

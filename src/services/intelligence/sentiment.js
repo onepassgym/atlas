@@ -104,3 +104,44 @@ function analyzeGymSentiment(reviews = []) {
 }
 
 module.exports = { analyzeTextSentiment, analyzeGymSentiment };
+
+// ── LLM-powered sentiment (used in Stage 6) ───────────────────────────────────
+
+const llm = require('./llmClient');
+
+const SENTIMENT_SYSTEM = `You are a fitness sentiment analyst. Given gym review text, return a sentiment score and tags. Return ONLY a JSON object.`;
+
+/**
+ * LLM-based sentiment analysis — used in enrichment Stage 6.
+ * Falls back to keyword approach if LLM is unavailable.
+ */
+async function analyzeGymSentimentAI(reviewText) {
+  const user = `
+Review text:
+${reviewText.slice(0, 3000)}
+
+Return JSON:
+{
+  "score": <number from -1.0 to 1.0>,
+  "tags": {
+    "positive": ["word1", "word2", "word3"],
+    "negative": ["word1", "word2", "word3"]
+  }
+}`;
+
+  const { result, cost } = await llm.call({ system: SENTIMENT_SYSTEM, user, maxTokens: 200 });
+
+  if (!result || typeof result.score !== 'number') {
+    // Fallback to keyword approach
+    const fallback = analyzeGymSentiment([{ text: reviewText }]);
+    return { ...fallback, cost: 0 };
+  }
+
+  return {
+    score: Math.max(-1, Math.min(1, result.score)),
+    tags:  result.tags || { positive: [], negative: [] },
+    cost,
+  };
+}
+
+module.exports.analyzeGymSentimentAI = analyzeGymSentimentAI;

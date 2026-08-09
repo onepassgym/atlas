@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { api, getBaseUrl, getEnv, setEnv } from '../api/client';
+import { api, getBaseUrl } from '../api/client';
 
 const AppContext = createContext(null);
 
@@ -191,13 +191,7 @@ function resolveSseUrl() {
 }
 
 export function AppProvider({ children }) {
-  const [env, setEnvState] = useState(() => getEnv());
   const [connected, setConnected] = useState(false);
-  const [theme, setTheme] = useState(() => {
-    const saved = window.localStorage.getItem('atlas_theme');
-    return saved === 'light' || saved === 'dark' ? saved : 'dark';
-  });
-
   const [events, setEvents] = useState([]);
   const [logs, setLogs] = useState([]);
   const [toasts, setToasts] = useState([]);
@@ -205,16 +199,6 @@ export function AppProvider({ children }) {
   const [crawlActivity, setCrawlActivity] = useState(DEFAULT_CRAWL_ACTIVITY);
 
   const sourceRef = useRef(null);
-
-  const isProdHost = useMemo(() => {
-    const host = window.location.hostname.toLowerCase();
-    return !(host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local'));
-  }, []);
-
-  const switchEnv = useCallback((nextEnv) => {
-    setEnv(nextEnv);
-    setEnvState(nextEnv);
-  }, []);
 
   const clearLogs = useCallback(() => {
     setLogs([]);
@@ -236,15 +220,6 @@ export function AppProvider({ children }) {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, TOAST_TTL_MS);
   }, []);
-
-  const toggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem('atlas_theme', theme);
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
 
   useEffect(() => {
     let cancelled = false;
@@ -276,7 +251,7 @@ export function AppProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [env]);
+  }, []);
 
   useEffect(() => {
     const url = resolveSseUrl();
@@ -320,15 +295,10 @@ export function AppProvider({ children }) {
       sourceRef.current = null;
       setConnected(false);
     };
-  }, [env]);
+  }, []);
 
   const value = useMemo(() => ({
-    env,
-    switchEnv,
     connected,
-    isProdHost,
-    theme,
-    toggleTheme,
     events,
     logs,
     clearLogs,
@@ -338,12 +308,7 @@ export function AppProvider({ children }) {
     setChainsCache,
     crawlActivity,
   }), [
-    env,
-    switchEnv,
     connected,
-    isProdHost,
-    theme,
-    toggleTheme,
     events,
     logs,
     clearLogs,

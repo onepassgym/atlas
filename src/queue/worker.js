@@ -6,6 +6,8 @@ const { connectDB }   = require('../db/connection');
 const { BrowserManager, searchGymsInCity, scrapeGymDetail, scrapeEnrichmentDetail, FITNESS_CATEGORIES, isBlocked } = require('../scraper/googleMapsScraper');
 const { processSpace }  = require('../scraper/spaceProcessor');
 const { processEnrichmentJob } = require('../scraper/enrichmentProcessor');
+const registry = require('../scraper/SourceRegistry');
+const resolver = require('../scraper/SpaceResolver');
 const CrawlJob        = require('../db/crawlJobModel');
 const Space           = require('../db/spaceModel');
 const SystemState     = require('../db/systemStateModel');
@@ -688,6 +690,156 @@ async function processEnrichmentJobHandler(job) {
   }
 }
 
+// ── Phase 3: Space-name crawl (multi-source fan-out) ─────────────────────────
+
+async function processSpaceNameJob(job) {
+  const { jobId, input } = job.data;
+  const { name, location, categories = [], deepCrossRef = true } = input;
+  const startTime = Date.now();
+
+  await connectDB();
+  await updateJob(jobId, { status: 'running', startedAt: new Date(), bullJobId: String(job.id) });
+  bus.publish('job:started', { jobId, type: 'space_name', name, location });
+  logger.info(`\n🔍 [SPACE-NAME] "${name}" location="${location || ''}" deepCrossRef=${deepCrossRef}`);
+
+  try {
+    await job.updateProgress(10);
+
+    // Fan-out search across all active sources
+    const rawResults = await registry.searchByName(name, location, categories);
+    logger.info(`  Found ${rawResults.length} raw results from ${[...new Set(rawResults.map(r => r.sourceId))].join(', ')}`);
+
+    await job.updateProgress(50);
+
+    let merged = null;
+    if (rawResults.length === 0) {
+      await updateJob(jobId, { status: 'completed', completedAt: new Date(), durationMs: Date.now() - startTime, 'progress.total': 0 });
+      return { jobId, found: 0, status: 'completed' };
+    }
+
+    // Deep cross-reference: if we found a result with a website URL, scrape it too
+    if (deepCrossRef) {
+      const withWebsite = rawResults.find(r => r.contact?.website);
+      if (withWebsite?.contact?.website) {
+        try {
+          const webResult = await registry.scrapeByUrl(withWebsite.contact.website);
+          if (webResult) rawResults.push(webResult);
+        } catch (_) {}
+      }
+    }
+
+    // Merge multi-source results into canonical document
+    merged = resolver.merge(rawResults);
+
+    await job.updateProgress(80);
+
+    // Upsert to DB
+    const res = await processSpace(merged, merged.city || location || name, jobId, false);
+    await job.updateProgress(100);
+
+    const durationMs = Date.now() - startTime;
+    await updateJob(jobId, {
+      status: 'completed',
+      completedAt: new Date(),
+      durationMs,
+      'progress.total': 1,
+      ...(res.action === 'created' ? { $inc: { 'progress.newSpaces': 1 }, $push: { spaceIds: res.spaceId } } : {}),
+      ...(res.action === 'updated' ? { $inc: { 'progress.updatedSpaces': 1 }, $push: { spaceIds: res.spaceId } } : {}),
+    });
+
+    if (res.action === 'created') bus.publish('space:created', { name, spaceId: String(res.spaceId), sources: merged.sources });
+    if (res.action === 'updated') bus.publish('space:updated', { name, spaceId: String(res.spaceId), sources: merged.sources });
+
+    logger.info(`  ✅ [SPACE-NAME] Done: action=${res.action} sources=[${(merged.sources || []).join(', ')}] (${(durationMs/1000).toFixed(1)}s)`);
+    return { jobId, action: res.action, spaceId: res.spaceId, spaceOpgId: res.spaceOpgId, sources: merged.sources, durationMs };
+
+  } catch (e) {
+    const durationMs = Date.now() - startTime;
+    await updateJob(jobId, { status: 'failed', completedAt: new Date(), durationMs });
+    bus.publish('job:failed', { jobId, name, error: e.message });
+    throw e;
+  }
+}
+
+// ── Phase 3: Space-URL crawl (source detection + optional cross-ref) ──────────
+
+async function processSpaceUrlJob(job) {
+  const { jobId, input } = job.data;
+  const { url, deepCrossRef = true } = input;
+  const startTime = Date.now();
+
+  await connectDB();
+  await updateJob(jobId, { status: 'running', startedAt: new Date(), bullJobId: String(job.id) });
+  bus.publish('job:started', { jobId, type: 'space_url', url });
+  logger.info(`\n🌐 [SPACE-URL] ${url.slice(0, 100)}`);
+
+  try {
+    await job.updateProgress(10);
+
+    // Step A: scrape from the detected source
+    const baseResult = await registry.scrapeByUrl(url);
+    if (!baseResult?.name) {
+      await updateJob(jobId, { status: 'completed', completedAt: new Date(), durationMs: Date.now() - startTime, 'progress.total': 0 });
+      logger.warn(`  [SPACE-URL] Could not extract data from: ${url}`);
+      return { jobId, found: 0, status: 'completed' };
+    }
+
+    await job.updateProgress(40);
+    logger.info(`  Base: "${baseResult.name}" from ${baseResult.sourceId}`);
+
+    const allResults = [baseResult];
+
+    // Step B: deep cross-reference across all other sources
+    if (deepCrossRef && baseResult.name) {
+      const location = baseResult.city || baseResult.areaName;
+      const crossResults = await registry.searchByName(baseResult.name, location);
+      const otherResults = crossResults.filter(r => r.sourceId !== baseResult.sourceId);
+      allResults.push(...otherResults);
+      logger.info(`  Cross-ref found ${otherResults.length} additional results from [${[...new Set(otherResults.map(r => r.sourceId))].join(', ')}]`);
+    }
+
+    // Also scrape official website if URL is known and not already the primary source
+    if (baseResult.contact?.website && baseResult.sourceId !== 'official_website') {
+      try {
+        const webResult = await registry.scrapeByUrl(baseResult.contact.website);
+        if (webResult) allResults.push(webResult);
+      } catch (_) {}
+    }
+
+    await job.updateProgress(75);
+
+    // Merge all sources
+    const merged = resolver.merge(allResults);
+
+    // Upsert to DB
+    const res = await processSpace(merged, merged.city || '', jobId, false);
+
+    await job.updateProgress(100);
+    const durationMs = Date.now() - startTime;
+
+    await updateJob(jobId, {
+      status: 'completed',
+      completedAt: new Date(),
+      durationMs,
+      'progress.total': 1,
+      ...(res.action === 'created' ? { $inc: { 'progress.newSpaces': 1 }, $push: { spaceIds: res.spaceId } } : {}),
+      ...(res.action === 'updated' ? { $inc: { 'progress.updatedSpaces': 1 }, $push: { spaceIds: res.spaceId } } : {}),
+    });
+
+    if (res.action === 'created') bus.publish('space:created', { name: baseResult.name, spaceId: String(res.spaceId), sources: merged.sources });
+    if (res.action === 'updated') bus.publish('space:updated', { name: baseResult.name, spaceId: String(res.spaceId), sources: merged.sources });
+
+    logger.info(`  ✅ [SPACE-URL] Done: action=${res.action} sources=[${(merged.sources || []).join(', ')}] (${(durationMs/1000).toFixed(1)}s)`);
+    return { jobId, action: res.action, spaceId: res.spaceId, spaceOpgId: res.spaceOpgId, sources: merged.sources, durationMs };
+
+  } catch (e) {
+    const durationMs = Date.now() - startTime;
+    await updateJob(jobId, { status: 'failed', completedAt: new Date(), durationMs });
+    bus.publish('job:failed', { jobId, url, error: e.message });
+    throw e;
+  }
+}
+
 // ── Worker startup ───────────────────────────────────────────────────────────
 
 async function start() {
@@ -696,9 +848,11 @@ async function start() {
   // ── Crawl Worker (city-crawl, batch-scrape, gym-name-crawl) ───────────────
   const worker = new Worker('atlas-crawl', async (job) => {
     logger.info(`⚙️  Processing job: ${job.name} [${job.id}]`);
-    if (job.name === 'city-crawl')     return processCityJob(job);
-    if (job.name === 'batch-scrape')   return processBatchJob(job);
-    if (job.name === 'gym-name-crawl') return processGymNameJob(job);
+    if (job.name === 'city-crawl')       return processCityJob(job);
+    if (job.name === 'batch-scrape')     return processBatchJob(job);
+    if (job.name === 'gym-name-crawl')   return processGymNameJob(job);
+    if (job.name === 'space-name-crawl') return processSpaceNameJob(job);
+    if (job.name === 'space-url-crawl')  return processSpaceUrlJob(job);
     throw new Error(`Unknown job name: ${job.name}`);
   }, {
     connection,

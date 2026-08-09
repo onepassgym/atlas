@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, Sector } from 'recharts';
-import { Building2, MessageCircle, Camera, Zap, Target, Link2, Activity, TrendingUp, XCircle, RefreshCw } from 'lucide-react';
-import StatCard from '../components/StatCard';
+import { Building2, Camera, Zap, Target, Link2, Activity, TrendingUp, XCircle, RefreshCw } from 'lucide-react';
 import CrawlActivity from '../components/CrawlActivity';
 import EnrichmentPanel from '../components/EnrichmentPanel';
 import HealthRecommendations from '../components/HealthRecommendations';
@@ -12,7 +11,6 @@ import GymDrawer from '../components/GymDrawer';
 import SystemPanel from '../components/SystemPanel';
 import JobsPanel from '../components/JobsPanel';
 import ChainsPanel from '../components/ChainsPanel';
-import NetworkTelemetry from '../components/NetworkTelemetry';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
 
@@ -76,21 +74,24 @@ export default function Overview() {
   const [isGlobalPaused, setIsGlobalPaused] = useState(false);
   const [crawlPace, setCrawlPace] = useState('normal');
   const [isMediaPaused, setIsMediaPaused] = useState(false);
+  const [isCrawlQueuePaused, setIsCrawlQueuePaused] = useState(false);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [gymRes, queueRes, chainRes, latestRes, jobsRes, stateRes] = await Promise.all([
-        api.get('/api/gyms/stats').catch(() => null),
+      const [gymRes, queueRes, chainRes, latestRes, jobsRes, stateRes, queuePausedRes] = await Promise.all([
+        api.get('/api/spaces/stats').catch(() => null),
         api.get('/api/crawl/queue/stats').catch(() => null),
         api.get('/api/chains').catch(() => ({ chains: [] })),
-        api.get('/api/gyms?limit=6&sortBy=createdAt').catch(() => null),
+        api.get('/api/spaces?limit=6&sortBy=createdAt').catch(() => null),
         api.get('/api/crawl/jobs?limit=6').catch(() => null),
-        api.get('/api/system/state').catch(() => ({ state: {} }))
+        api.get('/api/system/state').catch(() => ({ state: {} })),
+        api.get('/api/crawl/queue/paused').catch(() => null),
       ]);
 
       if (stateRes?.state?.globalPause !== undefined) setIsGlobalPaused(stateRes.state.globalPause);
       if (stateRes?.state?.crawlPace !== undefined) setCrawlPace(stateRes.state.crawlPace);
       if (stateRes?.state?.mediaQueuePaused !== undefined) setIsMediaPaused(stateRes.state.mediaQueuePaused);
+      if (queuePausedRes?.success) setIsCrawlQueuePaused(queuePausedRes.crawlPaused || false);
       
       if (gymRes?.success) setStats(gymRes.stats);
       if (queueRes?.success) {
@@ -102,7 +103,7 @@ export default function Overview() {
         const totalLocs = chainRes.chains.reduce((s, c) => s + (c.totalLocations || 0), 0);
         setChainStats({ count: chainRes.chains.length, totalLocs });
       }
-      if (latestRes?.success) setLatestGyms(latestRes.gyms || []);
+      if (latestRes?.success) setLatestGyms(latestRes.spaces || []);
       if (jobsRes?.success) setJobs(jobsRes.jobs || []);
     } catch {} finally {
       setLoading(false);
@@ -133,8 +134,8 @@ export default function Overview() {
         api.get('/api/crawl/jobs?limit=6').then(r => r?.success && setJobs(r.jobs || [])).catch(() => {});
       }
       if (refetchGyms) {
-        api.get('/api/gyms/stats').then(r => r?.success && setStats(r.stats)).catch(() => {});
-        api.get('/api/gyms?limit=6&sortBy=createdAt').then(r => r?.success && setLatestGyms(r.gyms || [])).catch(() => {});
+        api.get('/api/spaces/stats').then(r => r?.success && setStats(r.stats)).catch(() => {});
+        api.get('/api/spaces?limit=6&sortBy=createdAt').then(r => r?.success && setLatestGyms(r.spaces || [])).catch(() => {});
       }
     }, 2000);
     
@@ -172,6 +173,14 @@ export default function Overview() {
         if (toast) toast(res?.message || 'Media downloading paused', 'warning');
       }
     } catch { if (toast) toast('Failed to update media state', 'error'); }
+  };
+
+  const resumeCrawlQueue = async () => {
+    try {
+      const res = await api.post('/api/crawl/queue/resume');
+      setIsCrawlQueuePaused(false);
+      if (toast) toast(res?.message || 'Crawl queue resumed', 'success');
+    } catch { if (toast) toast('Failed to resume crawl queue', 'error'); }
   };
 
   const cityData = (stats?.topCities || []).map(c => ({ name: c._id || 'Unknown', count: c.count }));
@@ -283,6 +292,32 @@ export default function Overview() {
         </div>
       </div>
 
+      {/* ── Crawl Queue Paused Warning ────── */}
+      {isCrawlQueuePaused && (
+        <div style={{
+          background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)',
+          borderRadius: 8, padding: '12px 20px', marginBottom: 'var(--spacing-lg)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <XCircle size={18} style={{ color: 'var(--error, #ef4444)', flexShrink: 0 }} />
+            <span style={{ fontWeight: 700, color: 'var(--error, #ef4444)' }}>Crawl Queue Paused</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>— jobs are queued but workers will not pick them up until resumed.</span>
+          </div>
+          <button
+            onClick={resumeCrawlQueue}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '7px 18px',
+              borderRadius: 8, fontWeight: 700, cursor: 'pointer', border: 'none',
+              background: 'var(--success, #10b981)', color: 'white', whiteSpace: 'nowrap',
+              boxShadow: '0 0 10px rgba(16,185,129,0.35)',
+            }}
+          >
+            <RefreshCw size={14} /> Resume Queue
+          </button>
+        </div>
+      )}
+
       {/* ── Health Recommendations (Phase 4) ────── */}
       <div style={{
         background: 'var(--bg-secondary)',
@@ -296,29 +331,116 @@ export default function Overview() {
 
       {/* ── System Activity (Live Crawler & Enrichment) ────── */}
       <div className="fluid-grid-large">
-        {(crawlActivity.status !== 'idle' || crawlActivity.recentActions.length > 0) ? (
-          <CrawlActivity />
-        ) : (
-          <NetworkTelemetry stats={stats} queueStats={queueStats} />
-        )}
+        <CrawlActivity />
         <EnrichmentPanel />
       </div>
 
-      {/* ── Stat Cards ────── */}
-      <div className="grid">
-        <StatCard title="Total Gyms" value={stats?.total} label="venues in database" icon={<Building2 size={18} />} color="blue" />
-        <StatCard title="Total Photos" value={stats?.totalPhotos} label="venue images" icon={<Camera size={18} />} color="orange" />
-        <StatCard title="Crawl Queue" value={queueStats?.active ?? 0} label={`${queueStats?.waiting || 0} waiting`} icon={<Zap size={18} />} color="cyan" />
-        <StatCard title="Photo Queue" value={mediaQueueStats?.active ?? 0} label={`${mediaQueueStats?.waiting || 0} downloading`} icon={<Camera size={18} />} color="indigo" />
-        <StatCard title="Crawl Health" value={crawlActivity.throttle.toFixed(1)} label={throttleLabel} sublabel={crawlActivity.status} icon={<Activity size={18} />} color={throttleColor} />
-        <StatCard 
-          title="Today's Activity" 
-          value={(stats?.todayStats?.created || 0) + (stats?.todayStats?.updated || 0)} 
-          label={`${stats?.todayStats?.created || 0} New Venues`} 
-          sublabel={`${stats?.todayStats?.updated || 0} Updated`} 
-          icon={<TrendingUp size={18} />} 
-          color="green" 
-        />
+      {/* ── Intel Matrix ────── */}
+      <div style={{
+        marginBottom: 'var(--spacing-lg)',
+        background: 'linear-gradient(160deg, rgba(139,92,246,0.04) 0%, rgba(59,130,246,0.03) 60%, rgba(16,185,129,0.03) 100%)',
+        border: '1px solid var(--border)',
+        borderRadius: 16,
+        overflow: 'hidden',
+      }}>
+        {/* Matrix header */}
+        <div style={{ padding: '11px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(0,0,0,0.25)' }}>
+          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 3, color: 'var(--text-muted)', fontFamily: 'var(--mono)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Activity size={11} style={{ color: 'var(--accent)' }} /> INTEL MATRIX
+          </span>
+          <span style={{ fontSize: 10, color: 'var(--success)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--mono)', fontWeight: 700, background: 'rgba(16,185,129,0.08)', padding: '3px 10px', borderRadius: 20, border: '1px solid rgba(16,185,129,0.2)' }}>
+            <span style={{ width: 5, height: 5, background: 'var(--success)', borderRadius: '50%', animation: 'pulse-dot 2s infinite', display: 'inline-block', flexShrink: 0 }} /> LIVE
+          </span>
+        </div>
+
+        {/* Primary metrics */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', borderBottom: '1px solid var(--border)' }}>
+          {[
+            {
+              label: 'VENUES',
+              value: (stats?.total || 0).toLocaleString(),
+              sub: `${(stats?.totalPhotos || 0).toLocaleString()} photos linked`,
+              color: '#3b82f6',
+              Icon: Building2,
+            },
+            {
+              label: 'PHOTOS',
+              value: (stats?.totalPhotos || 0).toLocaleString(),
+              sub: 'media assets stored',
+              color: '#f97316',
+              Icon: Camera,
+            },
+            {
+              label: 'TODAY',
+              value: ((stats?.todayStats?.created || 0) + (stats?.todayStats?.updated || 0)).toLocaleString(),
+              sub: `${stats?.todayStats?.created || 0} new · ${stats?.todayStats?.updated || 0} updated`,
+              color: '#10b981',
+              Icon: TrendingUp,
+            },
+          ].map((m, i) => (
+            <div key={i} style={{
+              padding: '28px 28px 24px',
+              borderRight: i < 2 ? '1px solid var(--border)' : 'none',
+              position: 'relative',
+              overflow: 'hidden',
+            }}>
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, transparent, ${m.color}55, transparent)` }} />
+              <div style={{ position: 'absolute', top: 16, right: 16, padding: 8, background: `${m.color}0f`, borderRadius: 10, border: `1px solid ${m.color}22` }}>
+                <m.Icon size={14} color={m.color} />
+              </div>
+              <div style={{ fontSize: 'clamp(28px, 3.5vw, 44px)', fontWeight: 900, fontFamily: 'var(--mono)', color: 'var(--text-primary)', letterSpacing: -2, lineHeight: 1, marginBottom: 8, textShadow: `0 0 48px ${m.color}30` }}>
+                {m.value}
+              </div>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 3, color: m.color, fontFamily: 'var(--mono)', textTransform: 'uppercase', marginBottom: 4 }}>{m.label}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{m.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Secondary metrics */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)' }}>
+          {[
+            {
+              label: 'CRAWL ACTIVE',
+              value: queueStats?.active ?? 0,
+              sub: `${queueStats?.waiting || 0} waiting`,
+              color: '#06b6d4',
+            },
+            {
+              label: 'PHOTO DL',
+              value: mediaQueueStats?.active ?? 0,
+              sub: `${mediaQueueStats?.waiting || 0} queued`,
+              color: '#8b5cf6',
+            },
+            {
+              label: 'CHAINS',
+              value: chainStats.count,
+              sub: `${chainStats.totalLocs.toLocaleString()} locations`,
+              color: '#f59e0b',
+            },
+            {
+              label: 'CITIES',
+              value: stats?.topCities?.length || 0,
+              sub: 'geographic coverage',
+              color: '#ec4899',
+            },
+            {
+              label: 'THROTTLE',
+              value: crawlActivity.throttle.toFixed(1) + '×',
+              sub: throttleLabel,
+              color: throttleColor === 'green' ? '#10b981' : throttleColor === 'yellow' ? '#f59e0b' : '#ef4444',
+            },
+          ].map((m, i) => (
+            <div key={i} style={{
+              padding: '16px 20px',
+              borderRight: i < 4 ? '1px solid var(--border)' : 'none',
+            }}>
+              <div style={{ fontSize: 'clamp(18px, 2vw, 26px)', fontWeight: 900, fontFamily: 'var(--mono)', color: m.color, letterSpacing: -1, lineHeight: 1, marginBottom: 5 }}>{m.value}</div>
+              <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 2, color: 'var(--text-muted)', fontFamily: 'var(--mono)', textTransform: 'uppercase', marginBottom: 3 }}>{m.label}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{m.sub}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* ── Charts ────── */}
