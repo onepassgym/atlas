@@ -2,33 +2,44 @@
 const slugify     = require('slugify');
 const { upsertSpace } = require('../db/upsertSpace');
 const { addMediaJob } = require('../queue/queues');
+const { mapCategory: taxonomyMapCategory } = require('../services/validationService');
 const logger      = require('../utils/logger');
 
-const CATEGORY_MAP = {
+// Fallback CATEGORY_MAP for keywords not yet in taxonomy.json
+const CATEGORY_MAP_FALLBACK = {
   yoga:        'yoga-studio',
-  crossfit:    'crossfit',
-  pilates:     'pilates',
+  crossfit:    'crossfit-box',
+  pilates:     'pilates-studio',
   martial:     'martial-arts',
-  boxing:      'martial-arts',
+  boxing:      'boxing-gym',
   karate:      'martial-arts',
   dance:       'dance-studio',
-  swim:        'swimming-club',
+  swim:        'swimming-pool',
   'health club':'health-club',
   fitness:     'fitness-center',
   gym:         'gym',
   cycle:       'cycling-studio',
   spinning:    'cycling-studio',
-  zumba:       'fitness-center',
-  functional:  'fitness-center',
-  strength:    'gym',
+  zumba:       'zumba',
+  functional:  'functional-training',
+  strength:    'powerlifting',
+  mma:         'mma-gym',
+  badminton:   'badminton-court',
+  tennis:      'tennis-academy',
+  cricket:     'cricket-academy',
 };
 
 function mapCategory(raw = '') {
+  // 1. Try taxonomy.json lookup first (maintained, extensible)
+  const mapped = taxonomyMapCategory(raw);
+  if (mapped?.slug) return mapped.slug;
+
+  // 2. Fall back to keyword matching
   const l = raw.toLowerCase();
-  for (const [key, val] of Object.entries(CATEGORY_MAP)) {
+  for (const [key, val] of Object.entries(CATEGORY_MAP_FALLBACK)) {
     if (l.includes(key)) return val;
   }
-  return 'fitness-venue';
+  return 'fitness-center';
 }
 
 function calcCompleteness(d) {

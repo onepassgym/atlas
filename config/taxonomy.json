@@ -1,0 +1,202 @@
+{
+  "gym": {
+    "searchKeywords": ["gym", "fitness center", "weight training gym"],
+    "osmTags": ["leisure=fitness_centre", "amenity=gym", "sport=fitness"],
+    "appSlug": "gym"
+  },
+  "fitness-center": {
+    "searchKeywords": ["fitness center", "fitness studio", "workout center"],
+    "osmTags": ["leisure=fitness_centre", "sport=fitness"],
+    "appSlug": "fitness-center"
+  },
+  "yoga-studio": {
+    "searchKeywords": ["yoga studio", "yoga class", "yoga center"],
+    "osmTags": ["leisure=yoga", "sport=yoga"],
+    "appSlug": "yoga-studio"
+  },
+  "crossfit-box": {
+    "searchKeywords": ["crossfit", "crossfit box", "crossfit gym"],
+    "osmTags": ["sport=crossfit", "leisure=fitness_centre"],
+    "appSlug": "crossfit-box"
+  },
+  "pilates-studio": {
+    "searchKeywords": ["pilates studio", "pilates class"],
+    "osmTags": ["sport=pilates", "leisure=fitness_centre"],
+    "appSlug": "pilates-studio"
+  },
+  "martial-arts": {
+    "searchKeywords": ["martial arts", "martial arts academy", "kung fu", "taekwondo"],
+    "osmTags": ["sport=martial_arts", "leisure=martial_arts"],
+    "appSlug": "martial-arts"
+  },
+  "boxing-gym": {
+    "searchKeywords": ["boxing gym", "boxing academy", "boxing training"],
+    "osmTags": ["sport=boxing", "leisure=fitness_centre"],
+    "appSlug": "boxing-gym"
+  },
+  "dance-studio": {
+    "searchKeywords": ["dance studio", "dance academy", "dance school"],
+    "osmTags": ["leisure=dance", "sport=dance"],
+    "appSlug": "dance-studio"
+  },
+  "swimming-pool": {
+    "searchKeywords": ["swimming pool", "swim center", "aquatic center"],
+    "osmTags": ["leisure=swimming_pool", "amenity=swimming_pool", "sport=swimming"],
+    "appSlug": "swimming-pool"
+  },
+  "personal-training": {
+    "searchKeywords": ["personal training studio", "personal trainer", "pt studio"],
+    "osmTags": ["leisure=fitness_centre", "sport=fitness"],
+    "appSlug": "personal-training"
+  },
+  "functional-training": {
+    "searchKeywords": ["functional training", "functional fitness", "functional gym"],
+    "osmTags": ["sport=fitness", "leisure=fitness_centre"],
+    "appSlug": "functional-training"
+  },
+  "hiit-studio": {
+    "searchKeywords": ["hiit studio", "hiit class", "high intensity training"],
+    "osmTags": ["sport=fitness", "leisure=fitness_centre"],
+    "appSlug": "hiit-studio"
+  },
+  "ems-studio": {
+    "searchKeywords": ["ems studio", "ems training", "electro muscle stimulation"],
+    "osmTags": ["sport=fitness", "leisure=fitness_centre"],
+    "appSlug": "ems-studio"
+  },
+  "calisthenics": {
+    "searchKeywords": ["calisthenics gym", "calisthenics park", "street workout"],
+    "osmTags": ["sport=calisthenics", "leisure=fitness_centre"],
+    "appSlug": "calisthenics"
+  },
+  "powerlifting": {
+    "searchKeywords": ["powerlifting gym", "powerlifting", "strength gym"],
+    "osmTags": ["sport=weightlifting", "leisure=fitness_centre"],
+    "appSlug": "powerlifting"
+  },
+  "aerial-yoga": {
+    "searchKeywords": ["aerial yoga", "aerial yoga studio", "anti gravity yoga"],
+    "osmTags": ["sport=yoga", "leisure=yoga"],
+    "appSlug": "aerial-yoga"
+  },
+  "meditation-center": {
+    "searchKeywords": ["meditation center", "meditation studio", "mindfulness center"],
+    "osmTags": ["amenity=place_of_worship", "sport=meditation"],
+    "appSlug": "meditation-center"
+  },
+  "spa-wellness": {
+    "searchKeywords": ["spa", "wellness center", "day spa"],
+    "osmTags": ["leisure=spa", "amenity=spa"],
+    "appSlug": "spa-wellness"
+  },
+  "physiotherapy": {
+    "searchKeywords": ["physiotherapy", "physiotherapy clinic", "physical therapy"],
+    "osmTags": ["healthcare=physiotherapist", "amenity=clinic"],
+    "appSlug": "physiotherapy"
+  },
+  "sports-rehab": {
+    "searchKeywords": ["sports rehab", "sports rehabilitation", "sports injury clinic"],
+    "osmTags": ["healthcare=physiotherapist", "amenity=clinic"],
+    "appSlug": "sports-rehab"
+  },
+  "mma-gym": {
+    "searchKeywords": ["mma gym", "mma training", "mixed martial arts"],
+    "osmTags": ["sport=martial_arts", "leisure=fitness_centre"],
+    "appSlug": "mma-gym"
+  },
+  "wrestling": {
+    "searchKeywords": ["wrestling academy", "wrestling gym", "kushti"],
+    "osmTags": ["sport=wrestling", "leisure=sports_centre"],
+    "appSlug": "wrestling"
+  },
+  "judo": {
+    "searchKeywords": ["judo academy", "judo club", "judo training"],
+    "osmTags": ["sport=judo", "leisure=sports_centre"],
+    "appSlug": "judo"
+  },
+  "karate": {
+    "searchKeywords": ["karate academy", "karate class", "karate training"],
+    "osmTags": ["sport=karate", "leisure=sports_centre"],
+    "appSlug": "karate"
+  },
+  "cycling-studio": {
+    "searchKeywords": ["cycling studio", "indoor cycling", "spin class"],
+    "osmTags": ["sport=cycling", "leisure=fitness_centre"],
+    "appSlug": "cycling-studio"
+  },
+  "running-club": {
+    "searchKeywords": ["running club", "running group", "run training"],
+    "osmTags": ["sport=running", "leisure=sports_centre"],
+    "appSlug": "running-club"
+  },
+  "zumba": {
+    "searchKeywords": ["zumba class", "zumba dance", "zumba fitness"],
+    "osmTags": ["leisure=dance", "sport=dance"],
+    "appSlug": "zumba"
+  },
+  "barre": {
+    "searchKeywords": ["barre studio", "barre class", "ballet barre"],
+    "osmTags": ["sport=dance", "leisure=dance"],
+    "appSlug": "barre"
+  },
+  "bollywood-dance": {
+    "searchKeywords": ["bollywood dance", "bollywood dance class", "bollywood fitness"],
+    "osmTags": ["leisure=dance", "sport=dance"],
+    "appSlug": "bollywood-dance"
+  },
+  "badminton-court": {
+    "searchKeywords": ["badminton court", "badminton academy", "badminton club"],
+    "osmTags": ["sport=badminton", "leisure=sports_centre"],
+    "appSlug": "badminton-court"
+  },
+  "tennis-academy": {
+    "searchKeywords": ["tennis academy", "tennis club", "tennis court"],
+    "osmTags": ["sport=tennis", "leisure=pitch"],
+    "appSlug": "tennis-academy"
+  },
+  "basketball-court": {
+    "searchKeywords": ["basketball court", "basketball academy", "basketball club"],
+    "osmTags": ["sport=basketball", "leisure=pitch"],
+    "appSlug": "basketball-court"
+  },
+  "football-turf": {
+    "searchKeywords": ["football turf", "football ground", "soccer field", "5-a-side"],
+    "osmTags": ["sport=football", "sport=soccer", "leisure=pitch"],
+    "appSlug": "football-turf"
+  },
+  "cricket-academy": {
+    "searchKeywords": ["cricket academy", "cricket coaching", "cricket club"],
+    "osmTags": ["sport=cricket", "leisure=pitch"],
+    "appSlug": "cricket-academy"
+  },
+  "squash-court": {
+    "searchKeywords": ["squash court", "squash club", "squash rackets"],
+    "osmTags": ["sport=squash", "leisure=sports_centre"],
+    "appSlug": "squash-court"
+  },
+  "climbing-wall": {
+    "searchKeywords": ["climbing wall", "rock climbing", "bouldering gym"],
+    "osmTags": ["sport=climbing", "leisure=sports_centre"],
+    "appSlug": "climbing-wall"
+  },
+  "parkour": {
+    "searchKeywords": ["parkour", "parkour training", "freerunning"],
+    "osmTags": ["sport=parkour", "leisure=sports_centre"],
+    "appSlug": "parkour"
+  },
+  "sports-complex": {
+    "searchKeywords": ["sports complex", "sports facility", "multi-sport complex"],
+    "osmTags": ["leisure=sports_centre", "leisure=stadium"],
+    "appSlug": "sports-complex"
+  },
+  "health-club": {
+    "searchKeywords": ["health club", "fitness club", "wellness club"],
+    "osmTags": ["leisure=fitness_centre", "leisure=sports_centre"],
+    "appSlug": "health-club"
+  },
+  "community-center": {
+    "searchKeywords": ["community fitness center", "community gym", "public gym"],
+    "osmTags": ["amenity=community_centre", "leisure=fitness_centre"],
+    "appSlug": "community-center"
+  }
+}

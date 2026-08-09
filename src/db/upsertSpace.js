@@ -31,6 +31,7 @@ const { analyzeGymSentiment } = require('../services/intelligence/sentiment');
 const { makeOpgId } = require('../utils/opgId');
 const logger       = require('../utils/logger');
 const slugify      = require('slugify');
+const { resolveEntity } = require('../services/entityResolver');
 
 
 // ── Fields that we always overwrite with fresh crawl data ─────────────────────
@@ -177,6 +178,17 @@ function buildLocation(lat, lng) {
     return { type: 'Point', coordinates: [lng, lat] };
   }
   return undefined;
+}
+
+// ── Fast exact-match dedup (tiers 1-3: slug, googleMapsUrl, placeId) ─────────
+async function _findExact(crawledData) {
+  const { slug, googleMapsUrl, placeId } = crawledData;
+  const orConditions = [];
+  if (slug)          orConditions.push({ slug });
+  if (googleMapsUrl) orConditions.push({ googleMapsUrl });
+  if (placeId)       orConditions.push({ placeId });
+  if (!orConditions.length) return null;
+  return Space.findOne({ $or: orConditions }).lean();
 }
 
 // ── Find existing space by slug → googleMapsUrl → placeId → geo+name → phone ─
@@ -349,7 +361,35 @@ async function upsertSpace(crawledData) {
   };
 
   try {
-    const existing = await findExistingSpace(crawledData);
+    // Tier 1-3: fast exact-match dedup (slug / googleMapsUrl / placeId)
+    let existing = await _findExact(crawledData);
+
+    // Tier 4-5: fuzzy dedup via entityResolver (Phase 7B — replaces legacy geo+name+phone)
+    if (!existing) {
+      const { cityOpgId: earlyCity } = await resolveLocation(
+        crawledData.city || crawledData.areaName,
+        crawledData.areaName
+      ).catch(() => ({ cityOpgId: null }));
+
+      const candidate = {
+        placeId:  crawledData.placeId,
+        name:     crawledData.name,
+        phone:    crawledData.contact?.phone,
+        location: crawledData.lat && crawledData.lng
+          ? { coordinates: [crawledData.lng, crawledData.lat] }
+          : undefined,
+      };
+      const resolution = await resolveEntity(candidate, earlyCity);
+
+      if (resolution.action === 'needsReview') {
+        result.action = 'needsReview';
+        return result;
+      }
+      if (resolution.action === 'merge' && resolution.entityOpgId) {
+        existing = await Space.findOne({ opgId: resolution.entityOpgId }).lean();
+      }
+    }
+
     const now = new Date();
 
     // ── Resolve classification ───────────────────────────────────────────────
@@ -435,7 +475,7 @@ async function upsertSpace(crawledData) {
       result.newPhotos = photoCount || 0;
 
       logger.info(`[INSERT] "${crawledData.name}" → new space (opgId: ${opgId})`);
-      result.action = 'inserted';
+      result.action = 'created';
       result.spaceId = spaceId;
       result.spaceOpgId = opgId;
       return result;

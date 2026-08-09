@@ -31,8 +31,8 @@ module.exports = {
   },
   scraper: {
     concurrency: parseInt(process.env.SCRAPER_CONCURRENCY || '1', 10),
-    delayMin:    parseInt(process.env.SCRAPER_DELAY_MIN   || '1200',  10),
-    delayMax:    parseInt(process.env.SCRAPER_DELAY_MAX   || '2500', 10),
+    delayMin:    parseInt(process.env.SCRAPER_DELAY_MIN   || '3000',  10), // increased for anti-detection
+    delayMax:    parseInt(process.env.SCRAPER_DELAY_MAX   || '6000', 10),
     timeout:     parseInt(process.env.SCRAPER_TIMEOUT     || '45000', 10),
     maxRetries:  parseInt(process.env.SCRAPER_MAX_RETRIES || '3', 10),
     headless:    process.env.SCRAPER_HEADLESS !== 'false',
@@ -52,6 +52,11 @@ module.exports = {
     enrichMaxPhotos:  parseInt(process.env.ENRICHMENT_MAX_PHOTOS  || '500', 10),
     enrichBatchSize:  parseInt(process.env.ENRICHMENT_BATCH_SIZE  || '50',  10),
     userAgent:   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    // Session management (free-scraping resilience)
+    sessionUrlBudget:    parseInt(process.env.SCRAPER_SESSION_URL_BUDGET   || '40',      10),
+    blockCooldownMs:     parseInt(process.env.SCRAPER_BLOCK_COOLDOWN_MS    || '1800000', 10), // 30 min
+    hourlyBlockBudget:   parseInt(process.env.SCRAPER_HOURLY_BLOCK_BUDGET  || '2',       10),
+    hourPauseMs:         parseInt(process.env.SCRAPER_HOUR_PAUSE_MS        || '7200000', 10), // 2 h
   },
   // ── Media download toggle (MEDIA_DOWNLOAD_ENABLED=false = URL capture only) ──
   // Default: false — all enrichment passes operate URL-capture-only.

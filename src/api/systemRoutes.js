@@ -624,5 +624,71 @@ router.post('/sources/toggle', express.json(),
   }
 );
 
+// ── GET /api/system/crawl-runs — recent crawl_runs observability ───────────────
+router.get('/crawl-runs', async (req, res) => {
+  try {
+    const CrawlRun = require('../db/crawlRunModel');
+    const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+    const runs  = await CrawlRun.find({}, { payload: 0 })
+      .sort({ startedAt: -1 })
+      .limit(limit)
+      .lean();
+    ok(res, { runs, count: runs.length });
+  } catch (e) { err(res, e.message); }
+});
+
+// ── GET /api/system/sync/status — opg-core sync status ───────────────────────
+router.get('/sync/status', async (req, res) => {
+  try {
+    const { getStatus } = require('../services/syncService');
+    ok(res, await getStatus());
+  } catch (e) { err(res, e.message); }
+});
+
+// ── POST /api/system/sync/trigger — trigger a sync batch ─────────────────────
+router.post('/sync/trigger', async (req, res) => {
+  try {
+    const { syncBatch } = require('../services/syncService');
+    const limit  = parseInt(req.body?.limit || '100', 10);
+    const result = await syncBatch(limit);
+    ok(res, result);
+  } catch (e) { err(res, e.message); }
+});
+
+// ── GET /api/system/seeds — crawl seed management ────────────────────────────
+router.get('/seeds', async (req, res) => {
+  try {
+    const CrawlSeed = require('../db/crawlSeedModel');
+    const seeds = await CrawlSeed.find({ deletedAt: null }).sort({ priority: 1 }).lean();
+    ok(res, { seeds, count: seeds.length });
+  } catch (e) { err(res, e.message); }
+});
+
+// ── POST /api/system/seeds — add / upsert a seed ─────────────────────────────
+router.post('/seeds', express.json(),
+  body('locationOpgId').notEmpty().trim(),
+  body('cityName').notEmpty().trim(),
+  async (req, res) => {
+    if (validate(req, res)) return;
+    try {
+      const { upsertSeed } = require('../services/seedService');
+      const seed = await upsertSeed(req.body);
+      ok(res, { seed });
+    } catch (e) { err(res, e.message); }
+  }
+);
+
+// ── GET /api/system/needs-review — pending review queue ──────────────────────
+router.get('/needs-review', async (req, res) => {
+  try {
+    const NeedsReview = require('../db/needsReviewModel');
+    const type   = req.query.type;
+    const filter = { status: 'pending', deletedAt: null };
+    if (type) filter.type = type;
+    const items = await NeedsReview.find(filter).sort({ createdAt: -1 }).limit(100).lean();
+    ok(res, { items, count: items.length });
+  } catch (e) { err(res, e.message); }
+});
+
 module.exports = router;
 

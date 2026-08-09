@@ -61,9 +61,12 @@ router.get('/progress', (req, res) => {
 function buildFilter(q) {
   const filter = {};
 
-  // Gym filter
+  // Space filter
   if (q.gymId && mongoose.isValidObjectId(q.gymId)) {
-    filter.gymId = new mongoose.Types.ObjectId(q.gymId);
+    filter.spaceId = new mongoose.Types.ObjectId(q.gymId);
+  }
+  if (q.spaceId && mongoose.isValidObjectId(q.spaceId)) {
+    filter.spaceId = new mongoose.Types.ObjectId(q.spaceId);
   }
 
   // Type filter
@@ -131,7 +134,7 @@ router.get('/', async (req, res) => {
         .sort(sort)
         .skip(skip)
         .limit(limit)
-        .populate('gymId', 'name areaName slug')
+        .populate('spaceId', 'name areaName slug')
         .lean(),
       Photo.countDocuments(filter),
     ]);
@@ -168,10 +171,10 @@ router.get('/stats', async (req, res) => {
             { $sort: { count: -1 } }
           ],
           byGymTop: [
-            { $group: { _id: '$gymId', count: { $sum: 1 }, size: { $sum: '$sizeBytes' } } },
+            { $group: { _id: '$spaceId', count: { $sum: 1 }, size: { $sum: '$sizeBytes' } } },
             { $sort: { count: -1 } },
             { $limit: 10 },
-            { $lookup: { from: 'gyms', localField: '_id', foreignField: '_id', as: 'gym' } },
+            { $lookup: { from: 'spaces', localField: '_id', foreignField: '_id', as: 'gym' } },
             { $unwind: { path: '$gym', preserveNullAndEmptyArrays: true } },
             { $project: { gymName: { $ifNull: ['$gym.name', 'Unknown'] }, count: 1, size: 1 } }
           ],
@@ -190,13 +193,13 @@ router.get('/stats', async (req, res) => {
           largestFiles: [
             { $sort: { sizeBytes: -1 } },
             { $limit: 5 },
-            { $lookup: { from: 'gyms', localField: 'gymId', foreignField: '_id', as: 'gymDoc' } },
-            { $unwind: { path: '$gymDoc', preserveNullAndEmptyArrays: true } },
-            { $addFields: { gymId: { $cond: [{ $gt: ['$gymDoc', null] }, { _id: '$gymDoc._id', name: '$gymDoc.name' }, null] } } },
-            { $project: { gymDoc: 0 } }
+            { $lookup: { from: 'spaces', localField: 'spaceId', foreignField: '_id', as: 'spaceDoc' } },
+            { $unwind: { path: '$spaceDoc', preserveNullAndEmptyArrays: true } },
+            { $addFields: { spaceInfo: { $cond: [{ $gt: ['$spaceDoc', null] }, { _id: '$spaceDoc._id', name: '$spaceDoc.name' }, null] } } },
+            { $project: { spaceDoc: 0 } }
           ],
           unlinkedCount: [
-            { $match: { gymId: null } },
+            { $match: { spaceId: null } },
             { $count: 'count' }
           ],
         }
@@ -378,7 +381,7 @@ router.post('/sync', async (req, res) => {
           const isThumb  = rel.startsWith('thumbnails/') || f.name.startsWith('th_');
           const parts    = rel.split('/');
           const slug     = (!isThumb && parts.length >= 2) ? parts[1] : null;
-          const gymId    = slug ? (slugMap.get(slug) || null) : null;
+          const spaceId  = slug ? (slugMap.get(slug) || null) : null;
 
           return {
             updateOne: {
@@ -394,9 +397,9 @@ router.post('/sync', async (req, res) => {
                   fsExists:     true,
                   fsVerifiedAt: new Date(),
                   createdAt:    new Date(f.mtimeMs),
-                  ...(gymId ? { gymId } : {}),
+                  ...(spaceId ? { spaceId } : {}),
                 },
-                $set: { fsExists: true, fsVerifiedAt: new Date(), ...(gymId ? { gymId } : {}) },
+                $set: { fsExists: true, fsVerifiedAt: new Date(), ...(spaceId ? { spaceId } : {}) },
               },
               upsert: true,
             },
@@ -453,7 +456,7 @@ router.post('/relink-gyms', async (req, res) => {
     const gymSlugs = await Space.find({}).select('_id slug').lean();
     const slugMap  = new Map(gymSlugs.map(g => [g.slug, g._id]));
 
-    const unlinked = await Photo.find({ gymId: null, folder: { $regex: /^photos\// } })
+    const unlinked = await Photo.find({ spaceId: null, folder: { $regex: /^photos\// } })
       .select('_id folder')
       .lean();
 
@@ -462,11 +465,11 @@ router.post('/relink-gyms', async (req, res) => {
     let linked = 0;
     const ops = [];
     for (const p of unlinked) {
-      const parts = (p.folder || '').split('/');
-      const slug  = parts[1];
-      const gymId = slug ? slugMap.get(slug) : null;
-      if (gymId) {
-        ops.push({ updateOne: { filter: { _id: p._id }, update: { $set: { gymId } } } });
+      const parts   = (p.folder || '').split('/');
+      const slug    = parts[1];
+      const spaceId = slug ? slugMap.get(slug) : null;
+      if (spaceId) {
+        ops.push({ updateOne: { filter: { _id: p._id }, update: { $set: { spaceId } } } });
         linked++;
       }
     }
@@ -486,7 +489,7 @@ router.get('/:id', param('id').isMongoId(), async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return err(res, 'Invalid ID', 400);
   try {
-    const photo = await Photo.findById(req.params.id).populate('gymId', 'name areaName slug').lean();
+    const photo = await Photo.findById(req.params.id).populate('spaceId', 'name areaName slug').lean();
     if (!photo) return err(res, 'Photo not found', 404);
     ok(res, { photo });
   } catch (e) { err(res, e.message); }

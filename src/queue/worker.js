@@ -15,6 +15,8 @@ const { isJobCancelled, clearCancelFlag, addBatchScrapeJob, enrichmentQueue } = 
 const cfg             = require('../../config');
 const logger          = require('../utils/logger');
 const bus             = require('../services/eventBus');
+const sessionMgr      = require('../scraper/sessionManager');
+const rawIngestion    = require('../services/rawIngestionService');
 
 const connection = {
   host:     cfg.redis.host,
@@ -237,17 +239,22 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
       const gymDuration = Date.now() - gymStartTime;
       bus.publish('crawl:gym-done', { jobId, gymName: scraped.name, url: urlShort, action: 'pending', duration: gymDuration });
 
+      // Persist raw payload before entity processing (non-blocking — crash safety)
+      rawIngestion.ingest('google_maps', url, scraped, null, null).catch(() => {});
+
       const res = await processSpace(scraped, cityName, jobId, false);
 
       if (res.action === 'created') {
         stats.created++;
         await updateJob(jobId, { $inc: { 'progress.newSpaces': 1, 'progress.scraped': 1 }, $push: { spaceIds: res.spaceId } });
         bus.publish('space:created', { name: scraped.name, area: cityName, spaceId: String(res.spaceId) });
+        sessionMgr.reportUrlScraped().catch(() => {});
       }
       if (res.action === 'updated') {
         stats.updated++;
         await updateJob(jobId, { $inc: { 'progress.updatedSpaces': 1, 'progress.scraped': 1 }, $push: { spaceIds: res.spaceId } });
         bus.publish('space:updated', { name: scraped.name, area: cityName, spaceId: String(res.spaceId), changes: 1 });
+        sessionMgr.reportUrlScraped().catch(() => {});
       }
       if (res.action === 'skipped') { stats.skipped++; await updateJob(jobId, { $inc: { 'progress.skipped': 1 } }); }
       if (res.action === 'error')   {
@@ -401,6 +408,7 @@ async function processCityJob(job) {
 
   try {
     await browser.launch();
+    sessionMgr.markSessionLaunched().catch(() => {});
     logger.info(`\n🏙  [DISCOVERY] ${cityName} — ${categories.length} categories, searchPool:${SEARCH_POOL}, batchSize:${BATCH_SIZE}`);
 
     // ── Phase 6: Parallel category search ─────────────────────────────────
@@ -490,6 +498,7 @@ async function processBatchJob(job) {
 
   try {
     await browser.launch();
+    sessionMgr.markSessionLaunched().catch(() => {});
 
     // ── Scrape all URLs using the parallel page pool ──────────────────────
     stopReason = await processUrlsWithPool(

@@ -2,13 +2,11 @@
 /**
  * Stage 3 — Social Signals
  * Collects signals from:
- * - Google Search (mentions, news articles) via SerpAPI/Serper.dev
- * - Instagram (location tag page — public posts count, popular tags)
- * - Facebook (public business page info via Graph API)
+ * - DuckDuckGo (free, no API key) → official website domain + social handles
+ * - Facebook Graph API (if token configured)
  */
 
-const axios = require('axios');
-const cfg   = require('../../../config');
+const cfg    = require('../../../config');
 const logger = require('../../utils/logger');
 
 async function runStage3(space) {
@@ -16,8 +14,7 @@ async function runStage3(space) {
   const signals = {};
 
   await Promise.allSettled([
-    _fetchGoogleMentions(space, signals),
-    _fetchInstagramSignals(space, signals),
+    _fetchDuckDuckGoSignals(space, signals),
     _fetchFacebookSignals(space, signals),
   ]);
 
@@ -26,56 +23,41 @@ async function runStage3(space) {
   if (signals.verifiedWebsite && !space.contact?.website)
     updates['contact.website'] = signals.verifiedWebsite;
 
-  // Merge additional photo URLs found from social
   if (signals.extraPhotoUrls?.length) updates._newPhotoUrls = signals.extraPhotoUrls;
 
   updates._stageData = signals;
   return updates;
 }
 
-async function _fetchGoogleMentions(space, signals) {
-  const key    = cfg.sources?.serpApiKey || cfg.sources?.serperKey;
-  const isSerp = !!cfg.sources?.serpApiKey;
-  if (!key) return;
+async function _fetchDuckDuckGoSignals(space, signals) {
+  const name = space.name;
+  const city = space.city || space.areaName || '';
+  if (!name) return;
 
-  const query = `"${space.name}" ${space.city || ''} gym fitness`;
   try {
-    let results = [];
-    if (isSerp) {
-      const resp = await axios.get('https://serpapi.com/search.json', {
-        params: { q: query, engine: 'google', num: 10, api_key: key },
-        timeout: 10000,
-      });
-      results = resp.data?.organic_results || [];
-    } else {
-      const resp = await axios.post('https://google.serper.dev/search',
-        { q: query, num: 10 },
-        { headers: { 'X-API-KEY': key }, timeout: 10000 }
-      );
-      results = resp.data?.organic || [];
+    const ddg = require('../sources/DuckDuckGoSource');
+    const result = await ddg.findOfficialDomain(name, city);
+    if (!result) return;
+
+    if (result.url && !signals.verifiedWebsite) {
+      signals.verifiedWebsite = result.url;
     }
 
-    // Extract Instagram/Facebook handles from search results
-    for (const r of results) {
-      const url = r.link || r.url || '';
-      if (/instagram\.com\/[^/?]+/.test(url) && !signals.instagramHandle) {
-        const match = url.match(/instagram\.com\/([^/?]+)/);
-        if (match) signals.instagramHandle = `https://www.instagram.com/${match[1]}/`;
+    // Parse Instagram / Facebook handles if the DDG result contains social URLs
+    if (result.domain) {
+      if (/instagram\.com/i.test(result.domain) && !signals.instagramHandle) {
+        signals.instagramHandle = result.url;
       }
-      if (/facebook\.com\/[^/?]+/.test(url) && !signals.facebookUrl) {
-        const match = url.match(/facebook\.com\/([^/?]+)/);
-        if (match) signals.facebookUrl = `https://www.facebook.com/${match[1]}/`;
+      if (/facebook\.com/i.test(result.domain) && !signals.facebookUrl) {
+        signals.facebookUrl = result.url;
       }
     }
   } catch (err) {
-    logger.debug(`[stage3] Google mentions failed: ${err.message}`);
+    logger.debug(`[stage3] DuckDuckGo signals failed: ${err.message}`);
   }
 }
 
 async function _fetchInstagramSignals(space, signals) {
-  // Instagram public location page (no API key needed for basic info)
-  if (!space.placeId) return;
-  // Skip — Instagram location scraping is rate-limited and fragile.
   // Reserved for future implementation with session cookies or official API.
 }
 

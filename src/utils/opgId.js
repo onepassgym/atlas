@@ -24,11 +24,13 @@ const BASE32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 // Entity prefix registry for atlas cluster
 const ENTITY_PREFIXES = {
-  space:    'SPC',
-  review:   'RVW',
-  photo:    'PHT',
-  chain:    'CHN',
-  location: 'LOC',
+  space:       'SPC',
+  review:      'RVW',
+  photo:       'PHT',
+  chain:       'CHN',
+  location:    'LOC',
+  needsReview: 'NRV',
+  seed:        'SED',
 };
 
 /**

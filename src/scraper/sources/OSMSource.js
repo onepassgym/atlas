@@ -18,16 +18,29 @@ const OVERPASS_ENDPOINTS = [
   'https://lz4.overpass-api.de/api/interpreter',
 ];
 
-// All OSM tags that represent fitness venues
+// All OSM tags that represent fitness venues (expanded for India coverage)
 const OSM_FITNESS_FILTERS = [
   '["leisure"="fitness_centre"]',
   '["leisure"="sports_centre"]',
   '["leisure"="yoga"]',
   '["leisure"="swimming_pool"]',
   '["leisure"="martial_arts"]',
+  '["leisure"="dance"]',
   '["amenity"="gym"]',
   '["amenity"="swimming_pool"]',
-  '["leisure"="dance"]',
+  // India-relevant sport= tags common on OSM India data
+  '["sport"="fitness"]',
+  '["sport"="yoga"]',
+  '["sport"="martial_arts"]',
+  '["sport"="swimming"]',
+  '["sport"="dance"]',
+  '["sport"="crossfit"]',
+  '["sport"="boxing"]',
+  '["sport"="weightlifting"]',
+  '["sport"="badminton"]',
+  '["sport"="cricket"]',
+  '["sport"="tennis"]',
+  '["sport"="basketball"]',
 ];
 
 class OSMSource extends BaseSourceScraper {

@@ -53,17 +53,18 @@ async function runStage1(space) {
     reviews:      [],
   };
 
-  const merged = resolver.merge([existingResult, ...newResults]);
+  const { merged, fieldConfidence } = resolver.mergeWithConfidence([existingResult, ...newResults]);
   const newSources = [...new Set([...existingSources, ...newResults.map(r => r.sourceId)])];
 
   return {
-    sources:      newSources,
-    contact:      merged.contact,
-    openingHours: merged.openingHours?.length > (space.openingHours?.length || 0) ? merged.openingHours : undefined,
-    description:  !space.description && merged.description ? merged.description : undefined,
-    amenities:    merged.amenities,
-    rawPhotoUrls: merged.rawPhotoUrls?.length > (space.rawPhotoUrls?.length || 0) ? merged.rawPhotoUrls : undefined,
-    _stageData:   { newSources: newResults.map(r => r.sourceId), resultCount: newResults.length },
+    sources:        newSources,
+    contact:        merged.contact,
+    openingHours:   merged.openingHours?.length > (space.openingHours?.length || 0) ? merged.openingHours : undefined,
+    description:    !space.description && merged.description ? merged.description : undefined,
+    amenities:      merged.amenities,
+    rawPhotoUrls:   merged.rawPhotoUrls?.length > (space.rawPhotoUrls?.length || 0) ? merged.rawPhotoUrls : undefined,
+    fieldConfidence,
+    _stageData:     { newSources: newResults.map(r => r.sourceId), resultCount: newResults.length },
   };
 }
 

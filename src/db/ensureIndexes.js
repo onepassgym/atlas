@@ -91,6 +91,32 @@ async function ensureIndexes() {
   const systemStates = db.collection('system_states');
   await systemStates.createIndex({ key: 1 }, { unique: true, name: 'systemStates_key_unique' });
 
+  // ── raw_sources (Phase 0 rebuild pipeline) ────────────────────────────────
+  const rawSources = db.collection('raw_sources');
+  await rawSources.createIndex({ source: 1, sourceId: 1, version: -1 }, { name: 'rawSources_source_sourceId_version' });
+  await rawSources.createIndex({ crawlRunId: 1 },                        { name: 'rawSources_crawlRunId' });
+  await rawSources.createIndex({ fetchedAt: 1, isArchived: 1 },          { name: 'rawSources_fetchedAt_archive' });
+  await rawSources.createIndex({ source: 1, sourceId: 1, supersededAt: 1 }, { name: 'rawSources_current_lookup' });
+
+  // ── crawl_runs (Phase 0 observability) ───────────────────────────────────
+  const crawlRuns = db.collection('crawl_runs');
+  await crawlRuns.createIndex({ runId: 1 },                              { unique: true, name: 'crawlRuns_runId_unique' });
+  await crawlRuns.createIndex({ crawlJobId: 1 },                         { name: 'crawlRuns_crawlJobId' });
+  await crawlRuns.createIndex({ locationOpgId: 1, categorySlug: 1, startedAt: -1 }, { name: 'crawlRuns_location_category_time' });
+  await crawlRuns.createIndex({ source: 1, startedAt: -1 },              { name: 'crawlRuns_source_time' });
+
+  // ── needs_review (Phase 0 dedup routing) ─────────────────────────────────
+  const needsReview = db.collection('needs_review');
+  await needsReview.createIndex({ status: 1, type: 1, createdAt: -1 },   { name: 'needsReview_status_type' });
+  await needsReview.createIndex({ spaceOpgId: 1 },                       { sparse: true, name: 'needsReview_spaceOpgId' });
+  await needsReview.createIndex({ existingEntityOpgId: 1 },              { sparse: true, name: 'needsReview_existingEntity' });
+  await needsReview.createIndex({ opgId: 1 },                            { unique: true, sparse: true, name: 'needsReview_opgId' });
+
+  // ── crawl_seeds (Phase 0 scheduling) ─────────────────────────────────────
+  const crawlSeeds = db.collection('crawl_seeds');
+  await crawlSeeds.createIndex({ locationOpgId: 1, frequency: 1, nextSeedAt: 1 }, { name: 'crawlSeeds_location_freq_next' });
+  await crawlSeeds.createIndex({ isEnabled: 1, nextSeedAt: 1 },          { name: 'crawlSeeds_enabled_next' });
+
   logger.info('✅ DB indexes verified/created (all collections — v5 schema)');
 }
 

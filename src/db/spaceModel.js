@@ -171,6 +171,20 @@ const SpaceSchema = new mongoose.Schema({
   createdVia: { type: String, default: 'crawler' },
   deletedAt:  { type: Date, default: null },
 
+  // ── Rebuild pipeline fields (Phase 0+) ───────────────────────────────────
+  validationState: {
+    type: String,
+    enum: ['raw', 'draft', 'validated', 'published', 'archived'],
+    default: 'raw',
+    index: true,
+  },
+  // field-level confidence: { geo: { confidence, source, capturedAt }, ... }
+  fieldConfidence: { type: Map, of: mongoose.Schema.Types.Mixed, default: undefined },
+  rawType:         String,    // original Maps/OSM type when no taxonomy mapping exists
+  publishedToCore: { type: Boolean, default: false, index: true },
+  lastSyncedToCore: Date,
+  publishedAt:     Date,
+
   // Legacy compat fields (kept for migration, will be removed post-backfill)
   lat: Number,
   lng: Number,

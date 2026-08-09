@@ -12,6 +12,9 @@ const { addCityJob, addGymNameJob } = require('../queue/queues');
 const { FITNESS_CATEGORIES } = require('../scraper/googleMapsScraper');
 const bus = require('./eventBus');
 const { runPhotoSync } = require('./photoSyncService');
+const { getNextBatch, recordRun } = require('./seedService');
+const { discover }    = require('./discoveryService');
+const { processDiscoveryCandidates } = require('./discoveryProcessor');
 
 const SCHEDULE_PATH = path.resolve(__dirname, '../../config/schedule.json');
 
@@ -225,6 +228,54 @@ async function queueIncompleteGyms(reason = 'enrichment') {
   return queued;
 }
 
+// ── Seed-based crawl (DB-driven, replaces schedule.json iteration over time) ──
+
+async function runSeedBasedCrawl(reason = 'seed-cron') {
+  const seeds = await getNextBatch(20);
+  if (!seeds.length) {
+    logger.info('📅 Seed crawl: no seeds due for crawl');
+    return [];
+  }
+
+  logger.info(`\n📅 Seed crawl [${reason}] — ${seeds.length} seeds due`);
+  const results = [];
+
+  for (const seed of seeds) {
+    try {
+      // Phase 7A: multi-source discovery → entity pipeline (OSM + JustDial + Google Maps)
+      const { candidates, crawlRunId } = await discover({
+        locationOpgId: seed.locationOpgId,
+        cityName:      seed.cityName,
+        categorySlugs: seed.categorySlugs?.length ? seed.categorySlugs : null,
+      });
+
+      let processingStats = { created: 0, updated: 0, skipped: 0, needsReview: 0, errors: 0 };
+
+      if (candidates.length > 0) {
+        processingStats = await processDiscoveryCandidates(candidates, seed.locationOpgId, crawlRunId);
+      }
+
+      // Also queue a BullMQ city job for deep Google Maps detail scraping
+      const jobId = await queueCity(seed.cityName, `seed-${reason}`);
+
+      await recordRun(seed._id, {
+        recordsFound: candidates.length,
+        googleBlocked: false,
+      });
+
+      results.push({ cityName: seed.cityName, jobId, candidates: candidates.length, ...processingStats });
+      logger.info(`  ✅ Seed "${seed.cityName}": ${candidates.length} candidates → ${processingStats.created} new, ${processingStats.updated} updated`);
+
+    } catch (err) {
+      logger.error(`  ❌ Seed crawl failed for "${seed.cityName}": ${err.message}`);
+      await recordRun(seed._id, { recordsFound: 0, googleBlocked: /block|captcha/i.test(err.message) });
+    }
+  }
+
+  bus.publish('schedule:fired', { reason, count: results.length });
+  return results;
+}
+
 // ── Trigger all scheduled cities (legacy compat) ─────────────────────────────
 
 async function scheduleNCRCrawl(reason = 'scheduled') {
@@ -292,6 +343,23 @@ function startScheduler() {
     }
   }, { timezone: tz });
 
+  // Seed-based crawl: every 6 hours — picks seeds due by nextSeedAt
+  cron.schedule('0 */6 * * *', async () => {
+    await runSeedBasedCrawl('seed-6h-cron');
+  }, { timezone: tz });
+
+  // opg-core sync: every night at 1:00 AM IST = 19:30 UTC previous day
+  cron.schedule('30 19 * * *', async () => {
+    logger.info('[scheduler] Triggering nightly opg-core sync...');
+    try {
+      const { syncBatch } = require('./syncService');
+      const result = await syncBatch(200);
+      logger.info(`[scheduler] Sync complete: ${result.synced} synced, ${result.archived} archived`);
+    } catch (e) {
+      logger.error(`[scheduler] opg-core sync failed: ${e.message}`);
+    }
+  }, { timezone: tz });
+
   logger.info('⏰ Scheduler started:');
   logger.info('   • Weekly cities    → every Sunday 02:00 AM IST');
   logger.info('   • Biweekly cities  → 1st & 3rd Sunday 03:00 AM IST');
@@ -299,12 +367,15 @@ function startScheduler() {
   logger.info('   • Staleness check  → every Wednesday 03:00 AM IST');
   logger.info('   • Enrichment       → every Friday 03:00 AM IST');
   logger.info('   • Photo sync       → every day 04:00 AM IST');
+  logger.info('   • Seed-based crawl → every 6h (DB-driven seeds)');
+  logger.info('   • opg-core sync    → every night 01:00 AM IST');
 }
 
 module.exports = {
   startScheduler,
   scheduleNCRCrawl,
   runScheduledCrawl,
+  runSeedBasedCrawl,
   queueStaleGyms,
   queueIncompleteGyms,
   getScheduleConfig,

@@ -25,6 +25,17 @@ const SOURCE_PRIORITY = {
   osm:              5,
 };
 
+// Confidence values per field category per source (0.0–1.0)
+const FIELD_CONFIDENCE = {
+  geo:          { google_maps: 0.95, osm: 0.70, yelp: 0.60, justdial: 0.50, official_website: 0.40 },
+  phone:        { google_maps: 0.90, justdial: 0.85, official_website: 0.75, yelp: 0.65, osm: 0.30 },
+  website:      { official_website: 1.00, google_maps: 0.80, justdial: 0.50, yelp: 0.50, osm: 0.20 },
+  openingHours: { google_maps: 0.90, official_website: 0.80, yelp: 0.70, justdial: 0.60, osm: 0.50 },
+  description:  { official_website: 0.90, google_maps: 0.70, yelp: 0.65, justdial: 0.55, osm: 0.40 },
+  rating:       { google_maps: 0.95, yelp: 0.90, justdial: 0.70, osm: 0.40, official_website: 0.20 },
+  priceLevel:   { official_website: 0.90, yelp: 0.80, google_maps: 0.60, justdial: 0.50 },
+};
+
 function rank(sourceId) {
   return SOURCE_PRIORITY[sourceId] ?? 99;
 }
@@ -168,6 +179,71 @@ class SpaceResolver {
   _enrich(result) {
     if (!result.sources) result.sources = [result.sourceId];
     return result;
+  }
+
+  /**
+   * Merge results AND return per-field confidence metadata.
+   * Returns { merged, fieldConfidence } where fieldConfidence is a plain object
+   * mapping field names to { confidence, source, capturedAt }.
+   *
+   * Used by Stage 1 enrichment to populate Space.fieldConfidence.
+   */
+  mergeWithConfidence(results) {
+    const merged = this.merge(results);
+    if (!merged) return { merged: null, fieldConfidence: {} };
+
+    const bySource = {};
+    for (const r of results) bySource[r.sourceId] = r;
+    const now = new Date();
+    const fc = {};
+
+    const conf = (category, srcId) =>
+      (FIELD_CONFIDENCE[category]?.[srcId]) ?? 0.50;
+
+    // Geo
+    const geoSrc = bestSourceForField('lat', bySource)?.sourceId;
+    if (geoSrc && (merged.lat != null || merged.location?.coordinates)) {
+      fc.geo = { confidence: conf('geo', geoSrc), source: geoSrc, capturedAt: now };
+    }
+
+    // Phone
+    const phonePrio = ['google_maps', 'justdial', 'yelp', 'official_website', 'osm'];
+    const phoneSrc = phonePrio.find(s => bySource[s]?.contact?.phone);
+    if (phoneSrc && merged.contact?.phone) {
+      fc.phone = { confidence: conf('phone', phoneSrc), source: phoneSrc, capturedAt: now };
+    }
+
+    // Website
+    const webSrc = bestSourceForField('contact.website', bySource)?.sourceId;
+    if (webSrc && merged.contact?.website) {
+      fc.website = { confidence: conf('website', webSrc), source: webSrc, capturedAt: now };
+    }
+
+    // Opening hours
+    const hoursSrc = bestSourceForField('openingHours', bySource)?.sourceId;
+    if (hoursSrc && merged.openingHours?.length) {
+      fc.openingHours = { confidence: conf('openingHours', hoursSrc), source: hoursSrc, capturedAt: now };
+    }
+
+    // Description
+    const descSrc = bestSourceForField('description', bySource)?.sourceId;
+    if (descSrc && merged.description) {
+      fc.description = { confidence: conf('description', descSrc), source: descSrc, capturedAt: now };
+    }
+
+    // Rating
+    const ratingSrc = [...results].sort((a, b) => rank(a.sourceId) - rank(b.sourceId)).find(r => r.rating != null)?.sourceId;
+    if (ratingSrc && merged.rating != null) {
+      fc.rating = { confidence: conf('rating', ratingSrc), source: ratingSrc, capturedAt: now };
+    }
+
+    // Price level
+    const priceSrc = bestSourceForField('priceLevel', bySource)?.sourceId;
+    if (priceSrc && merged.priceLevel) {
+      fc.priceLevel = { confidence: conf('priceLevel', priceSrc), source: priceSrc, capturedAt: now };
+    }
+
+    return { merged, fieldConfidence: fc };
   }
 }
 

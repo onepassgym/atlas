@@ -1,33 +1,45 @@
 'use strict';
 
+// ── Thresholds ────────────────────────────────────────────────────────────────
+const PUBLISH_THRESHOLD     = 60;
+const HIGH_QUALITY_THRESHOLD= 80;
+const STALENESS_HALF_LIFE_DAYS = 90;
+
 /**
- * Calculates a composite 0-100 quality score for a gym.
- * @param {Object} gymData - The crawled data or gym document.
+ * Calculates a composite 0-100 quality score.
+ * Works for both raw crawl format (lat/lng/photos/category) and v5 Space documents.
+ *
+ * Dimensions (100 pts total):
+ *   rating          30 pts  — (rating / 5) × 30
+ *   reviewDensity   15 pts  — log-scale, caps at 500 reviews
+ *   completeness    20 pts  — 12 field checks
+ *   sourceConfidence20 pts  — avg(fieldConfidence.values()) or half-credit default
+ *   staleness       15 pts  — exponential decay, half-life 90 days
+ *
+ * @param {Object} gymData
  * @returns {{ score: number, breakdown: Object }}
  */
 function calculateQualityScore(gymData) {
-  let score = 0;
   const breakdown = {
-    rating: 0,
-    reviews: 0,
-    completeness: 0,
-    media: 0,
-    freshness: 0
+    rating:          0,
+    reviewDensity:   0,
+    completeness:    0,
+    sourceConfidence:0,
+    staleness:       0,
   };
 
-  // 1. Rating (Max 40 points)
-  if (gymData.rating > 0) {
-    breakdown.rating = Math.round((gymData.rating / 5) * 40);
+  // 1. Rating (30 pts)
+  if ((gymData.rating || 0) > 0) {
+    breakdown.rating = Math.round((gymData.rating / 5) * 30);
   }
 
-  // 2. Reviews (Max 20 points, logarithmic scaling, maxed at ~500 reviews)
+  // 2. Review density (15 pts, log-scale capped at 500)
   const totalReviews = gymData.totalReviews || 0;
   if (totalReviews > 0) {
-    let revScore = (Math.log(totalReviews + 1) / Math.log(500)) * 20;
-    breakdown.reviews = Math.round(Math.min(revScore, 20));
+    breakdown.reviewDensity = Math.round(Math.min((Math.log(totalReviews + 1) / Math.log(501)) * 15, 15));
   }
 
-  // 3. Completeness (Max 20 points, 12 checks)
+  // 3. Completeness (20 pts, 12 field checks)
   // Handles both raw crawl format (lat/lng/photos/category) and Space document format.
   const checks = [
     gymData.name,
@@ -46,29 +58,34 @@ function calculateQualityScore(gymData) {
   const filled = checks.filter(Boolean).length;
   breakdown.completeness = Math.round((filled / checks.length) * 20);
 
-  // 4. Media Richness (Max 10 points - 2 pts per photo max 5, + bonus for high visual appeal)
-  const photoCount = gymData.photos?.length || gymData.totalPhotos || 0;
-  let mediaScore = Math.min(photoCount * 2, 10);
-  if (gymData.visualAppealScore > 80) mediaScore += 2; // small bonus for great photos
-  else if (gymData.visualAppealScore < 40 && photoCount > 0) mediaScore -= 2; // penalty for bad photos
-  breakdown.media = Math.max(0, Math.min(mediaScore, 10));
+  // 4. Source confidence (20 pts)
+  // Uses fieldConfidence Map if present, otherwise awards half-credit (10 pts)
+  const fc = gymData.fieldConfidence;
+  if (fc && (fc instanceof Map ? fc.size : Object.keys(fc).length) > 0) {
+    const values = fc instanceof Map ? [...fc.values()] : Object.values(fc);
+    const confidences = values.map(v => (typeof v === 'object' ? (v.confidence || 0) : v)).filter(c => typeof c === 'number');
+    const avg = confidences.length ? confidences.reduce((s, c) => s + c, 0) / confidences.length : 0.5;
+    breakdown.sourceConfidence = Math.round(avg * 20);
+  } else {
+    breakdown.sourceConfidence = 10; // half-credit when no confidence data available
+  }
 
-  // 5. Freshness (Max 10 points) - Assumes if being crawled, it's fresh right now.
-  // We can refine this if we run the scorer asynchronously, but for upsert, it's 10.
-  // Let's check `lastCrawledAt` from metadata if it exists.
-  const lastCrawledAt = gymData.crawlMeta?.lastCrawledAt || new Date();
-  const daysSince = (new Date() - new Date(lastCrawledAt)) / (1000 * 60 * 60 * 24);
-  
-  if (daysSince <= 30) breakdown.freshness = 10;
-  else if (daysSince <= 90) breakdown.freshness = 5;
-  else breakdown.freshness = 0;
+  // 5. Staleness (15 pts, exponential decay, half-life 90 days)
+  const lastCrawledAt = gymData.crawl?.lastCrawledAt || gymData.crawlMeta?.lastCrawledAt || null;
+  if (lastCrawledAt) {
+    const daysSince = (Date.now() - new Date(lastCrawledAt).getTime()) / 86_400_000;
+    breakdown.staleness = Math.round(15 * Math.exp(-daysSince / STALENESS_HALF_LIFE_DAYS));
+  } else {
+    breakdown.staleness = 15; // assume fresh if just crawled
+  }
 
-  score = breakdown.rating + breakdown.reviews + breakdown.completeness + breakdown.media + breakdown.freshness;
+  const score = Math.min(100, Math.max(0,
+    breakdown.rating + breakdown.reviewDensity + breakdown.completeness +
+    breakdown.sourceConfidence + breakdown.staleness,
+  ));
 
-  return {
-    score: Math.min(100, Math.max(0, score)),
-    breakdown
-  };
+  return { score, breakdown };
 }
 
-module.exports = { calculateQualityScore };
+module.exports = { calculateQualityScore, PUBLISH_THRESHOLD, HIGH_QUALITY_THRESHOLD };
+

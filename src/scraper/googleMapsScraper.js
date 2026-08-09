@@ -104,6 +104,10 @@ class BrowserManager {
         '--disable-background-networking',
         '--disable-default-apps',
         '--lang=en-US',
+        // Additional anti-detection hardening
+        '--disable-blink-features=AutomationControlled',
+        '--disable-infobars',
+        '--window-position=0,0',
       ],
     });
 
@@ -111,16 +115,37 @@ class BrowserManager {
     const viewport = pickRandom(VIEWPORTS);
     const tz       = pickRandom(TIMEZONES);
     const lang     = pickRandom(ACCEPT_LANGS);
+    // Randomize device scale factor to vary fingerprint further
+    const deviceScaleFactor = [1.0, 1.25, 1.5, 2.0][Math.floor(Math.random() * 4)];
 
     this.ctx = await this.browser.newContext({
-      userAgent:   getRandomUA(),
-      locale:      'en-US',
-      timezoneId:  tz,
+      userAgent:        getRandomUA(),
+      locale:           'en-US',
+      timezoneId:       tz,
       viewport,
+      deviceScaleFactor,
+      colorScheme:      'light',
+      hasTouch:         false,
+      isMobile:         false,
       extraHTTPHeaders: { 'Accept-Language': lang },
+      // Randomize geolocation slightly so each session looks like a different user location
+      geolocation: {
+        latitude:  28.6 + (Math.random() - 0.5) * 0.2,
+        longitude: 77.2 + (Math.random() - 0.5) * 0.2,
+      },
+      permissions: ['geolocation'],
     });
 
-    logger.info(`  🎭 Browser fingerprint: ${viewport.width}×${viewport.height}, tz:${tz}`);
+    logger.info(`  🎭 Browser fingerprint: ${viewport.width}×${viewport.height}, tz:${tz}, dpr:${deviceScaleFactor}`);
+
+    // Inject anti-automation overrides into every new page
+    await this.ctx.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver',  { get: () => undefined });
+      Object.defineProperty(navigator, 'plugins',    { get: () => [1, 2, 3, 4, 5] });
+      Object.defineProperty(navigator, 'languages',  { get: () => ['en-US', 'en'] });
+      Object.defineProperty(navigator, 'connection', { get: () => ({ effectiveType: '4g' }) });
+      window.chrome = { runtime: {} };
+    });
 
     // ── Phase 1a: Aggressive resource blocking ────────────────────────────────
     // Block images, stylesheets, fonts, media — we only need DOM text content.
@@ -147,9 +172,8 @@ class BrowserManager {
 }
 
 // ── Google block / CAPTCHA detection ─────────────────────────────────────────
-// Returns true if Google served a CAPTCHA, consent wall, or unusual-traffic page
-// instead of actual Maps content. The worker should back off when this triggers.
-
+// Returns the block reason string if Google served a block page, or false if clear.
+// Also reports to sessionManager so the circuit breaker is updated.
 async function isBlocked(page) {
   try {
     const blocked = await page.evaluate(() => {
@@ -164,6 +188,11 @@ async function isBlocked(page) {
           body.length < 200) return 'empty';
       return false;
     });
+    if (blocked) {
+      // Notify session manager — triggers cooldown + circuit breaker update
+      const sessionMgr = require('./sessionManager');
+      sessionMgr.reportBlock().catch(() => {});
+    }
     return blocked;
   } catch (_) {
     return false;

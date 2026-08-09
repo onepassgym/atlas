@@ -181,6 +181,12 @@ async function _applyStageUpdates(space, stageData, $set) {
   if (stageData.sources) {
     $set.sources = stageData.sources;
   }
+  // fieldConfidence from Stage 1 mergeWithConfidence() — used by quality scoring
+  if (stageData.fieldConfidence && Object.keys(stageData.fieldConfidence).length > 0) {
+    for (const [field, fcEntry] of Object.entries(stageData.fieldConfidence)) {
+      $set[`fieldConfidence.${field}`] = fcEntry;
+    }
+  }
   if (stageData.contact) _mergeContact($set, stageData.contact);
   if (stageData.description) $set.description = stageData.description;
   if (stageData.priceLevel)  $set.priceLevel  = stageData.priceLevel;
