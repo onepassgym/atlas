@@ -44,6 +44,8 @@ module.exports = {
     skipRecentDays: parseInt(process.env.SCRAPER_SKIP_RECENT_DAYS || '7', 10),
     // URLs per batch-scrape job
     batchSize:      parseInt(process.env.SCRAPER_BATCH_SIZE       || '12', 10),
+    // Max URLs to process in a gym-name crawl
+    gymNameMaxUrls: parseInt(process.env.SCRAPER_GYM_NAME_MAX_URLS || '30', 10),
     // Phase 1c / Phase 4: depth caps per standard-mode scrape
     maxReviews:  parseInt(process.env.SCRAPER_MAX_REVIEWS || '30', 10),
     maxPhotos:   parseInt(process.env.SCRAPER_MAX_PHOTOS  || '20', 10),

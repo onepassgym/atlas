@@ -2,7 +2,7 @@
 const path        = require('path');
 const Location    = require('../db/locationModel');
 const NeedsReview = require('../db/needsReviewModel');
-const { makeOpgId } = require('../utils/opgId');
+const { generateSingleOpgId } = require('../utils/opgId');
 const logger      = require('../utils/logger');
 
 // taxonomy.json: categorySlug → { searchKeywords, osmTags, appSlug }
@@ -148,7 +148,7 @@ async function validateCandidate(candidate, cityOpgId) {
 async function _createNeedsReview(data) {
   try {
     await NeedsReview.create({
-      opgId:      makeOpgId('needsReview', { highVolume: false }),
+      opgId:      await generateSingleOpgId('needsReview'),
       status:     'pending',
       ...data,
     });

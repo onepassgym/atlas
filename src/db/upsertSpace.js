@@ -28,7 +28,7 @@ const ChangeLog    = require('./gymChangeLogModel');
 const Location     = require('./locationModel');
 const { calculateQualityScore } = require('../services/intelligence/scoring');
 const { analyzeGymSentiment } = require('../services/intelligence/sentiment');
-const { makeOpgId } = require('../utils/opgId');
+const { generateSingleOpgId, reserveOpgIds, generateOpgId } = require('../utils/opgId');
 const logger       = require('../utils/logger');
 const slugify      = require('slugify');
 const { resolveEntity } = require('../services/entityResolver');
@@ -111,7 +111,7 @@ async function resolveLocation(city, areaName) {
   let cityDoc = await Location.findOne({ slug: citySlug, type: 'city' }).lean();
 
   if (!cityDoc) {
-    const cityOpgId = makeOpgId('location', { highVolume: false });
+    const cityOpgId = await generateSingleOpgId('location');
     cityDoc = await Location.findOneAndUpdate(
       { slug: citySlug, type: 'city' },
       { $setOnInsert: { opgId: cityOpgId, slug: citySlug, name: city, displayName: city, type: 'city', country: 'IN', createdVia: 'crawler' } },
@@ -124,7 +124,7 @@ async function resolveLocation(city, areaName) {
     const areaSlug = slugifyValue(`${areaName}-${city}`);
     let areaDoc = await Location.findOne({ slug: areaSlug, type: 'area' }).lean();
     if (!areaDoc) {
-      areaOpgId = makeOpgId('location', { highVolume: false });
+      areaOpgId = await generateSingleOpgId('location');
       areaDoc = await Location.findOneAndUpdate(
         { slug: areaSlug, type: 'area' },
         { $setOnInsert: { opgId: areaOpgId, slug: areaSlug, name: areaName, displayName: `${areaName}, ${city}`, type: 'area', parentOpgId: cityDoc.opgId, country: 'IN', createdVia: 'crawler' } },
@@ -147,7 +147,7 @@ async function upsertPhotoUrls(spaceId, spaceOpgId, photoUrls = [], now) {
       filter: { originalUrl: url, spaceId },
       update: {
         $setOnInsert: {
-          opgId: makeOpgId('photo'),
+          opgId: null, // assigned below
           spaceId,
           spaceOpgId,
           originalUrl: url,
@@ -166,6 +166,11 @@ async function upsertPhotoUrls(spaceId, spaceOpgId, photoUrls = [], now) {
   }));
 
   if (ops.length) {
+    const photoStartSeq = await reserveOpgIds('photo', ops.length);
+    ops.forEach((op, i) => {
+      op.updateOne.update.$setOnInsert.opgId = generateOpgId('photo', photoStartSeq + i);
+    });
+
     const res = await Photo.bulkWrite(ops, { ordered: false });
     return res.upsertedCount || 0;
   }
@@ -266,7 +271,8 @@ async function insertReviews(spaceId, rawReviews = [], spaceOpgId) {
   if (!docs.length) return 0;
 
   // Assign individual review opgIds
-  docs.forEach(d => { d.opgId = makeOpgId('review'); });
+  const revStartSeq = await reserveOpgIds('review', docs.length);
+  docs.forEach((d, i) => { d.opgId = generateOpgId('review', revStartSeq + i); });
 
   try {
     const res = await Review.insertMany(docs, { ordered: false });
@@ -294,7 +300,8 @@ async function mergeReviews(spaceId, rawReviews = [], spaceOpgId) {
   if (!fresh.length) return 0;
 
   const docs = buildReviewDocs(spaceId, fresh, spaceOpgId);
-  docs.forEach(d => { d.opgId = makeOpgId('review'); });
+  const revStartSeq = await reserveOpgIds('review', docs.length);
+  docs.forEach((d, i) => { d.opgId = generateOpgId('review', revStartSeq + i); });
 
   try {
     const res = await Review.insertMany(docs, { ordered: false });
@@ -382,6 +389,7 @@ async function upsertSpace(crawledData) {
       const resolution = await resolveEntity(candidate, earlyCity);
 
       if (resolution.action === 'needsReview') {
+        logger.warn(`[DEDUP] needsReview: "${crawledData.name}" at ${crawledData.address || 'no address'}`);
         result.action = 'needsReview';
         return result;
       }
@@ -430,7 +438,7 @@ async function upsertSpace(crawledData) {
         normalizedData.location = buildLocation(normalizedData.lat, normalizedData.lng);
       }
 
-      const opgId = makeOpgId('space');
+      const opgId = await generateSingleOpgId('space');
       normalizedData.opgId = opgId;
       normalizedData.createdVia = 'crawler';
 

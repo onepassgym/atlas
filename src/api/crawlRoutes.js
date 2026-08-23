@@ -72,11 +72,12 @@ router.post('/city',
   body('cityName').notEmpty().trim(),
   body('categories').optional().isArray(),
   body('force').optional().isBoolean(),
+  body('skipRecentDays').optional().isInt({ min: 0 }),
   async (req, res) => {
     if (validate(req, res)) return;
     const { cityName, force = false } = req.body;
-    // Ensure categories is an array. Default to full list if missing/null.
     const categories = Array.isArray(req.body.categories) ? req.body.categories : FITNESS_CATEGORIES;
+    const skipRecentDays = req.body.skipRecentDays !== undefined ? Number(req.body.skipRecentDays) : undefined;
 
     try {
       // Job dedup guard
@@ -92,8 +93,8 @@ router.post('/city',
       }
 
       const jobId = uuidv4();
-      await CrawlJob.create({ jobId, type: 'city', input: { cityName, categories }, status: 'queued' });
-      await addCityJob(jobId, cityName, categories);
+      await CrawlJob.create({ jobId, type: 'city', input: { cityName, categories, skipRecentDays }, status: 'queued' });
+      await addCityJob(jobId, cityName, categories, skipRecentDays);
       bus.publish('job:queued', { jobId, type: 'city', cityName, categoryCount: categories.length });
       ok(res, { message: `City crawl queued for "${cityName}"`, jobId, categoryCount: categories.length, trackAt: `/api/crawl/status/${jobId}` }, 202);
     } catch (e) { logger.error(e.message); err(res, e.message); }
@@ -623,19 +624,32 @@ router.post('/by-url',
 router.post('/by-area',
   body('area').notEmpty().trim().isLength({ min: 2, max: 200 }),
   body('categories').optional().isArray(),
+  body('force').optional().isBoolean(),
+  body('skipRecentDays').optional().isInt({ min: 0 }),
   async (req, res) => {
     if (validate(req, res)) return;
-    const { area } = req.body;
+    const { area, force = false } = req.body;
     const categories = Array.isArray(req.body.categories) ? req.body.categories : FITNESS_CATEGORIES;
+    const skipRecentDays = req.body.skipRecentDays !== undefined ? Number(req.body.skipRecentDays) : undefined;
     try {
+      if (!force) {
+        const active = await hasActiveJob(area);
+        if (active) {
+          return ok(res, {
+            message: `"${area}" already has an active job (${active.status}). Use force:true to override.`,
+            existingJobId: active.jobId,
+            trackAt: `/api/crawl/status/${active.jobId}`,
+          }, 409);
+        }
+      }
       const jobId = uuidv4();
       await CrawlJob.create({
         jobId,
         type: 'city',
-        input: { cityName: area, categories, multiSource: true },
+        input: { cityName: area, categories, skipRecentDays, multiSource: true },
         status: 'queued',
       });
-      await addCityJob(jobId, area, categories);
+      await addCityJob(jobId, area, categories, skipRecentDays);
       bus.publish('job:queued', { jobId, type: 'city', cityName: area, multiSource: true });
       ok(res, { message: `Multi-source area crawl queued for "${area}"`, jobId, trackAt: `/api/crawl/status/${jobId}` }, 202);
     } catch (e) { logger.error(e.message); err(res, e.message); }

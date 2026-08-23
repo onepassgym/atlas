@@ -24,7 +24,7 @@ services:
       - "8747:8747"
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas
+      - MONGODB_URI=mongodb://mongo:27017/atlas05
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=production
@@ -56,7 +56,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas
+      - MONGODB_URI=mongodb://mongo:27017/atlas05
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=production
@@ -87,7 +87,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas
+      - MONGODB_URI=mongodb://mongo:27017/atlas05
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=production
@@ -115,7 +115,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas
+      - MONGODB_URI=mongodb://mongo:27017/atlas05
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=production

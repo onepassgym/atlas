@@ -196,8 +196,8 @@ export default function JobsPanel() {
                       </span>
                     ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                   </td>
-                  <td style={{ color: 'var(--success)', fontFamily: 'var(--mono)' }}>{p.newGyms || 0}</td>
-                  <td className="col-hide-mobile" style={{ color: 'var(--accent)', fontFamily: 'var(--mono)' }}>{p.updatedGyms || 0}</td>
+                  <td style={{ color: 'var(--success)', fontFamily: 'var(--mono)' }}>{p.newSpaces || 0}</td>
+                  <td className="col-hide-mobile" style={{ color: 'var(--accent)', fontFamily: 'var(--mono)' }}>{p.updatedSpaces || 0}</td>
                   <td style={{ color: 'var(--danger)', fontFamily: 'var(--mono)' }}>{p.failed || 0}</td>
                   <td className="col-hide-mobile">
                     {errorCount > 0 ? (

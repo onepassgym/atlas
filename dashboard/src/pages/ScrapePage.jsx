@@ -40,11 +40,13 @@ function SourceBadge({ sourceId }) {
 
 function JobStatusBadge({ status }) {
   const map = {
-    queued:    { color: '#F59E0B', label: 'Queued'    },
-    running:   { color: '#3B82F6', label: 'Running'   },
-    completed: { color: '#10B981', label: 'Completed' },
-    failed:    { color: '#EF4444', label: 'Failed'    },
-    cancelled: { color: '#6B7280', label: 'Cancelled' },
+    queued:          { color: '#F59E0B', label: 'Queued'          },
+    running:         { color: '#3B82F6', label: 'Running'         },
+    completed:       { color: '#10B981', label: 'Completed'       },
+    completed_empty: { color: '#F59E0B', label: 'Empty — 0 found' },
+    failed:          { color: '#EF4444', label: 'Failed'          },
+    cancelled:       { color: '#6B7280', label: 'Cancelled'       },
+    partial:         { color: '#8B5CF6', label: 'Partial'         },
   };
   const { color, label } = map[status] || { color: '#6B7280', label: status };
   return (
@@ -184,6 +186,8 @@ function ScrapeByUrl() {
 
 function ScrapeByArea() {
   const [area, setArea] = useState('');
+  const [skipRecentDays, setSkipRecentDays] = useState('');
+  const [force, setForce] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -193,12 +197,19 @@ function ScrapeByArea() {
     e.preventDefault();
     if (!area.trim()) return;
     setSubmitting(true); setResult(null); setError(null);
+    const payload = { area: area.trim(), force };
+    if (skipRecentDays !== '') payload.skipRecentDays = Number(skipRecentDays);
     try {
-      const res = await crawlsApi.scrapeByArea({ area: area.trim() });
+      const res = await crawlsApi.scrapeByArea(payload);
       setResult(res.data);
       showToast?.(`Area crawl queued for ${area}`, 'success');
     } catch (err) {
-      setError(err.response?.data?.message || err.message);
+      const msg = err.response?.data?.message || err.message;
+      // 409 = duplicate job, surface the existing job ID
+      if (err.response?.status === 409 && err.response?.data?.existingJobId) {
+        setResult({ jobId: err.response.data.existingJobId, message: err.response.data.message });
+      }
+      setError(msg);
     } finally {
       setSubmitting(false);
     }
@@ -216,10 +227,30 @@ function ScrapeByArea() {
           required
         />
         <p style={helpStyle}>
-          Crawls Google Maps, JustDial, and OpenStreetMap for ALL fitness categories in this area.
-          40+ categories including gym, yoga, crossfit, martial arts, swimming, dance, sports courts, and more.
+          Crawls Google Maps for ALL fitness categories in this area.
         </p>
       </div>
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+        <div style={{ flex: 1 }}>
+          <label style={labelStyle}>Skip Recent Days</label>
+          <input
+            type="number"
+            min="0"
+            value={skipRecentDays}
+            onChange={e => setSkipRecentDays(e.target.value)}
+            placeholder={`default (7)`}
+            style={inputStyle}
+          />
+          <p style={helpStyle}>Set 0 to force re-crawl all URLs regardless of last crawl date.</p>
+        </div>
+      </div>
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+        <input type="checkbox" checked={force} onChange={e => setForce(e.target.checked)} />
+        <span>Force (bypass duplicate job guard)</span>
+      </label>
+
       <button type="submit" disabled={submitting || !area.trim()} style={btnStyle(submitting || !area.trim())}>
         {submitting ? <><Loader2 size={14} className="spin" /> Queuing…</> : <><MapPin size={14} /> Start Area Crawl</>}
       </button>
@@ -274,6 +305,11 @@ function JobResult({ result }) {
           {tracking.status === 'completed' && (
             <span style={{ color: '#10B981', display: 'flex', alignItems: 'center', gap: 4 }}>
               <CheckCircle2 size={11} /> Complete
+            </span>
+          )}
+          {tracking.status === 'completed_empty' && (
+            <span style={{ color: '#F59E0B', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <AlertCircle size={11} /> 0 URLs discovered — Google may have blocked the search, or no gyms exist in this area. Check categoryYield in job details.
             </span>
           )}
         </div>

@@ -1,7 +1,7 @@
 'use strict';
 const Space       = require('../db/spaceModel');
 const NeedsReview = require('../db/needsReviewModel');
-const { makeOpgId } = require('../utils/opgId');
+const { generateSingleOpgId } = require('../utils/opgId');
 const logger      = require('../utils/logger');
 
 // ── Normalisation helpers ─────────────────────────────────────────────────────
@@ -124,7 +124,7 @@ async function resolveEntity(candidate, cityOpgId) {
 async function _createNeedsReview(candidate, existingOpgId, tier, confidence) {
   try {
     await NeedsReview.create({
-      opgId:              makeOpgId('needsReview', { highVolume: false }),
+      opgId:              await generateSingleOpgId('needsReview'),
       type:               'dedup_ambiguous',
       candidate: {
         name:     candidate.name,

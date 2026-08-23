@@ -155,9 +155,9 @@ export default function GymDrawer({ gymId, onClose }) {
             <div className="empty-state">Failed to load gym details</div>
           ) : (
             <>
-              {(gym.photos?.[0]?.url || gym.coverPhoto) && (
+              {(gym.rawPhotoUrls?.[0] || gym.coverUrl) && (
                 <img
-                  src={gym.photos?.[0]?.url || gym.coverPhoto}
+                  src={gym.rawPhotoUrls?.[0] || gym.coverUrl}
                   alt={gym.name}
                   style={{ width: '100%', height: 180, objectFit: 'cover', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}
                   onError={e => e.target.style.display = 'none'}

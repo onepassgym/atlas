@@ -36,6 +36,8 @@ const SEARCH_POOL       = cfg.scraper.searchPool;
 const SKIP_RECENT_DAYS  = cfg.scraper.skipRecentDays;
 // Phase 9: how many URLs per batch-scrape job
 const BATCH_SIZE        = cfg.scraper.batchSize;
+// Gym-name crawl URL cap
+const GYM_NAME_MAX_URLS = cfg.scraper.gymNameMaxUrls;
 
 // ── Graceful shutdown state ──────────────────────────────────────────────────
 let isShuttingDown = false;
@@ -257,6 +259,13 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
         sessionMgr.reportUrlScraped().catch(() => {});
       }
       if (res.action === 'skipped') { stats.skipped++; await updateJob(jobId, { $inc: { 'progress.skipped': 1 } }); }
+      if (res.action === 'needsReview') {
+        stats.skipped++;
+        await updateJob(jobId, {
+          $inc: { 'progress.skipped': 1 },
+          $push: { jobErrors: { message: `needsReview (potential duplicate): ${scraped.name}`, url, at: new Date() } },
+        });
+      }
       if (res.action === 'error')   {
         stats.failed++;
         await updateJob(jobId, {
@@ -348,11 +357,11 @@ async function searchAllCategories(browser, cityName, categories, jobId, bullJob
  * within SKIP_RECENT_DAYS. Removes those from the URL list so we
  * don't waste scrape time on unchanged gyms.
  */
-async function preFilterUrls(urls, cityName) {
-  if (!SKIP_RECENT_DAYS || SKIP_RECENT_DAYS <= 0) return [...urls];
+async function preFilterUrls(urls, cityName, skipDays = SKIP_RECENT_DAYS) {
+  if (!skipDays || skipDays <= 0) return [...urls];
 
   try {
-    const cutoff = new Date(Date.now() - SKIP_RECENT_DAYS * 86_400_000);
+    const cutoff = new Date(Date.now() - skipDays * 86_400_000);
 
     const recentGyms = await Space.find(
       {
@@ -374,7 +383,7 @@ async function preFilterUrls(urls, cityName) {
     const skipped = urls.length - fresh.length;
 
     if (skipped > 0) {
-      logger.info(`  🔎 Pre-filter: skipping ${skipped}/${urls.length} recently-crawled URLs (within ${SKIP_RECENT_DAYS}d)`);
+      logger.info(`  🖎 Pre-filter: skipping ${skipped}/${urls.length} recently-crawled URLs (within ${skipDays}d)`);
     }
     return fresh;
   } catch (err) {
@@ -394,7 +403,8 @@ async function preFilterUrls(urls, cityName) {
 
 async function processCityJob(job) {
   const { jobId, input = {} } = job.data;
-  const { cityName, mode = 'standard' } = input;
+  const { cityName, mode = 'standard', skipRecentDays } = input;
+  const effectiveSkipDays = skipRecentDays !== undefined ? skipRecentDays : SKIP_RECENT_DAYS;
   // Ensure categories is an array. Default to export if missing or null.
   const categories = Array.isArray(input.categories) ? input.categories : FITNESS_CATEGORIES;
   const startTime = Date.now();
@@ -423,7 +433,7 @@ async function processCityJob(job) {
     logger.info(`\n📋 Discovered ${discoveredTotal} unique URLs for ${cityName}`);
 
     // ── Phase 7: Pre-filter recently-crawled URLs ──────────────────────────
-    const urlsToScrape = stopReason ? [] : await preFilterUrls([...allUrls], cityName);
+    const urlsToScrape = stopReason ? [] : await preFilterUrls([...allUrls], cityName, effectiveSkipDays);
     const total = urlsToScrape.length;
     const skippedPreFilter = discoveredTotal - total;
 
@@ -435,8 +445,16 @@ async function processCityJob(job) {
 
     if (total === 0 || stopReason) {
       const durationMs = Date.now() - startTime;
-      const finalStatus = stopReason === 'cancelled' ? 'cancelled' : 'completed';
-      if (stopReason === 'cancelled') await clearCancelFlag(jobId);
+      let finalStatus;
+      if (stopReason === 'cancelled') {
+        finalStatus = 'cancelled';
+        await clearCancelFlag(jobId);
+      } else if (discoveredTotal === 0) {
+        finalStatus = 'completed_empty';
+        logger.warn(`  ⚠ [DISCOVERY EMPTY] ${cityName} — 0 URLs found. Check categoryYield for block details.`);
+      } else {
+        finalStatus = 'completed'; // discovered but all pre-filtered
+      }
       await updateJob(jobId, { status: finalStatus, completedAt: new Date(), durationMs });
       bus.publish('job:completed', { jobId, cityName, status: finalStatus, batches: 0, durationMs });
       logger.info(`  ✅ Discovery done: ${total} URLs, 0 batches (${(durationMs/1000).toFixed(1)}s)`);
@@ -456,7 +474,7 @@ async function processCityJob(job) {
     }
 
     // Mark discovery phase as done — batch results update the job document
-    await updateJob(jobId, { 'progress.batches': batches.length, 'progress.batchesDone': 0 });
+    await updateJob(jobId, { status: 'discovery_complete', 'progress.batches': batches.length, 'progress.batchesDone': 0 });
     bus.publish('job:batches-queued', { jobId, cityName, batches: batches.length, totalUrls: total });
 
     const durationMs = Date.now() - startTime;
@@ -489,6 +507,25 @@ async function processBatchJob(job) {
   const startTime = Date.now();
 
   await connectDB();
+
+  // Wait out any active Google Maps cooldown before touching the browser
+  const MAX_SESSION_WAIT_MS = 35 * 60 * 1000;
+  const SESSION_POLL_MS     = 30_000;
+  let sessionWaited = 0;
+  while (!(await sessionMgr.isAvailable())) {
+    if (sessionWaited >= MAX_SESSION_WAIT_MS) {
+      logger.warn(`[BATCH ${batchIndex}] Session unavailable after ${sessionWaited / 60000}m — aborting`);
+      await updateJob(parentJobId, {
+        $inc: { 'progress.batchesDone': 1, 'progress.failed': urls.length, errorCount: 1 },
+        $push: { jobErrors: { message: `Batch ${batchIndex} aborted — session cooling too long`, at: new Date() } },
+      });
+      return { batchIndex, stats: {}, status: 'skipped_cooling' };
+    }
+    logger.info(`[BATCH ${batchIndex}] Session cooling — waiting ${SESSION_POLL_MS / 1000}s…`);
+    await new Promise(r => setTimeout(r, SESSION_POLL_MS));
+    sessionWaited += SESSION_POLL_MS;
+  }
+
   logger.info(`\n📦 [BATCH ${batchIndex}] ${cityName} — ${urls.length} URLs, pagePool:${PAGE_POOL}, mode:${mode}`);
   bus.publish('crawl:batch-start', { jobId: parentJobId, cityName, batchIndex, urlCount: urls.length, pagePool: PAGE_POOL, mode });
 
@@ -510,35 +547,24 @@ async function processBatchJob(job) {
     const durationMs = Date.now() - startTime;
     const batchStatus = stopReason ? (stopReason === 'cancelled' ? 'cancelled' : 'partial') : 'completed';
 
-    // ── Report batch results to parent job ────────────────────────────────
-    await updateJob(parentJobId, {
-      $inc: { 'progress.batchesDone': 1 },
-    });
-
-    // Check if ALL batches are done → mark parent job completed
+    // ── Atomically increment batchesDone and check for overall completion ─
     try {
-      const parentJob = await CrawlJob.findOne({ jobId: parentJobId }).lean();
-      const p = parentJob?.progress || {};
+      const afterIncrement = await CrawlJob.findOneAndUpdate(
+        { jobId: parentJobId },
+        { $inc: { 'progress.batchesDone': 1 } },
+        { new: true, lean: true }
+      );
+      const p        = afterIncrement?.progress || {};
       const totalDone = (p.scraped || 0) + (p.failed || 0) + (p.skipped || 0);
+      const allDone   = p.batchesDone >= p.batches || (p.total > 0 && totalDone >= p.total);
 
-      if (p.batchesDone >= p.batches || (p.total > 0 && totalDone >= p.total)) {
-        const totalDuration = parentJob.startedAt ? (Date.now() - new Date(parentJob.startedAt).getTime()) : durationMs;
-        
-        await updateJob(parentJobId, {
-          status: 'completed',
-          completedAt: new Date(),
-          durationMs: totalDuration,
-        });
-
-        // Clear any remaining pending batches for this job
-        await removeJobAndBatches(parentJobId);
-
-        bus.publish('job:completed', {
-          jobId: parentJobId, cityName,
-          status: 'completed',
-          durationMs: totalDuration,
-        });
-        logger.info(`\n🏁 [CITY COMPLETE] ${cityName} — all ${parentJob.progress.batches} batches done (${(totalDuration/1000).toFixed(1)}s total)`);
+      if (allDone) {
+        const totalDuration = afterIncrement.startedAt
+          ? (Date.now() - new Date(afterIncrement.startedAt).getTime())
+          : durationMs;
+        await updateJob(parentJobId, { status: 'completed', completedAt: new Date(), durationMs: totalDuration });
+        bus.publish('job:completed', { jobId: parentJobId, cityName, status: 'completed', durationMs: totalDuration });
+        logger.info(`\n🏁 [CITY COMPLETE] ${cityName} — all ${p.batches} batches done (${(totalDuration / 1000).toFixed(1)}s total)`);
       }
     } catch (_) {}
 
@@ -601,7 +627,7 @@ async function processGymNameJob(job) {
     await updateJob(jobId, { 'progress.total': urls.length });
 
     let i = 0;
-    for (const url of urls.slice(0, 15)) {
+    for (const url of urls.slice(0, GYM_NAME_MAX_URLS)) {
       stopReason = await shouldStop(jobId);
       if (stopReason) break;
 
@@ -854,6 +880,9 @@ async function processSpaceUrlJob(job) {
 async function start() {
   await connectDB();
 
+  // Clear any stale Google Maps cooling state so batches aren't blocked on restart
+  await sessionMgr.resetSession().catch(() => {});
+
   // ── Crawl Worker (city-crawl, batch-scrape, gym-name-crawl) ───────────────
   const worker = new Worker('atlas-crawl', async (job) => {
     logger.info(`⚙️  Processing job: ${job.name} [${job.id}]`);
@@ -866,10 +895,10 @@ async function start() {
   }, {
     connection,
     concurrency: CONCURRENCY,
-    lockDuration:    2_700_000, // 45 min per job (city discovery + batching)
-    lockRenewTime:     300_000, // renew every 5 min
-    stalledInterval:   900_000, // detect stalled after 15 min
-    maxStalledCount:         2, // 2 stall retries before failed
+    lockDuration:    2_700_000,
+    lockRenewTime:     60_000,
+    stalledInterval:   900_000,
+    maxStalledCount:         2,
   });
 
   // ── Enrichment Worker (gym-enrichment) ────────────────────────────────
@@ -897,7 +926,7 @@ async function start() {
   enrichWorker.on('error',    (err) => logger.error(`Enrichment worker error: ${err.message}`));
   enrichWorker.on('stalled',  (jobId) => logger.warn(`⚠️  Enrichment job stalled: ${jobId}`));
 
-  logger.info(`\n🚀 Atlas Worker started  [concurrency: ${CONCURRENCY}, pagePool: ${PAGE_POOL}, lockDuration: 2700s, lockRenewTime: 300s]`);
+  logger.info(`\n🚀 Atlas Worker started  [concurrency: ${CONCURRENCY}, pagePool: ${PAGE_POOL}, lockDuration: 2700s, lockRenewTime: 60s]`);
   logger.info(`✨ Enrichment Worker started [concurrency: 1, lockDuration: 1800s, stalledInterval: 600s]`);
 
   // ── Graceful shutdown ────────────────────────────────────────────────────

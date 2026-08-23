@@ -410,8 +410,8 @@ function SpaceRow({ space, onClick, COL }) {
 
       {/* Category */}
       <div style={{ width: COL.category, paddingRight: 8 }}>
-        <span style={{ fontSize: 11, color: '#71717A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
-          {space.primaryCategorySlug?.replace(/-/g, ' ') || space.category || '—'}
+        <span style={{ fontSize: 11, color: '#71717A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block', textTransform: 'capitalize' }}>
+          {space.primaryCategorySlug?.replace(/-/g, ' ') || '—'}
         </span>
       </div>
 

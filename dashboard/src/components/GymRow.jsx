@@ -3,7 +3,7 @@ import { Star, MessageCircle, Target, MapPin, Phone, Globe, ImageIcon, Award } f
 
 function formatCategory(cat) {
   if (!cat || cat === 'undefined' || cat === 'unknown') return null;
-  return String(cat).split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  return String(cat).split(/[-_]/).map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
 function HighlightText({ text, search }) {
@@ -106,14 +106,15 @@ function RatingStars({ rating }) {
 }
 
 export default React.memo(function GymRow({ gym, onClick, searchTerm = '' }) {
-  const categoryLabel = formatCategory(gym.category) || (gym.categoryId?.label ? formatCategory(gym.categoryId.label) : null);
+  const categoryLabel = formatCategory(gym.primaryCategorySlug || gym.category);
+  const thumbUrl = gym.coverUrl || gym.rawPhotoUrls?.[0] || null;
 
   return (
     <div className="gym-row-card" onClick={() => onClick?.(gym._id)} id={`gym-${gym._id}`}>
       {/* Thumbnail */}
       <div className="gym-row-thumb">
-        {gym.coverPhoto?.thumbnailUrl ? (
-          <img src={gym.coverPhoto.thumbnailUrl} alt="" loading="lazy" />
+        {thumbUrl ? (
+          <img src={thumbUrl} alt="" loading="lazy" />
         ) : (
           <div className="gym-row-thumb-fallback">
             <MapPin size={18} />

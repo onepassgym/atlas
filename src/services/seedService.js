@@ -1,7 +1,7 @@
 'use strict';
 const CrawlSeed   = require('../db/crawlSeedModel');
 const Location    = require('../db/locationModel');
-const { makeOpgId } = require('../utils/opgId');
+const { generateSingleOpgId } = require('../utils/opgId');
 const logger      = require('../utils/logger');
 
 const CONSECUTIVE_ZERO_ALERT = 3;

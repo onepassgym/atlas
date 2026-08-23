@@ -348,6 +348,24 @@ function startScheduler() {
     await runSeedBasedCrawl('seed-6h-cron');
   }, { timezone: tz });
 
+  // Idle feeder: checks every minute if the crawler is free and feeds due seeds
+  cron.schedule('* * * * *', async () => {
+    try {
+      const { getQueueStats } = require('../queue/queues');
+      const stats = await getQueueStats();
+      if (stats.waiting === 0 && stats.active === 0 && stats.delayed === 0) {
+        const { getNextBatch } = require('./seedService');
+        const due = await getNextBatch(1);
+        if (due.length > 0) {
+          logger.info(`[scheduler] Crawler is idle. Triggering next batch of scheduled seeds...`);
+          await runSeedBasedCrawl('idle-feeder');
+        }
+      }
+    } catch (e) {
+      logger.error(`[scheduler] Idle feeder failed: ${e.message}`);
+    }
+  }, { timezone: tz });
+
   // opg-core sync: every night at 1:00 AM IST = 19:30 UTC previous day
   cron.schedule('30 19 * * *', async () => {
     logger.info('[scheduler] Triggering nightly opg-core sync...');
@@ -368,6 +386,7 @@ function startScheduler() {
   logger.info('   • Enrichment       → every Friday 03:00 AM IST');
   logger.info('   • Photo sync       → every day 04:00 AM IST');
   logger.info('   • Seed-based crawl → every 6h (DB-driven seeds)');
+  logger.info('   • Idle feeder      → every minute (if queue empty)');
   logger.info('   • opg-core sync    → every night 01:00 AM IST');
 }
 

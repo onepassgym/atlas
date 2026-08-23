@@ -111,4 +111,14 @@ async function markSessionLaunched() {
   await setState({ state: 'active', urlsScraped: 0, blockCount: 0, launchedAt: Date.now() });
 }
 
-module.exports = { shouldRotateSession, reportUrlScraped, reportBlock, isAvailable, markSessionLaunched };
+/** Call on process start to clear any stale cooling state from a previous run. */
+async function resetSession() {
+  try {
+    await getRedis().del(HOURLY_KEY);
+    await setState({ state: 'idle', urlsScraped: 0, blockCount: 0 });
+    await cb.recordSuccess('google_maps').catch(() => {});
+    logger.info('[SessionManager] Session state cleared on startup');
+  } catch (_) {}
+}
+
+module.exports = { shouldRotateSession, reportUrlScraped, reportBlock, isAvailable, markSessionLaunched, resetSession };

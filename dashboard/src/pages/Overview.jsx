@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, Sector } from 'recharts';
 import { Building2, Camera, Zap, Target, Link2, Activity, TrendingUp, XCircle, RefreshCw } from 'lucide-react';
-import CrawlActivity from '../components/CrawlActivity';
 import EnrichmentPanel from '../components/EnrichmentPanel';
 import HealthRecommendations from '../components/HealthRecommendations';
 import Skeleton from '../components/Skeleton';
@@ -18,7 +17,7 @@ const CHART_COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#e
 
 function formatCategory(cat) {
   if (!cat || cat === 'undefined' || cat === 'unknown') return 'Unknown';
-  return String(cat).split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  return String(cat).split(/[-_]/).map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
 const CustomTooltip = ({ active, payload }) => {
@@ -61,7 +60,7 @@ const renderActiveShape = (props) => {
 };
 
 export default function Overview() {
-  const { events, setChainsCache, crawlActivity, toast } = useApp();
+  const { events, setChainsCache, toast } = useApp();
   const [stats, setStats] = useState(null);
   const [queueStats, setQueueStats] = useState(null);
   const [mediaQueueStats, setMediaQueueStats] = useState(null);
@@ -185,10 +184,6 @@ export default function Overview() {
 
   const cityData = (stats?.topCities || []).map(c => ({ name: c._id || 'Unknown', count: c.count }));
   const catData = (stats?.byCategory || []).slice(0, 8).map(c => ({ name: formatCategory(c._id), value: c.count }));
-
-  // Throttle health color
-  const throttleColor = crawlActivity.throttle <= 1.0 ? 'green' : crawlActivity.throttle <= 2.0 ? 'yellow' : 'red';
-  const throttleLabel = crawlActivity.throttle <= 0.85 ? 'Cruising' : crawlActivity.throttle <= 1.1 ? 'Normal' : crawlActivity.throttle <= 2.0 ? 'Caution' : 'Throttled';
 
   return (
     <motion.div className="container" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
@@ -329,9 +324,8 @@ export default function Overview() {
         <HealthRecommendations />
       </div>
 
-      {/* ── System Activity (Live Crawler & Enrichment) ────── */}
+      {/* ── System Activity (Enrichment) ────── */}
       <div className="fluid-grid-large">
-        <CrawlActivity />
         <EnrichmentPanel />
       </div>
 
@@ -424,16 +418,10 @@ export default function Overview() {
               sub: 'geographic coverage',
               color: '#ec4899',
             },
-            {
-              label: 'THROTTLE',
-              value: crawlActivity.throttle.toFixed(1) + '×',
-              sub: throttleLabel,
-              color: throttleColor === 'green' ? '#10b981' : throttleColor === 'yellow' ? '#f59e0b' : '#ef4444',
-            },
           ].map((m, i) => (
             <div key={i} style={{
               padding: '16px 20px',
-              borderRight: i < 4 ? '1px solid var(--border)' : 'none',
+              borderRight: i < 3 ? '1px solid var(--border)' : 'none',
             }}>
               <div style={{ fontSize: 'clamp(18px, 2vw, 26px)', fontWeight: 900, fontFamily: 'var(--mono)', color: m.color, letterSpacing: -1, lineHeight: 1, marginBottom: 5 }}>{m.value}</div>
               <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 2, color: 'var(--text-muted)', fontFamily: 'var(--mono)', textTransform: 'uppercase', marginBottom: 3 }}>{m.label}</div>
@@ -580,7 +568,7 @@ export default function Overview() {
               <div style={{ padding: 6, background: 'rgba(16, 185, 129, 0.1)', borderRadius: 8, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
                 <Link2 size={16} color="#10b981" />
               </div>
-              Latest Venues
+              Latest Spaces
             </span>
           </div>
           <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
@@ -643,7 +631,7 @@ export default function Overview() {
                     )}
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'var(--mono)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--text-secondary)' }}>TOT</span> {total}</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--success)' }}>NEW</span> {p.newGyms || 0}</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--success)' }}>NEW</span> {p.newSpaces || 0}</span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--danger)' }}>FAIL</span> {p.failed || 0}</span>
                       {p.batches > 0 && <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--accent)' }}>BAT</span> {p.batchesDone || 0}/{p.batches}</span>}
                     </div>

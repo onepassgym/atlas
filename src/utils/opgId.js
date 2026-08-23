@@ -1,5 +1,5 @@
 'use strict';
-const crypto = require('crypto');
+const Counter = require('../db/counterModel');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // opgId v5 — Format: {ENTITY}-{WORD}-{base32tail}
@@ -34,24 +34,62 @@ const ENTITY_PREFIXES = {
 };
 
 /**
- * Generate a v5 opgId.
+ * Reserve a block of IDs atomically.
  * @param {string} entity - One of: space, review, photo, chain, location
- * @param {{ highVolume?: boolean }} opts - highVolume=true → 14 char tail (~70 bits)
- * @returns {string} e.g. "SPC-TIGER-9QX4M3PA7KF2QH"
+ * @param {number} count - Number of IDs to reserve
+ * @returns {Promise<number>} - The starting sequence number
  */
-function makeOpgId(entity, { highVolume = true } = {}) {
+async function reserveOpgIds(entity, count = 1) {
   const prefix = ENTITY_PREFIXES[entity];
   if (!prefix) throw new Error(`Unknown entity "${entity}". Valid: ${Object.keys(ENTITY_PREFIXES).join(', ')}`);
 
-  const word = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
-  const tailLen = highVolume ? 14 : 11;
-  const bytes = crypto.randomBytes(tailLen);
+  const counter = await Counter.findByIdAndUpdate(
+    `opg_${entity}`,
+    { $inc: { seq: count } },
+    { new: true, upsert: true }
+  );
+  
+  // If we incremented by `count`, the start of our reserved block is `counter.seq - count`
+  return counter.seq - count;
+}
+
+/**
+ * Generate a v5 opgId synchronously from a sequence number.
+ * Format: {PREFIX}-{ANIMAL}-{4_CHAR_BASE32}
+ * @param {string} entity - One of: space, review, photo, chain, location
+ * @param {number} seq - Sequence integer from reserveOpgIds
+ * @returns {string} e.g. "SPC-TIGER-465Q"
+ */
+function generateOpgId(entity, seq) {
+  const prefix = ENTITY_PREFIXES[entity];
+  if (!prefix) throw new Error(`Unknown entity "${entity}". Valid: ${Object.keys(ENTITY_PREFIXES).join(', ')}`);
+
+  // Max 4-char Base32 = 32^4 = 1,048,576
+  const MAX_BASE32_VAL = 1048576; 
+  
+  // Use seq to deterministically pick an animal, rollover if seq > max Base32
+  const animalIndex = Math.floor(seq / MAX_BASE32_VAL) % ANIMALS.length;
+  const word = ANIMALS[animalIndex];
+  
+  // Get remainder for the 4-char base32 tail
+  let remainder = seq % MAX_BASE32_VAL;
   let tail = '';
-  for (let i = 0; i < tailLen; i++) {
-    tail += BASE32[bytes[i] % 32];
+  for (let i = 0; i < 4; i++) {
+    tail = BASE32[remainder % 32] + tail;
+    remainder = Math.floor(remainder / 32);
   }
 
   return `${prefix}-${word}-${tail}`;
+}
+
+/**
+ * Convenience wrapper for generating a single ID.
+ * @param {string} entity - One of: space, review, photo, chain, location
+ * @returns {Promise<string>} e.g. "SPC-TIGER-465Q"
+ */
+async function generateSingleOpgId(entity) {
+  const seq = await reserveOpgIds(entity, 1);
+  return generateOpgId(entity, seq);
 }
 
 /**
@@ -61,7 +99,7 @@ function makeOpgId(entity, { highVolume = true } = {}) {
  */
 function isValidOpgId(str) {
   if (!str || typeof str !== 'string') return false;
-  return /^[A-Z]{3}-[A-Z]{4,7}-[0-9A-Z]{11,14}$/.test(str);
+  return /^[A-Z]{3}-[A-Z]{4,7}-[0-9A-Z]{4,14}$/.test(str);
 }
 
 /**
@@ -84,4 +122,4 @@ function entityFromOpgId(opgId) {
   return Object.entries(ENTITY_PREFIXES).find(([, v]) => v === prefix)?.[0] || null;
 }
 
-module.exports = { makeOpgId, isValidOpgId, isLegacyOpgId, entityFromOpgId, ENTITY_PREFIXES };
+module.exports = { reserveOpgIds, generateOpgId, generateSingleOpgId, isValidOpgId, isLegacyOpgId, entityFromOpgId, ENTITY_PREFIXES };

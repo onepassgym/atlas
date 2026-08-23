@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 
 const NeedsReviewSchema = new mongoose.Schema(
   {
-    // NRV-{ANIMAL}-{base32} — minted via makeOpgId('needsReview')
+    // NRV-{ANIMAL}-{base32} — minted via generateSingleOpgId('needsReview')
     opgId: { type: String, unique: true, sparse: true },
 
     type: {

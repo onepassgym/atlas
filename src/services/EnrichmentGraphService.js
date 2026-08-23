@@ -21,7 +21,7 @@ const Space         = require('../db/spaceModel');
 const Review        = require('../db/reviewModel');
 const Photo         = require('../db/photoModel');
 const EnrichmentLog = require('../db/enrichmentLogModel');
-const { makeOpgId } = require('../utils/opgId');
+const { reserveOpgIds, generateOpgId } = require('../utils/opgId');
 const logger        = require('../utils/logger');
 const bus           = require('./eventBus');
 
@@ -237,7 +237,7 @@ async function _applyStageUpdates(space, stageData, $set) {
         filter: { originalUrl: p.url, spaceId },
         update: {
           $setOnInsert: {
-            opgId:      makeOpgId('photo'),
+            opgId:      null, // assigned below
             spaceId,
             spaceOpgId,
             originalUrl: p.url,
@@ -254,9 +254,13 @@ async function _applyStageUpdates(space, stageData, $set) {
         upsert: true,
       }
     }));
-    if (ops.length) {
-      const PhotoModel = require('../db/photoModel');
-      await PhotoModel.bulkWrite(ops, { ordered: false }).catch(() => {});
+    if (ops.length > 0) {
+      const photoStartSeq = await reserveOpgIds('photo', ops.length);
+      ops.forEach((op, i) => {
+        op.updateOne.update.$setOnInsert.opgId = generateOpgId('photo', photoStartSeq + i);
+      });
+      const Photo = require('../db/photoModel');
+      await Photo.bulkWrite(ops, { ordered: false }).catch(() => {});
     }
   }
 
@@ -266,7 +270,8 @@ async function _applyStageUpdates(space, stageData, $set) {
     const { buildReviewDocs } = ReviewModel;
     if (typeof buildReviewDocs === 'function') {
       const docs = buildReviewDocs(space._id, stageData._newReviews, spaceOpgId);
-      docs.forEach(d => { d.opgId = makeOpgId('review'); });
+      const revStartSeq = await reserveOpgIds('review', docs.length);
+      docs.forEach((d, i) => { d.opgId = generateOpgId('review', revStartSeq + i); });
       await ReviewModel.Review.insertMany(docs, { ordered: false }).catch(() => {});
     }
   }

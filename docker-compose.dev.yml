@@ -1,0 +1,145 @@
+# ATLAS — Fitness Intelligence Scraper (Development Environment)
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  # ── API server (with nodemon) ──────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: atlas-api-dev
+    restart: unless-stopped
+    ports:
+      - "8747:8747"
+    env_file: .env
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/atlas05
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NODE_ENV=development
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./media:/app/media
+      - ./logs:/app/logs
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [opg]
+    # Install dependencies (including dev deps like nodemon) then run dev script
+    command: sh -c "npm install && npm run dev"
+
+  # ── Crawl worker (with nodemon) ────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: atlas-worker-dev
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/atlas05
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NODE_ENV=development
+      - SCRAPER_CONCURRENCY=1
+      - SCRAPER_PAGE_POOL=3
+      - SCRAPER_HEADLESS=true
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./media:/app/media
+      - ./logs:/app/logs
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [opg]
+    command: sh -c "npm install && npm run dev:worker"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # ── Enrichment worker (with nodemon) ───────────────────────────
+  enrichment-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: atlas-enrichment-worker-dev
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/atlas05
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NODE_ENV=development
+      - ENRICHMENT_DELAY=2000
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./media:/app/media
+      - ./logs:/app/logs
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [opg]
+    command: sh -c "npm install && npm run dev:worker:enrich"
+
+  # ── Dashboard UI (Vite dev server) ─────────────────────────────
+  dashboard:
+    image: node:20-slim
+    container_name: atlas-dashboard-dev
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://api:8747
+    volumes:
+      - ./dashboard:/app/dashboard
+      - /app/dashboard/node_modules
+    working_dir: /app/dashboard
+    networks: [opg]
+    # Needs to bind to 0.0.0.0 so host can access it
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+
+  # ── MongoDB ────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7.0
+    container_name: atlas-mongo
+    restart: unless-stopped
+    ports:
+      - "27328:27017"
+    volumes:
+      - mongo_data:/data/db
+    command: mongod --wiredTigerCacheSizeGB 1
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [opg]
+
+  # ── Redis ──────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: atlas-redis
+    restart: unless-stopped
+    ports:
+      - "6847:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 256mb --maxmemory-policy noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [opg]
+
+volumes:
+  mongo_data:
+  redis_data:
+
+networks:
+  opg:
+    driver: bridge

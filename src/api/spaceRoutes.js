@@ -303,9 +303,16 @@ router.get('/photos', async (req, res) => {
 
 async function resolveSpace(req, res, next) {
   const { opgId } = req.params;
-  if (!isValidOpgId(opgId)) return err(res, 'Invalid OPG ID format', 400);
   try {
-    const space = await Space.findOne({ opgId }).lean();
+    let space;
+    if (mongoose.Types.ObjectId.isValid(opgId) && String(new mongoose.Types.ObjectId(opgId)) === opgId) {
+      space = await Space.findById(opgId).lean();
+    } else if (isValidOpgId(opgId)) {
+      space = await Space.findOne({ opgId }).lean();
+    } else {
+      return err(res, 'Invalid Space ID format', 400);
+    }
+    
     if (!space) return err(res, 'Space not found', 404);
     req.space = space;
     next();
@@ -313,7 +320,7 @@ async function resolveSpace(req, res, next) {
 }
 
 router.get('/:opgId',
-  param('opgId').matches(/^SPC-[A-Z]+-[0-9A-Z]{11,14}$/).withMessage('Invalid space opgId'),
+  param('opgId').notEmpty().withMessage('Space ID required'),
   resolveSpace,
   async (req, res) => {
     if (validate(req, res)) return;
@@ -326,7 +333,7 @@ router.get('/:opgId',
 );
 
 router.patch('/:opgId',
-  param('opgId').matches(/^SPC-[A-Z]+-[0-9A-Z]{11,14}$/).withMessage('Invalid space opgId'),
+  param('opgId').notEmpty().withMessage('Space ID required'),
   resolveSpace,
   async (req, res) => {
     if (validate(req, res)) return;
@@ -351,7 +358,7 @@ router.patch('/:opgId',
  * flip the space_photos record to owned.
  */
 router.post('/:opgId/photos/:photoOpgId/download',
-  param('opgId').matches(/^SPC-[A-Z]+-[0-9A-Z]{11,14}$/),
+  param('opgId').notEmpty().withMessage('Space ID required'),
   param('photoOpgId').matches(/^PHT-[A-Z]+-[0-9A-Z]{11,14}$/),
   resolveSpace,
   async (req, res) => {
@@ -379,7 +386,7 @@ router.post('/:opgId/photos/:photoOpgId/download',
  * Download all un-downloaded photos for a space. Explicit, rate-limited.
  */
 router.post('/:opgId/photos/download-all',
-  param('opgId').matches(/^SPC-[A-Z]+-[0-9A-Z]{11,14}$/),
+  param('opgId').notEmpty().withMessage('Space ID required'),
   resolveSpace,
   async (req, res) => {
     if (validate(req, res)) return;

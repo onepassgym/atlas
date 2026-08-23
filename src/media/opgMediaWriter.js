@@ -16,7 +16,7 @@
  */
 
 const mongoose = require('mongoose');
-const { makeOpgId } = require('../utils/opgId');
+const { generateSingleOpgId } = require('../utils/opgId');
 const { downloadAndCreateVariants } = require('./downloader');
 const Photo = require('../db/photoModel');
 const Space = require('../db/spaceModel');
@@ -104,9 +104,8 @@ async function downloadPhoto(photoOpgId, context = {}) {
   });
 
   // Create media_assets record
-  const assetOpgId = makeOpgId('photo'); // reuse PHT- prefix for asset cross-ref tracking
-  // Actually per v5, assets use AST- prefix. Let's use a direct string:
-  const astId = `AST-${makeOpgId('photo').split('-').slice(1).join('-')}`; // AST-WORD-base32
+  const rawAstId = await generateSingleOpgId('photo');
+  const astId = `AST-${rawAstId.split('-').slice(1).join('-')}`; // AST-WORD-base32
 
   await MediaAsset.create({
     opgId: astId,
@@ -126,7 +125,8 @@ async function downloadPhoto(photoOpgId, context = {}) {
   // Create media_variants
   const variantDocs = [];
   for (const [varType, varData] of Object.entries(result.variants)) {
-    const varOpgId = `VAR-${makeOpgId('photo').split('-').slice(1).join('-')}`;
+    const rawVarId = await generateSingleOpgId('photo');
+    const varOpgId = `VAR-${rawVarId.split('-').slice(1).join('-')}`;
     variantDocs.push({
       opgId: varOpgId,
       assetOpgId: astId,

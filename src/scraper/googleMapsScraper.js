@@ -90,10 +90,23 @@ function sleep(min, max) {
 // ── Browser pool ──────────────────────────────────────────────────────────────
 
 class BrowserManager {
-  constructor() { this.browser = null; this.ctx = null; }
+  constructor() { this.browser = null; this.ctx = null; this._proxy = null; }
 
   async launch() {
     const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined;
+    const proxyList = cfg.sources.proxyList || [];
+    const proxyArgs = [];
+    if (proxyList.length > 0) {
+      const raw   = proxyList[Math.floor(Math.random() * proxyList.length)];
+      const parts = raw.split(':');
+      const proxyServer = `${parts[0]}:${parts[1]}`;
+      this._proxy = parts.length >= 4
+        ? { server: proxyServer, username: parts[2], password: parts[3] }
+        : { server: proxyServer };
+      proxyArgs.push(`--proxy-server=${proxyServer}`);
+      logger.info(`  🌐 Using proxy: ${proxyServer}`);
+    }
+
     this.browser = await chromium.launch({
       headless: cfg.scraper.headless,
       executablePath,
@@ -104,10 +117,10 @@ class BrowserManager {
         '--disable-background-networking',
         '--disable-default-apps',
         '--lang=en-US',
-        // Additional anti-detection hardening
         '--disable-blink-features=AutomationControlled',
         '--disable-infobars',
         '--window-position=0,0',
+        ...proxyArgs,
       ],
     });
 
@@ -137,6 +150,13 @@ class BrowserManager {
     });
 
     logger.info(`  🎭 Browser fingerprint: ${viewport.width}×${viewport.height}, tz:${tz}, dpr:${deviceScaleFactor}`);
+
+    if (this._proxy?.username) {
+      await this.ctx.setHTTPCredentials({
+        username: this._proxy.username,
+        password: this._proxy.password,
+      });
+    }
 
     // Inject anti-automation overrides into every new page
     await this.ctx.addInitScript(() => {
@@ -183,8 +203,11 @@ async function isBlocked(page) {
       // Google consent wall that won't dismiss
       if (/before you continue|consent\.google/i.test(window.location.href)) return 'consent';
       // Completely empty page (blocked silently)
+      // Only a true redirect/block lacks the Maps search input entirely
       if (document.querySelectorAll('a[href*="/maps/place/"]').length === 0 &&
           !document.querySelector('h1') &&
+          !document.querySelector('#searchboxinput, input[aria-label*="Search"]') &&
+          !document.querySelector('.m6QErb') &&
           body.length < 200) return 'empty';
       return false;
     });
@@ -271,11 +294,11 @@ async function searchGymsInCity(page, cityName, category) {
       }
 
       // End of list?
-      const ended = await page.locator('text="You\'ve reached the end of the list."').isVisible({ timeout: 500 }).catch(() => false);
+      const ended = await page.locator('text="You\'ve reached the end of the list.", text="End of results"').isVisible({ timeout: 500 }).catch(() => false);
       if (ended) break;
 
       // Scroll the results panel
-      const panel = page.locator('div[role="feed"]').first();
+      const panel = page.locator('div[role="feed"], div.m6QErb, .DxyBCb').first();
       try {
         await panel.evaluate(el => el.scrollBy(0, 1200));
       } catch (_) {
@@ -331,16 +354,30 @@ async function scrapeGymDetail(page, url, mode = 'standard') {
 
   // ── Core data from DOM ───────────────────────────────────────────────────
   const core = await page.evaluate(() => {
+    // keep t/a helpers local to the evaluate closure
+    /* eslint-disable no-shadow */
     const t  = s => document.querySelector(s)?.textContent?.trim() || null;
     const a  = (s, attr) => document.querySelector(s)?.getAttribute(attr) || null;
     const ta = (sel, attr) => [...document.querySelectorAll(sel)].map(el => el.getAttribute(attr)).filter(Boolean);
 
-    // Name
-    const name = t('h1.DUwDvf') || t('h1') || t('[data-attrid="title"]');
+    // Name — multiple fallbacks guard against Google DOM changes
+    const name = t('h1.DUwDvf')
+      || t('h1[class*="fontHeadlineLarge"]')
+      || t('h1')
+      || t('[class*="DUwDvf"]')
+      || t('[data-attrid="title"]')
+      || t('.x3AX1-LfntMc-header-title-title span');
 
     // Rating
     const ratingRaw = t('.F7nice span[aria-hidden="true"]') || t('.MW4etd');
-    const rating    = ratingRaw ? parseFloat(ratingRaw) : null;
+    let rating = ratingRaw ? parseFloat(ratingRaw) : null;
+    if (!rating) {
+      const starLabel = a('span[aria-label*="stars"]', 'aria-label');
+      if (starLabel) {
+        const m = starLabel.match(/([\d.]+)\s*stars/i);
+        if (m) rating = parseFloat(m[1]);
+      }
+    }
 
     // Review count
     const revText     = document.querySelector('.F7nice')?.getAttribute('aria-label') || '';
@@ -359,8 +396,12 @@ async function scrapeGymDetail(page, url, mode = 'standard') {
     const website = a('a[data-item-id="authority"]', 'href') ||
                     a('a[aria-label*="website" i]', 'href');
 
-    // Category
-    const category = t('.DkEaL') || t('button.DkEaL') || null;
+    // Category — fallbacks for layout variants
+    const category = t('.DkEaL')
+      || t('button.DkEaL')
+      || t('[jsaction*="category"] span')
+      || t('.skqShb')
+      || null;
 
     // Price level
     const priceLevel = t('[aria-label*="price range" i]') || null;
@@ -438,7 +479,11 @@ async function scrapeGymDetail(page, url, mode = 'standard') {
     };
   });
 
-  if (!core.name) throw new Error('Could not extract gym name — page may not have loaded correctly');
+  if (!core.name) {
+    const pageTitle = await page.title().catch(() => '');
+    logger.warn(`  ⚠ DOM name extraction failed — title: "${pageTitle}" | url: ${url.slice(-60)}`);
+    throw new Error('Could not extract gym name — DOM selectors may be stale or page failed to load');
+  }
 
   // ── Fast mode: return immediately with hero data only ────────────────────
   if (mode === 'fast') {
@@ -855,9 +900,16 @@ async function scrapeSelective(page, url, sections = ['all']) {
   const core = await page.evaluate(() => {
     const t  = s => document.querySelector(s)?.textContent?.trim() || null;
     const a  = (s, attr) => document.querySelector(s)?.getAttribute(attr) || null;
-    const name = t('h1.DUwDvf') || t('h1');
+    const name = t('h1.DUwDvf') || t('h1[class*="fontHeadlineLarge"]') || t('h1') || t('[class*="DUwDvf"]');
     const ratingRaw = t('.F7nice span[aria-hidden="true"]') || t('.MW4etd');
-    const rating = ratingRaw ? parseFloat(ratingRaw) : null;
+    let rating = ratingRaw ? parseFloat(ratingRaw) : null;
+    if (!rating) {
+      const starLabel = a('span[aria-label*="stars"]', 'aria-label');
+      if (starLabel) {
+        const m = starLabel.match(/([\d.]+)\s*stars/i);
+        if (m) rating = parseFloat(m[1]);
+      }
+    }
     const revText = document.querySelector('.F7nice')?.getAttribute('aria-label') || '';
     const revMatch = revText.match(/([\d,]+)\s*review/i);
     const totalReviews = revMatch ? parseInt(revMatch[1].replace(/,/g, ''), 10) : 0;
@@ -887,7 +939,11 @@ async function scrapeSelective(page, url, sections = ['all']) {
     };
   });
 
-  if (!core.name) throw new Error('Could not extract gym name — page may not have loaded correctly');
+  if (!core.name) {
+    const pageTitle = await page.title().catch(() => '');
+    logger.warn(`  ⚠ DOM name extraction failed (enrichment) — title: "${pageTitle}" | url: ${url.slice(-60)}`);
+    throw new Error('Could not extract gym name — DOM selectors may be stale or page failed to load');
+  }
 
   // Build result — start with core, selectively add sections
   const result = { ...core, reviews: [], reviewSummary: null };

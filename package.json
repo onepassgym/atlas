@@ -26,7 +26,8 @@
     "migrate:opgid": "node migration/index.js --run=addOpgIds",
     "migrate:opgid:prod": "NODE_ENV=production node migration/index.js --run=addOpgIds",
     "migration": "node migration/index.js",
-    "migration:prod": "NODE_ENV=production node migration/index.js"
+    "migration:prod": "NODE_ENV=production node migration/index.js",
+    "docker:dev": "docker compose -f docker-compose.dev.yml up"
   },
   "dependencies": {
     "axios": "1.7.2",

@@ -54,10 +54,10 @@ const enrichmentQueue = makeQueue('atlas-enrichment', {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function addCityJob(jobId, cityName, categories) {
+async function addCityJob(jobId, cityName, categories, skipRecentDays) {
   const job = await crawlQueue.add(
     'city-crawl',
-    { type: 'city', jobId, input: { cityName, categories } },
+    { type: 'city', jobId, input: { cityName, categories, skipRecentDays } },
     { jobId }
   );
   logger.info(`📥 Queued city: ${cityName} (BullMQ #${job.id})`);
