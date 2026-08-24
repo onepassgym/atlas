@@ -4,12 +4,14 @@ import { AppProvider } from './context/AppContext';
 import AppLayout from './components/layout/AppLayout';
 import ToastContainer from './components/Toast';
 import Skeleton from './components/Skeleton';
+import ConfirmDialog from './components/ConfirmDialog';
 
 const Overview     = lazy(() => import('./pages/Overview'));
 const Explorer     = lazy(() => import('./pages/Explorer'));
 const Enrichment   = lazy(() => import('./pages/Enrichment'));
 const DataHealth   = lazy(() => import('./pages/DataHealth'));
 const MediaStorage = lazy(() => import('./pages/MediaStorage'));
+const LiveLogs     = lazy(() => import('./pages/LiveLogs'));
 const ScrapePage   = lazy(() => import('./pages/ScrapePage'));
 const SourcesPage  = lazy(() => import('./pages/SourcesPage'));
 
@@ -34,11 +36,13 @@ export default function App() {
               <Route path="/enrichment"  element={<Enrichment />} />
               <Route path="/data-health" element={<DataHealth />} />
               <Route path="/media"       element={<MediaStorage />} />
+              <Route path="/logs"        element={<LiveLogs />} />
               <Route path="/sources"     element={<SourcesPage />} />
               <Route path="*"            element={<Navigate to="/overview" replace />} />
             </Routes>
           </Suspense>
           <ToastContainer />
+          <ConfirmDialog />
         </AppLayout>
       </AppProvider>
     </HashRouter>

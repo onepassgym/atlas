@@ -7,6 +7,7 @@ import {
   Link2, Upload, RotateCcw, TrendingUp, Database, Unlink
 } from 'lucide-react';
 import { api, getBaseUrl } from '../api/client';
+import { useApp } from '../context/AppContext';
 
 /* ── utils ──────────────────────────────────────────────────────────────────── */
 function fmtBytes(b, d = 1) {
@@ -268,6 +269,7 @@ function ProgressPanel({ jobs }) {
    MAIN COMPONENT
 ══════════════════════════════════════════════════════════════════════════════ */
 export default function MediaStorage() {
+  const { confirm } = useApp();
   const [photos,      setPhotos]      = useState([]);
   const [stats,       setStats]       = useState(null);
   const [page,        setPage]        = useState(1);
@@ -402,7 +404,7 @@ export default function MediaStorage() {
   /* ── bulk delete ─────────────────────────────────────────────────────────── */
   const bulkDelete = async () => {
     if (!selected.size) return;
-    if (!confirm(`Soft-delete ${selected.size} media items?`)) return;
+    if (!(await confirm(`Soft-delete ${selected.size} media items?`))) return;
     try {
       const r = await fetch(`${base}/api/media/bulk`, {
         method: 'DELETE',

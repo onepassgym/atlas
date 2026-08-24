@@ -102,7 +102,7 @@ export default function JobDrawer({ jobId, onClose }) {
                   <button 
                     className="btn sm success" 
                     onClick={async () => {
-                      if (!confirm('🏁 Force complete?')) return;
+                      if (!(await confirm('🏁 Force complete?'))) return;
                       await api.post(`/api/crawl/force-complete/${jobId}`);
                       onClose();
                     }}

@@ -565,6 +565,24 @@ router.delete('/jobs/:jobId', async (req, res) => {
   } catch (e) { err(res, e.message); }
 });
 
+// POST /api/crawl/jobs/bulk-delete
+router.post('/jobs/bulk-delete', async (req, res) => {
+  try {
+    const { jobIds } = req.body;
+    if (!jobIds || !Array.isArray(jobIds)) return err(res, 'jobIds array is required');
+    await CrawlJob.deleteMany({ jobId: { $in: jobIds } });
+    ok(res, { message: `${jobIds.length} jobs deleted` });
+  } catch (e) { err(res, e.message); }
+});
+
+// POST /api/crawl/jobs/clear-history
+router.post('/jobs/clear-history', async (req, res) => {
+  try {
+    const result = await CrawlJob.deleteMany({ status: { $nin: ['running', 'queued'] } });
+    ok(res, { message: `Cleared ${result.deletedCount} historical jobs` });
+  } catch (e) { err(res, e.message); }
+});
+
 // ── Phase 3: Smart entry points ───────────────────────────────────────────────
 
 // POST /api/crawl/by-name

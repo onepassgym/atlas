@@ -58,7 +58,7 @@ export default function ChainsPanel({ onSelectGym }) {
   };
 
   const handleTagAll = async () => {
-    if (!confirm('Tag all existing gyms with matching chain names?')) return;
+    if (!(await confirm('Tag all existing gyms with matching chain names?'))) return;
     try {
       const res = await api.post('/api/chains/tag-existing');
       toast(res?.message || 'Tagged', 'success');
@@ -118,11 +118,9 @@ export default function ChainsPanel({ onSelectGym }) {
         </div>
       </div>
       
-      <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 16 }} className="custom-scrollbar">
+      <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: 4, display: 'flex', flexDirection: 'column', gap: 8 }} className="custom-scrollbar">
         {chainsCache.map(c => (
-          <div key={c.slug} style={{ width: 280, flexShrink: 0 }}>
-            <ChainCard chain={c} onCrawl={handleCrawl} onViewGyms={viewChainGyms} onTag={handleTag} />
-          </div>
+          <ChainCard key={c.slug} chain={c} onCrawl={handleCrawl} onViewGyms={viewChainGyms} onTag={handleTag} />
         ))}
         {chainsCache.length === 0 && <div className="empty-state" style={{ width: '100%' }}>No target networks registered</div>}
       </div>

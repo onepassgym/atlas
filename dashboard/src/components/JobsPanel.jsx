@@ -39,10 +39,11 @@ export default function JobsPanel() {
   const [jobs, setJobs] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [filter, setFilter] = useState('');
+  const [filter, setFilter] = useState('running');
   const [loading, setLoading] = useState(true);
   const [promoting, setPromoting] = useState(null);
   const [selectedJobId, setSelectedJobId] = useState(null);
+  const [selectedJobs, setSelectedJobs] = useState([]);
 
   const fetchJobs = useCallback(async (p = page) => {
     setLoading(true);
@@ -69,7 +70,7 @@ export default function JobsPanel() {
 
   const cancelJob = async (jobId, e) => {
     e?.stopPropagation();
-    if (!confirm('Cancel this job?')) return;
+    if (!(await confirm('Cancel this job?'))) return;
     try {
       await api.post(`/api/crawl/cancel/${jobId}`);
       toast('Job cancelled', 'info');
@@ -95,7 +96,7 @@ export default function JobsPanel() {
   };
 
   const clearQueue = async () => {
-    if (!confirm('⚠️ Cancel ALL queued and running jobs?')) return;
+    if (!(await confirm('⚠️ Cancel ALL queued and running jobs?'))) return;
     try {
       const res = await api.post('/api/crawl/queue/clear');
       toast(res?.message || 'Cleared', 'info');
@@ -103,9 +104,38 @@ export default function JobsPanel() {
     } catch { toast('Failed', 'error'); }
   };
 
+  const clearHistory = async () => {
+    if (!(await confirm('🗑 Delete ALL non-active historical jobs?'))) return;
+    try {
+      const res = await api.post('/api/crawl/jobs/clear-history');
+      toast(res?.message || 'History cleared', 'info');
+      setTimeout(() => fetchJobs(1), 500);
+    } catch { toast('Failed', 'error'); }
+  };
+
+  const bulkDelete = async () => {
+    if (selectedJobs.length === 0) return;
+    if (!(await confirm(`Delete ${selectedJobs.length} selected jobs?`))) return;
+    try {
+      const res = await api.post('/api/crawl/jobs/bulk-delete', { jobIds: selectedJobs });
+      toast(res?.message || 'Jobs deleted', 'info');
+      setSelectedJobs([]);
+      setTimeout(() => fetchJobs(page), 500);
+    } catch { toast('Failed', 'error'); }
+  };
+
+  const toggleSelectAll = (e) => {
+    if (e.target.checked) setSelectedJobs(jobs.map(j => j.jobId));
+    else setSelectedJobs([]);
+  };
+
+  const toggleSelectJob = (id) => {
+    setSelectedJobs(prev => prev.includes(id) ? prev.filter(jId => jId !== id) : [...prev, id]);
+  };
+
   const forceComplete = async (jobId, e) => {
     e?.stopPropagation();
-    if (!confirm('🏁 Force complete this job? Current progress will be saved as final.')) return;
+    if (!(await confirm('🏁 Force complete this job? Current progress will be saved as final.'))) return;
     try {
       await api.post(`/api/crawl/force-complete/${jobId}`);
       toast('Job force-completed', 'success');
@@ -115,7 +145,7 @@ export default function JobsPanel() {
 
   const startNow = async (jobId, e) => {
     e?.stopPropagation();
-    if (!confirm('⚡ Promote this job to run immediately?')) return;
+    if (!(await confirm('⚡ Promote this job to run immediately?'))) return;
     setPromoting(jobId);
     try {
       const res = await api.post(`/api/crawl/start-now/${jobId}`);
@@ -148,8 +178,12 @@ export default function JobsPanel() {
           ))}
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
+          {selectedJobs.length > 0 && (
+            <button className="btn sm danger" onClick={bulkDelete}><Trash2 size={12} /> Delete Selected ({selectedJobs.length})</button>
+          )}
           <button className="btn sm" onClick={retryFailed}><RefreshCw size={12} /> Retry</button>
-          <button className="btn sm danger" onClick={clearQueue}><XCircle size={12} /> Clear</button>
+          <button className="btn sm secondary" onClick={clearHistory}><Trash2 size={12} /> Clear History</button>
+          <button className="btn sm danger" onClick={clearQueue}><XCircle size={12} /> Clear Queue</button>
         </div>
       </div>
 
@@ -159,6 +193,7 @@ export default function JobsPanel() {
           <table className="data-table" id="jobs-table">
             <thead>
             <tr>
+              <th style={{ width: 40 }}><input type="checkbox" onChange={toggleSelectAll} checked={jobs.length > 0 && selectedJobs.length === jobs.length} /></th>
               <th>Type</th><th>Name</th><th>Status</th><th>Progress</th>
               <th className="col-hide-mobile">Batches</th><th>New</th><th className="col-hide-mobile">Updated</th><th>Failed</th><th className="col-hide-mobile">Errors</th><th className="col-hide-mobile">Duration</th><th className="col-hide-mobile">When</th><th>Actions</th>
             </tr>
@@ -180,8 +215,11 @@ export default function JobsPanel() {
                   key={j.jobId}
                   onClick={() => setSelectedJobId(j.jobId)}
                   style={{ cursor: 'pointer' }}
-                  className="job-row-clickable"
+                  className={selectedJobs.includes(j.jobId) ? "job-row-clickable selected" : "job-row-clickable"}
                 >
+                  <td onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={selectedJobs.includes(j.jobId)} onChange={() => toggleSelectJob(j.jobId)} />
+                  </td>
                   <td><span className={`badge-type ${j.type || 'city'}`}>{j.type || 'city'}</span></td>
                   <td style={{ color: 'var(--text-primary)', fontWeight: 500, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</td>
                   <td><span className={`badge-status ${j.status}`}>{j.status}</span></td>

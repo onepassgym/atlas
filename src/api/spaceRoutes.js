@@ -225,7 +225,7 @@ router.get('/stats', async (_, res) => {
         { $sort: { count: -1 } }
       ]),
       Space.aggregate([
-        { $match: { city: { $ne: null }, location: { $ne: null }, deletedAt: null } },
+        { $match: { city: { $ne: null }, deletedAt: null } },
         { $group: { _id: '$city', count: { $sum: 1 }, avgRating: { $avg: '$rating' } } },
         { $sort: { count: -1 } },
         { $limit: 100 }

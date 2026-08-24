@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { setApiKey, getApiKey } from '../../api/client';
 import { KeyRound, X, Check } from 'lucide-react';
@@ -78,6 +79,19 @@ export default function TopBar() {
             {hasKey ? 'Key set' : 'Set API key'}
           </button>
         )}
+
+        <Link to="/logs" style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: 'rgba(167, 139, 250, 0.1)', border: '1px solid rgba(167, 139, 250, 0.3)',
+          borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
+          color: '#A78BFA', fontSize: 11, textDecoration: 'none',
+          transition: 'all 0.2s', fontWeight: 600
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = 'rgba(167, 139, 250, 0.2)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'rgba(167, 139, 250, 0.1)'}
+        >
+          <span>🪵</span> Logs
+        </Link>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: connected ? '#10B981' : '#52525B' }}>
           <span style={{

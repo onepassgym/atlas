@@ -10,6 +10,7 @@ import GymDrawer from '../components/GymDrawer';
 import SystemPanel from '../components/SystemPanel';
 import JobsPanel from '../components/JobsPanel';
 import ChainsPanel from '../components/ChainsPanel';
+import ScheduleEditor from '../components/ScheduleEditor';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
 
@@ -324,8 +325,35 @@ export default function Overview() {
         <HealthRecommendations />
       </div>
 
-      {/* ── System Activity (Enrichment) ────── */}
-      <div className="fluid-grid-large">
+      {/* ── System Actions (Command Center, Schedule, Logs) ────── */}
+      <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+        <SystemPanel />
+      </div>
+
+      {/* ── Reconnaissance Targets & Latest Spaces ────── */}
+      <div className="grid-2" style={{ marginBottom: 'var(--spacing-lg)' }}>
+        <ChainsPanel onSelectGym={setSelectedGym} />
+        
+        <div className="card">
+          <div className="card-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 12 }}>
+            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+              <div style={{ padding: 6, background: 'rgba(16, 185, 129, 0.1)', borderRadius: 8, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                <Link2 size={16} color="#10b981" />
+              </div>
+              Latest Spaces
+            </span>
+          </div>
+          <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
+            {latestGyms.length > 0 ? latestGyms.map(g => (
+              <GymRow key={g._id} gym={g} onClick={setSelectedGym} />
+            )) : <div className="empty-state">No gyms yet</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Schedule & Enrichment ────── */}
+      <div className="grid-2" style={{ marginBottom: 'var(--spacing-lg)' }}>
+        <ScheduleEditor />
         <EnrichmentPanel />
       </div>
 
@@ -557,94 +585,9 @@ export default function Overview() {
         </div>
       </div>
 
-      {/* ── Reconnaissance Targets (Chains) ────── */}
-      <ChainsPanel onSelectGym={setSelectedGym} />
 
-      {/* ── Latest Gyms + Jobs ────── */}
-      <div className="fluid-grid">
-        <div className="card">
-          <div className="card-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 12 }}>
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-              <div style={{ padding: 6, background: 'rgba(16, 185, 129, 0.1)', borderRadius: 8, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-                <Link2 size={16} color="#10b981" />
-              </div>
-              Latest Spaces
-            </span>
-          </div>
-          <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
-            {latestGyms.length > 0 ? latestGyms.map(g => (
-              <GymRow key={g._id} gym={g} onClick={setSelectedGym} />
-            )) : <div className="empty-state">No gyms yet</div>}
-          </div>
-        </div>
 
-        <div className="card">
-          <div className="card-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 12 }}>
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-              <div style={{ padding: 6, background: 'rgba(245, 158, 11, 0.1)', borderRadius: 8, border: '1px solid rgba(245, 158, 11, 0.2)' }}>
-                <Zap size={16} color="#f59e0b" />
-              </div>
-              Active & Recent Jobs
-            </span>
-          </div>
-          <div style={{ maxHeight: 300, overflowY: 'auto', paddingRight: 4 }}>
-            {jobs.length > 0 ? jobs.map((j, i) => {
-              const p = j.progress || {};
-              const total = p.total || 0;
-              const scraped = (p.scraped || 0) + (p.failed || 0) + (p.skipped || 0);
-              const pct = total > 0 ? Math.min(100, Math.round((scraped / total) * 100)) : 0;
-              const name = j.input?.cityName || j.input?.gymName || j.input?.chainName || 'Unknown';
-              const typeIcon = j.type === 'chain' ? '🔗' : j.type === 'gym_name' ? '🏋' : '🏙️';
-              const errorCount = j.errorCount || (j.jobErrors?.length) || 0;
-              return (
-                <motion.div 
-                  key={j.jobId} 
-                  whileHover={{ backgroundColor: 'var(--row-hover)' }}
-                  style={{ 
-                    padding: '12px 10px', 
-                    borderBottom: i === jobs.length - 1 ? 'none' : '1px solid var(--border)', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: 12,
-                    borderRadius: 8,
-                    transition: 'background-color 0.2s'
-                  }}
-                >
-                  <div style={{ 
-                    width: 32, height: 32, borderRadius: 8, background: 'var(--bg-surface)', 
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 
-                  }}>
-                    {typeIcon}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                      <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>{name}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        {errorCount > 0 && <span className="error-badge">{errorCount}</span>}
-                        <span className={`badge-status ${j.status}`} style={{ fontSize: 10, padding: '2px 6px' }}>{j.status}</span>
-                      </div>
-                    </div>
-                    {j.status === 'running' && (
-                      <div className="progress-bar" style={{ marginTop: 8, marginBottom: 4, height: 4, background: 'var(--bg-surface)', border: 'none' }}>
-                        <div className="progress-fill" style={{ width: `${pct}%`, background: 'var(--warning)', boxShadow: '0 0 8px var(--warning)' }} />
-                      </div>
-                    )}
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'var(--mono)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--text-secondary)' }}>TOT</span> {total}</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--success)' }}>NEW</span> {p.newSpaces || 0}</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--danger)' }}>FAIL</span> {p.failed || 0}</span>
-                      {p.batches > 0 && <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--accent)' }}>BAT</span> {p.batchesDone || 0}/{p.batches}</span>}
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            }) : <div className="empty-state"><div className="empty-state-icon">📭</div><div>No jobs</div></div>}
-          </div>
-        </div>
-      </div>
-
-      {/* ── System Actions ────── */}
-      <SystemPanel />
+      {/* System Actions Moved Up */}
 
       {/* ── Full Job History ────── */}
       <div style={{ marginTop: 24 }}>
@@ -660,3 +603,4 @@ export default function Overview() {
     </motion.div>
   );
 }
+

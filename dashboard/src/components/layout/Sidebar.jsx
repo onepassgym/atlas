@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutGrid, Target, Database, Zap,
-  Activity, ImageIcon, Radio,
+  Activity, ImageIcon, Radio, Terminal
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: '/enrichment',  icon: Zap,        label: 'Enrichment'  },
   { to: '/data-health', icon: Activity,   label: 'Data Health' },
   { to: '/media',       icon: ImageIcon,  label: 'Media'       },
+  { to: '/logs',        icon: Terminal,   label: 'Live Logs'   },
   { to: '/sources',     icon: Radio,      label: 'Sources'     },
 ];
 

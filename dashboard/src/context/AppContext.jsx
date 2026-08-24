@@ -197,6 +197,7 @@ export function AppProvider({ children }) {
   const [toasts, setToasts] = useState([]);
   const [chainsCache, setChainsCacheState] = useState([]);
   const [crawlActivity, setCrawlActivity] = useState(DEFAULT_CRAWL_ACTIVITY);
+  const [confirmState, setConfirmState] = useState({ isOpen: false, message: '', resolve: null });
 
   const sourceRef = useRef(null);
 
@@ -219,6 +220,19 @@ export function AppProvider({ children }) {
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, TOAST_TTL_MS);
+  }, []);
+
+  const confirm = useCallback((message) => {
+    return new Promise((resolve) => {
+      setConfirmState({ isOpen: true, message, resolve });
+    });
+  }, []);
+
+  const closeConfirm = useCallback((result) => {
+    setConfirmState(prev => {
+      if (prev.resolve) prev.resolve(result);
+      return { ...prev, isOpen: false, resolve: null };
+    });
   }, []);
 
   useEffect(() => {
@@ -298,26 +312,21 @@ export function AppProvider({ children }) {
   }, []);
 
   const value = useMemo(() => ({
-    connected,
-    events,
-    logs,
-    clearLogs,
-    toasts,
-    toast,
-    chainsCache,
-    setChainsCache,
-    crawlActivity,
-  }), [
-    connected,
-    events,
-    logs,
-    clearLogs,
-    toasts,
-    toast,
-    chainsCache,
-    setChainsCache,
-    crawlActivity,
-  ]);
+      connected,
+      events,
+      logs,
+      toasts,
+      toast,
+      clearLogs,
+      chainsCache,
+      setChainsCache,
+      crawlActivity,
+      confirm,
+      confirmState,
+      closeConfirm,
+    }),
+    [connected, events, logs, toasts, toast, clearLogs, chainsCache, setChainsCache, crawlActivity, confirm, confirmState, closeConfirm]
+  );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

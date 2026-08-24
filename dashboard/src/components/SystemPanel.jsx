@@ -121,9 +121,9 @@ export default function SystemPanel() {
   const triggerStale = async () => { try { const res = await api.post('/api/system/schedule/trigger/stale'); toast(res?.message || 'Triggered', 'success'); } catch { toast('Failed', 'error'); } };
   const triggerEnrichment = async () => { try { const res = await api.post('/api/system/schedule/trigger/enrichment'); toast(res?.message || 'Triggered', 'success'); } catch { toast('Failed', 'error'); } };
   const retryFailed = async () => { try { const res = await api.post('/api/crawl/retry/failed'); toast(res?.message || 'Retrying', 'success'); } catch { toast('Failed', 'error'); } };
-  const clearQueue = async () => { if (!confirm('⚠️ Cancel ALL queued and running jobs?')) return; try { const res = await api.post('/api/crawl/queue/clear'); toast(res?.message || 'Cleared', 'info'); } catch { toast('Failed', 'error'); } };
-  const recalcScores = async () => { if (!confirm('Recalculate quality scores for all gyms?')) return; try { await api.post('/api/system/recalculate-scores'); toast('Recalculation started', 'info'); } catch { toast('Failed', 'error'); } };
-  const vacuumLogs = async () => { if (!confirm('Delete all log files?')) return; try { const res = await api.post('/api/system/vacuum-logs'); toast(res?.message || 'Done', 'info'); } catch { toast('Failed', 'error'); } };
+  const clearQueue = async () => { if (!(await confirm('⚠️ Cancel ALL queued and running jobs?'))) return; try { const res = await api.post('/api/crawl/queue/clear'); toast(res?.message || 'Cleared', 'info'); } catch { toast('Failed', 'error'); } };
+  const recalcScores = async () => { if (!(await confirm('Recalculate quality scores for all gyms?'))) return; try { await api.post('/api/system/recalculate-scores'); toast('Recalculation started', 'info'); } catch { toast('Failed', 'error'); } };
+  const vacuumLogs = async () => { if (!(await confirm('Delete all log files?'))) return; try { const res = await api.post('/api/system/vacuum-logs'); toast(res?.message || 'Done', 'info'); } catch { toast('Failed', 'error'); } };
   const testEvent = async () => { try { await api.post('/api/events/test', {}); toast('Test event sent', 'info'); } catch { toast('Failed', 'error'); } };
   const triggerPhotoSync = async () => {
     try {
@@ -139,7 +139,7 @@ export default function SystemPanel() {
   };
 
   const tagExisting = async () => {
-    if (!confirm('Tag all existing gyms with matching chain names?')) return;
+    if (!(await confirm('Tag all existing gyms with matching chain names?'))) return;
     try { const res = await api.post('/api/chains/tag-existing'); toast(res?.message || 'Tagged', 'success'); } catch { toast('Failed', 'error'); }
   };
 
@@ -154,7 +154,7 @@ export default function SystemPanel() {
   };
 
   const removeCity = async (name) => {
-    if (!confirm(`Remove "${name}" from schedule?`)) return;
+    if (!(await confirm(`Remove "${name}" from schedule?`))) return;
     try { await api.delete(`/api/system/schedule/city?name=${encodeURIComponent(name)}`); toast(`Removed: ${name}`, 'info'); fetchSchedule(); } catch { toast('Failed', 'error'); }
   };
 
@@ -261,27 +261,7 @@ export default function SystemPanel() {
         </div>
       </div>
 
-      {/* ── Logs ────── */}
-      <div className="card">
-        <div className="card-header">
-          <span className="card-title">Live System Logs</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button className="btn sm" onClick={clearLogs}>Clear</button>
-            <span className="card-icon">🪵</span>
-          </div>
-        </div>
-        <div style={{ height: 280, overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: 11, background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', gap: 4, scrollbarWidth: 'thin' }}>
-          {logs.length === 0 ? (
-            <div className="empty-state"><div className="empty-state-icon">🪵</div><div>Waiting for log stream…</div></div>
-          ) : logs.slice(0, 100).map((l, i) => (
-            <div key={i} style={{ display: 'flex', gap: 10, lineHeight: 1.4, borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: 2 }}>
-              <span style={{ color: 'var(--text-muted)', minWidth: 65 }}>{l.timestamp?.split(' ')[1] || ''}</span>
-              <span style={{ fontWeight: 700, width: 45, textTransform: 'uppercase', color: l.level === 'error' ? 'var(--danger)' : l.level === 'warn' ? 'var(--warning)' : 'var(--success)' }}>{l.level || 'info'}</span>
-              <span style={{ color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{l.message || ''}{l.stack ? '\n' + l.stack : ''}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+
 
       {/* ── Health ────── */}
       <div className="card">
