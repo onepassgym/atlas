@@ -41,6 +41,6 @@ COPY --from=build-stage /build/dashboard/dist ./dashboard/dist
 # Create runtime directories
 RUN mkdir -p media/photos media/thumbnails logs
 
-EXPOSE 8747
+EXPOSE 4060
 
 CMD ["node", "src/server.js"]

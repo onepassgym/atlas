@@ -45,7 +45,7 @@ const SpaceSchema = new mongoose.Schema({
     sparse: true,
     index:  true,
     trim:   true,
-    match:  /^SPC-[A-Z]+-[0-9A-Z]{11,14}$/,
+    match:  /^SPC-[A-Z]+-[0-9A-Z]{4,14}$/,
   },
 
   // Identity

@@ -14,14 +14,14 @@ function getEnv(key, defaultValue) {
 
 module.exports = {
   server: {
-    port: parseInt(process.env.PORT || '8747', 10),
+    port: parseInt(process.env.PORT || '4060', 10),
     env:  env,
   },
   auth: {
     apiKeys: (process.env.API_KEYS || 'atlas_dev_secret').split(',').map(k => k.trim()).filter(Boolean),
   },
   mongo: {
-    uri:    getEnv('MONGODB_URI', isProd ? 'mongodb://mongo:27017/atlas' : 'mongodb://127.0.0.1:27328/atlas'),
+    uri:    getEnv('MONGODB_URI', isProd ? 'mongodb://mongo:27017/atlas' : 'mongodb://127.0.0.1:27051/atlas'),
     dbName: process.env.MONGODB_DB_NAME || 'atlas',
   },
   redis: {
@@ -65,7 +65,7 @@ module.exports = {
   // Set to true in .env to re-enable Sharp/Axios downloads via downloader.js.
   media: {
     basePath:        process.env.MEDIA_BASE_PATH || './media',
-    baseUrl:         getEnv('MEDIA_BASE_URL', isProd ? 'https://atlas.onepassgym.com/media' : `http://localhost:${process.env.PORT || '8747'}/media`),
+    baseUrl:         getEnv('MEDIA_BASE_URL', isProd ? 'https://atlas.onepassgym.com/media' : `http://localhost:${process.env.PORT || '4060'}/media`),
     downloadEnabled: process.env.MEDIA_DOWNLOAD_ENABLED === 'true', // default false
   },
   dedup: {

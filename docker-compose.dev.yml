@@ -10,7 +10,7 @@ services:
     container_name: atlas-api-dev
     restart: unless-stopped
     ports:
-      - "8747:8747"
+      - "4060:4060"
     env_file: .env
     environment:
       - MONGODB_URI=mongodb://mongo:27017/atlas05
@@ -91,9 +91,9 @@ services:
     container_name: atlas-dashboard-dev
     restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "6070:6070"
     environment:
-      - VITE_API_URL=http://api:8747
+      - VITE_API_URL=http://api:4060
     volumes:
       - ./dashboard:/app/dashboard
       - /app/dashboard/node_modules
@@ -108,7 +108,7 @@ services:
     container_name: atlas-mongo
     restart: unless-stopped
     ports:
-      - "27328:27017"
+      - "27051:27017"
     volumes:
       - mongo_data:/data/db
     command: mongod --wiredTigerCacheSizeGB 1

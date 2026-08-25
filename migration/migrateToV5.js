@@ -27,7 +27,7 @@ const { makeOpgId } = require('../src/utils/opgId');
 const DRY_RUN = process.argv.includes('--dry-run');
 const BATCH_SIZE = 500;
 
-const MONGO_URI = process.env.MONGODB_URI || process.env.DEV_MONGODB_URI || 'mongodb://127.0.0.1:27328/atlas';
+const MONGO_URI = process.env.MONGODB_URI || process.env.DEV_MONGODB_URI || 'mongodb://127.0.0.1:27051/atlas';
 
 async function connect() {
   await mongoose.connect(MONGO_URI);

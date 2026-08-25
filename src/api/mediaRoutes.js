@@ -345,7 +345,7 @@ router.post('/sync', async (req, res) => {
     try {
       const basePath = path.resolve(cfg.media.basePath);
       // Guard: baseUrl may be undefined if env var is missing
-      const rawBaseUrl = cfg.media.baseUrl || `http://localhost:${process.env.PORT || '8747'}/media`;
+      const rawBaseUrl = cfg.media.baseUrl || `http://localhost:${process.env.PORT || '4060'}/media`;
       const baseUrl  = rawBaseUrl.replace(/\/$/, '');
 
       let accessible = true;

@@ -61,6 +61,9 @@ app.use('/media', express.static(mediaPath, { maxAge: '7d' }));
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/',           indexRoutes);
 
+// ── Public Routes ──────────────────────────────────────────────────────────────
+app.use('/api/public', require('./api/publicRoutes'));
+
 // Base API authentication
 app.use('/api',        authMiddleware);
 

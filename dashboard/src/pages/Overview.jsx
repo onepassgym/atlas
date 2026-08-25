@@ -314,49 +314,6 @@ export default function Overview() {
         </div>
       )}
 
-      {/* ── Health Recommendations (Phase 4) ────── */}
-      <div style={{
-        background: 'var(--bg-secondary)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 8,
-        marginBottom: 'var(--spacing-lg)',
-        overflow: 'hidden',
-      }}>
-        <HealthRecommendations />
-      </div>
-
-      {/* ── System Actions (Command Center, Schedule, Logs) ────── */}
-      <div style={{ marginBottom: 'var(--spacing-lg)' }}>
-        <SystemPanel />
-      </div>
-
-      {/* ── Reconnaissance Targets & Latest Spaces ────── */}
-      <div className="grid-2" style={{ marginBottom: 'var(--spacing-lg)' }}>
-        <ChainsPanel onSelectGym={setSelectedGym} />
-        
-        <div className="card">
-          <div className="card-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 12 }}>
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-              <div style={{ padding: 6, background: 'rgba(16, 185, 129, 0.1)', borderRadius: 8, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-                <Link2 size={16} color="#10b981" />
-              </div>
-              Latest Spaces
-            </span>
-          </div>
-          <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
-            {latestGyms.length > 0 ? latestGyms.map(g => (
-              <GymRow key={g._id} gym={g} onClick={setSelectedGym} />
-            )) : <div className="empty-state">No gyms yet</div>}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Schedule & Enrichment ────── */}
-      <div className="grid-2" style={{ marginBottom: 'var(--spacing-lg)' }}>
-        <ScheduleEditor />
-        <EnrichmentPanel />
-      </div>
-
       {/* ── Intel Matrix ────── */}
       <div style={{
         marginBottom: 'var(--spacing-lg)',
@@ -457,6 +414,49 @@ export default function Overview() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* ── Health Recommendations (Phase 4) ────── */}
+      <div style={{
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 8,
+        marginBottom: 'var(--spacing-lg)',
+        overflow: 'hidden',
+      }}>
+        <HealthRecommendations />
+      </div>
+
+      {/* ── System Actions (Command Center, Schedule, Logs) ────── */}
+      <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+        <SystemPanel />
+      </div>
+
+      {/* ── Reconnaissance Targets & Latest Spaces ────── */}
+      <div className="grid-2" style={{ marginBottom: 'var(--spacing-lg)' }}>
+        <ChainsPanel onSelectGym={setSelectedGym} />
+        
+        <div className="card">
+          <div className="card-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 12 }}>
+            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+              <div style={{ padding: 6, background: 'rgba(16, 185, 129, 0.1)', borderRadius: 8, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                <Link2 size={16} color="#10b981" />
+              </div>
+              Latest Spaces
+            </span>
+          </div>
+          <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
+            {latestGyms.length > 0 ? latestGyms.map(g => (
+              <GymRow key={g._id} gym={g} onClick={setSelectedGym} />
+            )) : <div className="empty-state">No gyms yet</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Schedule & Enrichment ────── */}
+      <div className="grid-2" style={{ marginBottom: 'var(--spacing-lg)' }}>
+        <ScheduleEditor />
+        <EnrichmentPanel />
       </div>
 
       {/* ── Charts ────── */}

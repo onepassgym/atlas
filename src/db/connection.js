@@ -32,7 +32,7 @@ async function connectDB() {
     logger.error('❌ MongoDB connection failed: ' + err.message);
     logger.error('👉 Fix options:');
     logger.error('   1. Local:  make sure mongod is running  →  sudo systemctl start mongod  (Linux)  /  brew services start mongodb-community  (Mac)');
-    logger.error('   2. Docker: docker run -d -p 27328:27017 --name mongo mongo:7.0');
+    logger.error('   2. Docker: docker run -d -p 27051:27017 --name mongo mongo:7.0');
     logger.error('   3. Atlas:  set MONGODB_URI=mongodb+srv://... in .env');
     process.exit(1);
   }
