@@ -7,6 +7,12 @@ const cfg = require('../../config');
 
 const router = express.Router();
 
+const envBaseUrl = process.env.PUBLIC_BASE_URL ||
+  process.env.PROD_PUBLIC_BASE_URL ||
+  process.env.DEV_PUBLIC_BASE_URL 
+
+const publicBaseUrl = envBaseUrl.replace(/\/$/, '');
+
 // OpenAPI Specification definition
 const swaggerOptions = {
   definition: {
@@ -18,8 +24,8 @@ const swaggerOptions = {
     },
     servers: [
       {
-        url: `http://localhost:${cfg.server?.port || process.env.PORT || 5070}`,
-        description: 'Local development server',
+        url: publicBaseUrl,
+        description: process.env.NODE_ENV === 'production' ? 'Production server' : 'Local development server',
       },
     ],
   },
