@@ -12,7 +12,7 @@ const chainSlug = 'golds-gym';
 const CHAIN_NAME = "Gold's Gym";
 
 // Gold's Gym location API endpoints
-const SEARCH_API = 'https://www.goldsgym.com/api/gyms';
+const SEARCH_API = 'https://www.goldsgym.com/api/spaces';
 const ALT_API = 'https://api.goldsgym.com/api/v1/clubs';
 
 // Region sweep centroids
@@ -47,7 +47,7 @@ function normalizeLocation(raw) {
     phone:       raw.phone || raw.telephone || null,
     website:     raw.url || raw.website || raw.club_url || null,
     hours:       raw.hours || raw.operating_hours || null,
-    storeId:     raw.id || raw.club_id || raw.gymId || null,
+    storeId:     raw.id || raw.club_id || raw.spaceId || null,
     chainSlug,
     chainName:   CHAIN_NAME,
   };
@@ -73,16 +73,16 @@ async function fetchFromApi() {
         },
       });
 
-      const gyms = Array.isArray(data) ? data : data?.gyms || data?.clubs || data?.results || [];
-      for (const gym of gyms) {
-        const loc = normalizeLocation(gym);
+      const spaces = Array.isArray(data) ? data : data?.spaces || data?.clubs || data?.results || [];
+      for (const space of spaces) {
+        const loc = normalizeLocation(space);
         const key = loc.storeId || `${loc.lat},${loc.lng}`;
         if (!allLocations.has(key)) {
           allLocations.set(key, loc);
         }
       }
 
-      logger.info(`  [GoldsGym] ${region.label}: ${gyms.length} found (unique: ${allLocations.size})`);
+      logger.info(`  [GoldsSpace] ${region.label}: ${spaces.length} found (unique: ${allLocations.size})`);
     } catch (err) {
       // Try alternative API
       try {
@@ -92,15 +92,15 @@ async function fetchFromApi() {
           headers: { 'User-Agent': 'Mozilla/5.0 Chrome/124.0.0.0', Accept: 'application/json' },
         });
 
-        const gyms = Array.isArray(data) ? data : data?.clubs || data?.data || [];
-        for (const gym of gyms) {
-          const loc = normalizeLocation(gym);
+        const spaces = Array.isArray(data) ? data : data?.clubs || data?.data || [];
+        for (const space of spaces) {
+          const loc = normalizeLocation(space);
           const key = loc.storeId || `${loc.lat},${loc.lng}`;
           if (!allLocations.has(key)) allLocations.set(key, loc);
         }
-        logger.info(`  [GoldsGym] ${region.label} (alt API): ${gyms.length} found`);
+        logger.info(`  [GoldsSpace] ${region.label} (alt API): ${spaces.length} found`);
       } catch (altErr) {
-        logger.warn(`  [GoldsGym] ${region.label} failed: ${err.message}`);
+        logger.warn(`  [GoldsSpace] ${region.label} failed: ${err.message}`);
       }
     }
 
@@ -111,10 +111,10 @@ async function fetchFromApi() {
 }
 
 async function fetchAllLocations() {
-  logger.info(`[GoldsGym] Starting global location fetch...`);
+  logger.info(`[GoldsSpace] Starting global location fetch...`);
   let locations = await fetchFromApi();
   locations = locations.filter(l => l.lat && l.lng);
-  logger.info(`[GoldsGym] ✅ Total locations fetched: ${locations.length}`);
+  logger.info(`[GoldsSpace] ✅ Total locations fetched: ${locations.length}`);
   return locations;
 }
 

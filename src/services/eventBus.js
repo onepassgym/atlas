@@ -11,12 +11,12 @@
  * Event types:
  *   job:queued      — Job added to BullMQ queue
  *   job:started     — Worker picked up a job
- *   job:progress    — Periodic progress update (every 10th gym)
+ *   job:progress    — Periodic progress update (every 10th space)
  *   job:completed   — Job finished successfully
  *   job:failed      — Job failed with error
  *   job:cancelled   — Job cancelled by user or shutdown
- *   gym:created     — New gym inserted into DB
- *   gym:updated     — Existing gym updated with new data
+ *   space:created     — New space inserted into DB
+ *   space:updated     — Existing space updated with new data
  *   schedule:fired  — Cron schedule triggered a crawl batch
  *   system:startup  — Server started
  */

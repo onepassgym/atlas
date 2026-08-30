@@ -2,49 +2,49 @@
 /**
  * enrichmentProcessor.js
  *
- * processEnrichmentJob(raw, gymId, jobId)
- *   → Runs Tasks 1–5 data against an existing gym document.
- *   → Calls upsertGym() with enrichmentPass:true to skip 6-tier dedup.
- *   → Returns: { action, gymId, newReviews, updatedReviews, newPhotos }
+ * processEnrichmentJob(raw, spaceId, jobId)
+ *   → Runs Tasks 1–5 data against an existing space document.
+ *   → Calls upsertSpace() with enrichmentPass:true to skip 6-tier dedup.
+ *   → Returns: { action, spaceId, newReviews, updatedReviews, newPhotos }
  *
  * This module is imported by the enrichment worker (worker.js) and the
  * CLI script (scripts/enrichNCR.js) — NOT by the standard city-crawl path.
  */
 
-const Gym                 = require('../db/spaceModel');
+const Space                 = require('../db/spaceModel');
 const Photo               = require('../db/photoModel');
-const GymChangeLog        = require('../db/gymChangeLogModel');
+const SpaceChangeLog        = require('../db/spaceChangeLogModel');
 const { Review, buildReviewDocs, mergeReviewEnrichment } = require('../db/reviewModel');
 const logger              = require('../utils/logger');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function writeChangeLogs(gymId, diffs, now) {
+async function writeChangeLogs(spaceId, diffs, now) {
   if (!diffs?.length) return;
   const entries = diffs.map(({ field, oldValue, newValue }) => ({
-    gymId, field, oldValue, newValue, changedAt: now, source: 'enrichment',
+    spaceId, field, oldValue, newValue, changedAt: now, source: 'enrichment',
   }));
-  await GymChangeLog.insertMany(entries, { ordered: false });
+  await SpaceChangeLog.insertMany(entries, { ordered: false });
 }
 
 /**
- * Upsert photo URLs captured during enrichment into gym_photos.
+ * Upsert photo URLs captured during enrichment into space_photos.
  * Only inserts new URLs. Never overwrites existing records that have localPath populated.
  *
- * @param {ObjectId}  gymId
+ * @param {ObjectId}  spaceId
  * @param {string[]}  urls          - all captured photo URLs
  * @param {string}    sourceType    - 'user' | 'owner' | 'cover' | 'video_thumb' | 'streetview' | 'review_photo'
  * @param {Date}      capturedAt
  */
-async function upsertCapturedPhotoUrls(gymId, urls = [], sourceType = 'user', capturedAt) {
+async function upsertCapturedPhotoUrls(spaceId, urls = [], sourceType = 'user', capturedAt) {
   if (!urls.length) return 0;
 
   const ops = urls.map(url => ({
     updateOne: {
-      filter: { originalUrl: url, gymId },
+      filter: { originalUrl: url, spaceId },
       update: {
         $setOnInsert: {
-          gymId,
+          spaceId,
           originalUrl:  url,
           publicUrl:    null,
           localPath:    null,
@@ -73,11 +73,11 @@ async function upsertCapturedPhotoUrls(gymId, urls = [], sourceType = 'user', ca
  * Merge new reviews. For existing reviews, call mergeReviewEnrichment
  * to update ownerReply + reviewPhotos + localGuideLevel.
  */
-async function handleReviewEnrichment(gymId, rawReviews, now) {
+async function handleReviewEnrichment(spaceId, rawReviews, now) {
   if (!rawReviews?.length) return { newReviews: 0, updatedReviews: 0 };
 
   // Fetch existing review IDs
-  const existing = await Review.find({ gymId }, { reviewId: 1, _id: 0 }).lean();
+  const existing = await Review.find({ spaceId }, { reviewId: 1, _id: 0 }).lean();
   const existingIds = new Set(existing.map(r => r.reviewId));
 
   const fresh = rawReviews.filter(r => {
@@ -87,7 +87,7 @@ async function handleReviewEnrichment(gymId, rawReviews, now) {
 
   let newReviews = 0;
   if (fresh.length) {
-    const docs = buildReviewDocs(gymId, fresh);
+    const docs = buildReviewDocs(spaceId, fresh);
     try {
       const res = await Review.insertMany(docs, { ordered: false });
       newReviews = res.length;
@@ -103,7 +103,7 @@ async function handleReviewEnrichment(gymId, rawReviews, now) {
     const id = r.reviewId || r.id;
     return id && existingIds.has(id);
   });
-  const { updated: updatedReviews } = await mergeReviewEnrichment(gymId, toUpdate, writeChangeLogs);
+  const { updated: updatedReviews } = await mergeReviewEnrichment(spaceId, toUpdate, writeChangeLogs);
 
   return { newReviews, updatedReviews };
 }
@@ -113,23 +113,23 @@ async function handleReviewEnrichment(gymId, rawReviews, now) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Apply enrichment scraped data onto an existing gym document.
- * enrichmentPass=true → skip 6-tier dedup (gymId already known).
+ * Apply enrichment scraped data onto an existing space document.
+ * enrichmentPass=true → skip 6-tier dedup (spaceId already known).
  *
  * @param {Object}   enriched  - output from scrapeEnrichmentDetail()
- * @param {ObjectId} gymId     - known gym _id
+ * @param {ObjectId} spaceId     - known space _id
  * @param {string}   jobId     - for logging
- * @returns {{ action, gymId, newReviews, updatedReviews, newPhotos }}
+ * @returns {{ action, spaceId, newReviews, updatedReviews, newPhotos }}
  */
-async function processEnrichmentJob(enriched, gymId, jobId) {
-  const result = { action: null, gymId, newReviews: 0, updatedReviews: 0, newPhotos: 0 };
+async function processEnrichmentJob(enriched, spaceId, jobId) {
+  const result = { action: null, spaceId, newReviews: 0, updatedReviews: 0, newPhotos: 0 };
   const now = new Date();
 
   try {
-    const existing = await Gym.findById(gymId).lean();
+    const existing = await Space.findById(spaceId).lean();
     if (!existing) {
       result.action = 'error';
-      result.error  = `Gym not found: ${gymId}`;
+      result.error  = `Space not found: ${spaceId}`;
       return result;
     }
 
@@ -235,42 +235,42 @@ async function processEnrichmentJob(enriched, gymId, jobId) {
     $set.updatedAt = now;
 
     // ── Write changelog ──────────────────────────────────────────────────────
-    if (diffs.length) await writeChangeLogs(gymId, diffs, now);
+    if (diffs.length) await writeChangeLogs(spaceId, diffs, now);
 
-    // ── Write gym document ────────────────────────────────────────────────────
+    // ── Write space document ────────────────────────────────────────────────────
     if (Object.keys($set).length > 3) { // more than just timestamps
-      await Gym.findByIdAndUpdate(gymId, { $set }, { new: false });
+      await Space.findByIdAndUpdate(spaceId, { $set }, { new: false });
       result.action = 'enriched';
     } else {
       result.action = 'skipped';
     }
 
     // ── Task 2: Reviews ───────────────────────────────────────────────────────
-    const { newReviews, updatedReviews } = await handleReviewEnrichment(gymId, enriched.reviews, now);
+    const { newReviews, updatedReviews } = await handleReviewEnrichment(spaceId, enriched.reviews, now);
     result.newReviews     = newReviews;
     result.updatedReviews = updatedReviews;
 
     // Update totalReviews count if new reviews added
     if (newReviews > 0) {
-      await Gym.findByIdAndUpdate(gymId, {
+      await Space.findByIdAndUpdate(spaceId, {
         $inc: { totalReviews: newReviews },
         $set: { reviewsScraped: (existing.reviewsScraped || 0) + newReviews },
       });
     }
 
-    // ── Task 1: Upsert photo URLs into gym_photos ────────────────────────────
+    // ── Task 1: Upsert photo URLs into space_photos ────────────────────────────
     const capturedAt = enriched.scrapedAt || now;
     const [heroCount, videoCount] = await Promise.all([
-      upsertCapturedPhotoUrls(gymId, enriched.allPhotoUrls || [], 'user', capturedAt),
-      upsertCapturedPhotoUrls(gymId, enriched.videoThumbUrls || [], 'video_thumb', capturedAt),
+      upsertCapturedPhotoUrls(spaceId, enriched.allPhotoUrls || [], 'user', capturedAt),
+      upsertCapturedPhotoUrls(spaceId, enriched.videoThumbUrls || [], 'video_thumb', capturedAt),
     ]);
     if (enriched.coverPhotoUrl) {
-      await upsertCapturedPhotoUrls(gymId, [enriched.coverPhotoUrl], 'cover', capturedAt);
+      await upsertCapturedPhotoUrls(spaceId, [enriched.coverPhotoUrl], 'cover', capturedAt);
     }
 
     // Task 2: Review photo URLs
     const reviewPhotoUrls = (enriched.reviews || []).flatMap(r => r.reviewPhotos || []).filter(Boolean);
-    const reviewPhotoCount = await upsertCapturedPhotoUrls(gymId, [...new Set(reviewPhotoUrls)], 'review_photo', capturedAt);
+    const reviewPhotoCount = await upsertCapturedPhotoUrls(spaceId, [...new Set(reviewPhotoUrls)], 'review_photo', capturedAt);
 
     result.newPhotos = heroCount + videoCount + reviewPhotoCount;
 
@@ -278,10 +278,10 @@ async function processEnrichmentJob(enriched, gymId, jobId) {
     return result;
 
   } catch (err) {
-    logger.error(`processEnrichmentJob error [${gymId}]: ${err.message}`);
-    // Mark enrichment error on gym doc
+    logger.error(`processEnrichmentJob error [${spaceId}]: ${err.message}`);
+    // Mark enrichment error on space doc
     try {
-      await Gym.findByIdAndUpdate(gymId, {
+      await Space.findByIdAndUpdate(spaceId, {
         $set: {
           'enrichmentMeta.lastAttempt':       now,
           'enrichmentMeta.status':             'failed',

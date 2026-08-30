@@ -3,7 +3,7 @@
 const logger = require('../utils/logger');
 
 /**
- * Extracts high-quality photo URLs from a gym's official website.
+ * Extracts high-quality photo URLs from a space's official website.
  * Looks for OpenGraph images, Twitter cards, and large <img> tags.
  */
 async function scrapeWebsitePhotos(page, websiteUrl) {

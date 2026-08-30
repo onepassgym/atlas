@@ -2,9 +2,9 @@
 /**
  * photoSyncService.js
  *
- * Background worker that syncs gym photos into the gym_photos collection.
- * Implements a weekly rotation: every day at 4 AM it processes a batch of gyms,
- * resuming from where the previous run stopped. When all gyms have been processed
+ * Background worker that syncs space photos into the space_photos collection.
+ * Implements a weekly rotation: every day at 4 AM it processes a batch of spaces,
+ * resuming from where the previous run stopped. When all spaces have been processed
  * once, a new cycle begins.
  *
  * Concurrency safety:
@@ -13,26 +13,26 @@
  *
  * State machine:
  *   idle → running → done | error → idle (next run)
- *   When lastProcessedGymId reaches the end of collection → reset cursor → new cycle
+ *   When lastProcessedSpaceId reaches the end of collection → reset cursor → new cycle
  */
 
 const mongoose = require('mongoose');
 const Photo = require('../db/photoModel');
-const Gym   = require('../db/spaceModel');
+const Space   = require('../db/spaceModel');
 const PhotoSyncState = require('../db/photoSyncStateModel');
 const cfg    = require('../../config');
 const logger = require('../utils/logger');
 const { buildOp, collectPhotos } = require('./photoMigrationHelpers');
 
 // ── Tuning ────────────────────────────────────────────────────────────────────
-const GYMS_PER_RUN = 500;   // gyms to process per daily run (tune for your VPS)
+const SPACES_PER_RUN = 500;   // spaces to process per daily run (tune for your VPS)
 const BATCH_SIZE   = 200;   // photo ops per bulkWrite flush
 const RUN_TAG = `photo-sync-${process.pid}`; // unique tag for this process instance
 
 // ── Core sync runner ──────────────────────────────────────────────────────────
 
 /**
- * Run one sync batch. Processes up to GYMS_PER_RUN gyms.
+ * Run one sync batch. Processes up to SPACES_PER_RUN spaces.
  * Safe to call from cron or a manual trigger.
  *
  * @param {string} triggeredBy  'cron' | 'manual'
@@ -55,13 +55,13 @@ async function runPhotoSync(triggeredBy = 'cron') {
   state.lastRunError  = null;
   await state.save();
 
-  logger.info(`[photo-sync] Starting sync (trigger: ${triggeredBy}, cursor: ${state.lastProcessedGymId || 'start'}, cycle: ${state.completedCycles + 1})`);
+  logger.info(`[photo-sync] Starting sync (trigger: ${triggeredBy}, cursor: ${state.lastProcessedSpaceId || 'start'}, cycle: ${state.completedCycles + 1})`);
 
   let processed = 0, upserted = 0, skipped = 0;
 
   try {
-    // ── Count total gyms for progress tracking ────────────────────────────
-    const totalGyms = await Gym.countDocuments();
+    // ── Count total spaces for progress tracking ────────────────────────────
+    const totalSpaces = await Space.countDocuments();
 
     // ── Build query: pick up after cursor ────────────────────────────────
     const filter = {
@@ -70,23 +70,23 @@ async function runPhotoSync(triggeredBy = 'cron') {
         { rawPhotos: { $exists: true, $type: 'array', $ne: [] } },
       ],
     };
-    if (state.lastProcessedGymId) {
-      filter._id = { $gt: state.lastProcessedGymId };
+    if (state.lastProcessedSpaceId) {
+      filter._id = { $gt: state.lastProcessedSpaceId };
     }
 
-    const gyms = await Gym.find(filter)
+    const spaces = await Space.find(filter)
       .select('_id slug coverPhoto rawPhotos')
       .sort({ _id: 1 })
-      .limit(GYMS_PER_RUN)
+      .limit(SPACES_PER_RUN)
       .lean();
 
-    if (gyms.length === 0) {
+    if (spaces.length === 0) {
       // ── Cycle complete — reset cursor for next cycle ──────────────────
       const prevCycle = state.completedCycles;
       state.completedCycles++;
       state.currentCycleProcessed = 0;
-      state.currentCycleTotalGyms = totalGyms;
-      state.lastProcessedGymId = null;
+      state.currentCycleTotalSpaces = totalSpaces;
+      state.lastProcessedSpaceId = null;
       logger.info(`[photo-sync] ✅ Cycle ${prevCycle + 1} complete. Resetting cursor for cycle ${state.completedCycles + 1}.`);
     } else {
       // ── Process batch ─────────────────────────────────────────────────
@@ -104,12 +104,12 @@ async function runPhotoSync(triggeredBy = 'cron') {
         ops = [];
       }
 
-      for (const gym of gyms) {
-        const photoMap = collectPhotos(gym);
+      for (const space of spaces) {
+        const photoMap = collectPhotos(space);
         if (photoMap.size === 0) { skipped++; continue; }
 
         for (const { p, isCover } of photoMap.values()) {
-          ops.push(buildOp(gym._id, gym.slug, p, isCover));
+          ops.push(buildOp(space._id, space.slug, p, isCover));
           if (ops.length >= BATCH_SIZE) {
             await flush();
             if (upserted % 2000 === 0 && upserted > 0)
@@ -121,10 +121,10 @@ async function runPhotoSync(triggeredBy = 'cron') {
 
       await flush();
 
-      // Advance cursor to the last gym's _id
-      state.lastProcessedGymId = gyms[gyms.length - 1]._id;
+      // Advance cursor to the last space's _id
+      state.lastProcessedSpaceId = spaces[spaces.length - 1]._id;
       state.currentCycleProcessed = (state.currentCycleProcessed || 0) + processed;
-      state.currentCycleTotalGyms = totalGyms;
+      state.currentCycleTotalSpaces = totalSpaces;
     }
 
     // ── Update state ──────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ async function runPhotoSync(triggeredBy = 'cron') {
     state.lockedBy         = null;
     await state.save();
 
-    logger.info(`[photo-sync] ✅ Done: ${processed} gyms, ${upserted} upserted, ${skipped} skipped`);
+    logger.info(`[photo-sync] ✅ Done: ${processed} spaces, ${upserted} upserted, ${skipped} skipped`);
     return { processed, upserted, skipped, completedCycles: state.completedCycles };
 
   } catch (e) {
@@ -158,9 +158,9 @@ async function runPhotoSync(triggeredBy = 'cron') {
  */
 async function getSyncStatus() {
   const state = await PhotoSyncState.getSingleton();
-  const totalGyms = state.currentCycleTotalGyms || 0;
-  const cycleProgress = totalGyms > 0
-    ? Math.min(100, Math.round((state.currentCycleProcessed / totalGyms) * 100))
+  const totalSpaces = state.currentCycleTotalSpaces || 0;
+  const cycleProgress = totalSpaces > 0
+    ? Math.min(100, Math.round((state.currentCycleProcessed / totalSpaces) * 100))
     : 0;
 
   return {
@@ -175,8 +175,8 @@ async function getSyncStatus() {
     completedCycles:      state.completedCycles,
     currentCycleProgress: cycleProgress,
     currentCycleProcessed: state.currentCycleProcessed,
-    currentCycleTotalGyms: state.currentCycleTotalGyms,
-    cursorAt:             state.lastProcessedGymId,
+    currentCycleTotalSpaces: state.currentCycleTotalSpaces,
+    cursorAt:             state.lastProcessedSpaceId,
   };
 }
 

@@ -2,22 +2,22 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Tag, Rocket, ShieldCheck } from 'lucide-react';
 import ChainCard from './ChainCard';
-import GymRow from './GymRow';
+import SpaceRow from './SpaceRow';
 import Modal from './Modal';
 import Pagination from './Pagination';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
 
-export default function ChainsPanel({ onSelectGym }) {
+export default function ChainsPanel({ onSelectSpace }) {
   const { toast, chainsCache, setChainsCache } = useApp();
   
-  // Chain gyms panel
+  // Chain spaces panel
   const [selectedChainSlug, setSelectedChainSlug] = useState(null);
   const [selectedChainName, setSelectedChainName] = useState('');
-  const [chainGyms, setChainGyms] = useState([]);
-  const [chainGymsTotal, setChainGymsTotal] = useState(0);
-  const [chainGymsPage, setChainGymsPage] = useState(1);
-  const [chainGymsCountry, setChainGymsCountry] = useState('');
+  const [chainSpaces, setChainSpaces] = useState([]);
+  const [chainSpacesTotal, setChainSpacesTotal] = useState(0);
+  const [chainSpacesPage, setChainSpacesPage] = useState(1);
+  const [chainSpacesCountry, setChainSpacesCountry] = useState('');
 
   // Modals
   const [crawlModalOpen, setCrawlModalOpen] = useState(false);
@@ -58,7 +58,7 @@ export default function ChainsPanel({ onSelectGym }) {
   };
 
   const handleTagAll = async () => {
-    if (!confirm('Tag all existing gyms with matching chain names?')) return;
+    if (!confirm('Tag all existing spaces with matching chain names?')) return;
     try {
       const res = await api.post('/api/chains/tag-existing');
       toast(res?.message || 'Tagged', 'success');
@@ -83,22 +83,22 @@ export default function ChainsPanel({ onSelectGym }) {
     } catch { toast('Failed', 'error'); }
   };
 
-  const viewChainGyms = async (slug, name) => {
+  const viewChainSpaces = async (slug, name) => {
     setSelectedChainSlug(slug);
     setSelectedChainName(name);
-    setChainGymsPage(1);
-    setChainGymsCountry('');
-    await loadChainGyms(slug, 1, '');
+    setChainSpacesPage(1);
+    setChainSpacesCountry('');
+    await loadChainSpaces(slug, 1, '');
   };
 
-  const loadChainGyms = async (slug, p = chainGymsPage, country = chainGymsCountry) => {
+  const loadChainSpaces = async (slug, p = chainSpacesPage, country = chainSpacesCountry) => {
     const params = new URLSearchParams({ page: p, limit: 10 });
     if (country) params.set('country', country);
     try {
-      const res = await api.get(`/api/chains/${slug || selectedChainSlug}/gyms?${params}`);
+      const res = await api.get(`/api/chains/${slug || selectedChainSlug}/spaces?${params}`);
       if (res?.success) {
-        setChainGyms(res.gyms || []);
-        setChainGymsTotal(res.total || 0);
+        setChainSpaces(res.spaces || []);
+        setChainSpacesTotal(res.total || 0);
       }
     } catch {}
   };
@@ -121,7 +121,7 @@ export default function ChainsPanel({ onSelectGym }) {
       <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 16 }} className="custom-scrollbar">
         {chainsCache.map(c => (
           <div key={c.slug} style={{ width: 280, flexShrink: 0 }}>
-            <ChainCard chain={c} onCrawl={handleCrawl} onViewGyms={viewChainGyms} onTag={handleTag} />
+            <ChainCard chain={c} onCrawl={handleCrawl} onViewSpaces={viewChainSpaces} onTag={handleTag} />
           </div>
         ))}
         {chainsCache.length === 0 && <div className="empty-state" style={{ width: '100%' }}>No target networks registered</div>}
@@ -141,17 +141,17 @@ export default function ChainsPanel({ onSelectGym }) {
                 <button className="btn sm" onClick={() => setSelectedChainSlug(null)}>✕ Close</button>
               </div>
               <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center' }}>
-                <input className="input" type="text" placeholder="Filter by region..." value={chainGymsCountry} onChange={e => setChainGymsCountry(e.target.value)} style={{ maxWidth: 240 }} />
-                <button className="btn secondary sm" onClick={() => { setChainGymsPage(1); loadChainGyms(selectedChainSlug, 1, chainGymsCountry); }}>Apply Filter</button>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>{chainGymsTotal} active nodes</span>
+                <input className="input" type="text" placeholder="Filter by region..." value={chainSpacesCountry} onChange={e => setChainSpacesCountry(e.target.value)} style={{ maxWidth: 240 }} />
+                <button className="btn secondary sm" onClick={() => { setChainSpacesPage(1); loadChainSpaces(selectedChainSlug, 1, chainSpacesCountry); }}>Apply Filter</button>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>{chainSpacesTotal} active nodes</span>
               </div>
               <div style={{ maxHeight: 300, overflowY: 'auto' }} className="custom-scrollbar">
-                {chainGyms.length > 0 ? chainGyms.map(g => (
-                  <GymRow key={g._id} gym={g} onClick={onSelectGym} />
+                {chainSpaces.length > 0 ? chainSpaces.map(g => (
+                  <SpaceRow key={g._id} space={g} onClick={onSelectSpace} />
                 )) : <div className="empty-state" style={{ padding: 20 }}>No locations discovered yet</div>}
               </div>
               <div style={{ marginTop: 12 }}>
-                <Pagination current={chainGymsPage} total={Math.ceil(chainGymsTotal / 10)} onPage={p => { setChainGymsPage(p); loadChainGyms(selectedChainSlug, p, chainGymsCountry); }} />
+                <Pagination current={chainSpacesPage} total={Math.ceil(chainSpacesTotal / 10)} onPage={p => { setChainSpacesPage(p); loadChainSpaces(selectedChainSlug, p, chainSpacesCountry); }} />
               </div>
             </div>
           </motion.div>

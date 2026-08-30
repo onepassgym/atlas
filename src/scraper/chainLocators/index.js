@@ -18,7 +18,7 @@ const logger = require('../../utils/logger');
 
 const LOCATOR_MAP = {
   'anytime-fitness': './anytimeFitness',
-  'golds-gym':       './goldsGym',
+  'golds-space':       './goldsSpace',
   'planet-fitness':  './planetFitness',
   'snap-fitness':    './snapFitness',
   'f45-training':    './f45Training',

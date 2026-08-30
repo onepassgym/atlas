@@ -3,7 +3,7 @@
  * OpenStreetMap Overpass API Fallback
  *
  * Generic chain location fetcher using OSM Overpass API.
- * Works for ANY gym chain — just pass the brand name.
+ * Works for ANY space chain — just pass the brand name.
  * Free, no API key, global coverage (community maintained data).
  *
  * Overpass API docs: https://wiki.openstreetmap.org/wiki/Overpass_API
@@ -38,10 +38,10 @@ function buildQuery(brandName) {
   way["leisure"="fitness_centre"]["name"~"${escaped}",i];
   node["leisure"="sports_centre"]["brand"~"${escaped}",i];
   node["leisure"="sports_centre"]["name"~"${escaped}",i];
-  node["amenity"="gym"]["brand"~"${escaped}",i];
-  node["amenity"="gym"]["name"~"${escaped}",i];
-  way["amenity"="gym"]["brand"~"${escaped}",i];
-  way["amenity"="gym"]["name"~"${escaped}",i];
+  node["amenity"="space"]["brand"~"${escaped}",i];
+  node["amenity"="space"]["name"~"${escaped}",i];
+  way["amenity"="space"]["brand"~"${escaped}",i];
+  way["amenity"="space"]["name"~"${escaped}",i];
 );
 out center body;
   `.trim();
@@ -105,7 +105,7 @@ function normalizeElement(el, chainName) {
 
 /**
  * Fetch all locations for a brand from OpenStreetMap.
- * @param {string} brandName - The brand name to search for (e.g., "Gold's Gym")
+ * @param {string} brandName - The brand name to search for (e.g., "Gold's Space")
  * @returns {Promise<Array>} Array of normalized locations
  */
 async function fetchByBrand(brandName) {
@@ -145,7 +145,7 @@ async function fetchByBrand(brandName) {
  * The chainSlug and chainName are set externally by the chain worker.
  */
 async function fetchAllLocations(chainName) {
-  return fetchByBrand(chainName || 'gym');
+  return fetchByBrand(chainName || 'space');
 }
 
 module.exports = { fetchAllLocations, fetchByBrand, chainSlug };

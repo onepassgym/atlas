@@ -153,11 +153,11 @@ export default function EnrichmentPanel() {
               <span className="enrich-stat-label" style={{ fontSize: 9 }}>Total</span>
             </div>
             <div className="enrich-stat" style={{ padding: '8px 4px' }}>
-              <span className="enrich-stat-value" style={{ color: 'var(--cyan)', fontSize: 16 }}>{status?.totalEligibleGyms ?? 0}</span>
+              <span className="enrich-stat-value" style={{ color: 'var(--cyan)', fontSize: 16 }}>{status?.totalEligibleSpaces ?? 0}</span>
               <span className="enrich-stat-label" style={{ fontSize: 9 }}>Eligible</span>
             </div>
             <div className="enrich-stat" style={{ padding: '8px 4px' }}>
-              <span className="enrich-stat-value" style={{ color: 'var(--warning)', fontSize: 16 }}>{status?.staleGyms ?? 0}</span>
+              <span className="enrich-stat-value" style={{ color: 'var(--warning)', fontSize: 16 }}>{status?.staleSpaces ?? 0}</span>
               <span className="enrich-stat-label" style={{ fontSize: 9 }}>Stale</span>
             </div>
             <div className="enrich-stat" style={{ padding: '8px 4px' }}>
@@ -189,12 +189,12 @@ export default function EnrichmentPanel() {
       {/* Current / Next info */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {/* Last enriched */}
-        {status?.lastGym && (
-          <div className="enrich-next-gym" style={{ flex: 1 }}>
+        {status?.lastSpace && (
+          <div className="enrich-next-space" style={{ flex: 1 }}>
             <span style={{ fontSize: 14 }}>✅</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-primary)' }}>
-                Last: {status.lastGym}
+                Last: {status.lastSpace}
               </div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>
                 {status.lastAction} · {status.lastDuration ? `${(status.lastDuration / 1000).toFixed(1)}s` : '—'}
@@ -205,7 +205,7 @@ export default function EnrichmentPanel() {
 
         {/* Next in queue */}
         {status?.nextInQueue && (
-          <div className="enrich-next-gym" style={{ flex: 1 }}>
+          <div className="enrich-next-space" style={{ flex: 1 }}>
             <span style={{ fontSize: 14 }}>⏭️</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-primary)' }}>
@@ -220,7 +220,7 @@ export default function EnrichmentPanel() {
 
         {/* Priority queue preview */}
         {status?.priorityQueueLength > 0 && (
-          <div className="enrich-next-gym" style={{ flex: '1 1 100%', marginTop: 4, background: 'rgba(249, 115, 22, 0.05)', border: '1px solid rgba(249, 115, 22, 0.1)' }}>
+          <div className="enrich-next-space" style={{ flex: '1 1 100%', marginTop: 4, background: 'rgba(249, 115, 22, 0.05)', border: '1px solid rgba(249, 115, 22, 0.1)' }}>
             <Zap size={14} style={{ color: 'var(--orange)', flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 12, color: 'var(--orange)', display: 'flex', justifyContent: 'space-between' }}>
@@ -228,7 +228,7 @@ export default function EnrichmentPanel() {
                 <span>{status.priorityQueueLength} ITEMS</span>
               </div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {status.priorityQueue?.slice(0, 3).map(p => p.gymName).filter(Boolean).join(', ') || 'Processing high-priority tasks'}
+                {status.priorityQueue?.slice(0, 3).map(p => p.spaceName).filter(Boolean).join(', ') || 'Processing high-priority tasks'}
               </div>
             </div>
           </div>

@@ -17,8 +17,8 @@ export default function SystemPanel() {
   // Modals
   const [crawlCityModal, setCrawlCityModal] = useState(false);
   const [crawlCityInput, setCrawlCityInput] = useState('');
-  const [crawlGymModal, setCrawlGymModal] = useState(false);
-  const [crawlGymInput, setCrawlGymInput] = useState('');
+  const [crawlSpaceModal, setCrawlSpaceModal] = useState(false);
+  const [crawlSpaceInput, setCrawlSpaceInput] = useState('');
   const [chainCrawlModal, setChainCrawlModal] = useState(false);
   const [chainCrawlSlug, setChainCrawlSlug] = useState('');
   const [chainCrawlCountries, setChainCrawlCountries] = useState('');
@@ -75,13 +75,13 @@ export default function SystemPanel() {
     } catch { toast('Network error', 'error'); }
   };
 
-  const submitCrawlGym = async () => {
-    if (!crawlGymInput.trim()) return;
-    setCrawlGymModal(false);
+  const submitCrawlSpace = async () => {
+    if (!crawlSpaceInput.trim()) return;
+    setCrawlSpaceModal(false);
     try {
-      const res = await api.post('/api/crawl/space', { spaceName: crawlGymInput });
-      toast(res?.message || `Queued: ${crawlGymInput}`, 'success');
-      setCrawlGymInput('');
+      const res = await api.post('/api/crawl/space', { spaceName: crawlSpaceInput });
+      toast(res?.message || `Queued: ${crawlSpaceInput}`, 'success');
+      setCrawlSpaceInput('');
     } catch { toast('Network error', 'error'); }
   };
 
@@ -102,7 +102,7 @@ export default function SystemPanel() {
   const triggerEnrichment = async () => { try { const res = await api.post('/api/system/schedule/trigger/enrichment'); toast(res?.message || 'Triggered', 'success'); } catch { toast('Failed', 'error'); } };
   const retryFailed = async () => { try { const res = await api.post('/api/crawl/retry/failed'); toast(res?.message || 'Retrying', 'success'); } catch { toast('Failed', 'error'); } };
   const clearQueue = async () => { if (!confirm('⚠️ Cancel ALL queued and running jobs?')) return; try { const res = await api.post('/api/crawl/queue/clear'); toast(res?.message || 'Cleared', 'info'); } catch { toast('Failed', 'error'); } };
-  const recalcScores = async () => { if (!confirm('Recalculate quality scores for all gyms?')) return; try { await api.post('/api/system/recalculate-scores'); toast('Recalculation started', 'info'); } catch { toast('Failed', 'error'); } };
+  const recalcScores = async () => { if (!confirm('Recalculate quality scores for all spaces?')) return; try { await api.post('/api/system/recalculate-scores'); toast('Recalculation started', 'info'); } catch { toast('Failed', 'error'); } };
   const vacuumLogs = async () => { if (!confirm('Delete all log files?')) return; try { const res = await api.post('/api/system/vacuum-logs'); toast(res?.message || 'Done', 'info'); } catch { toast('Failed', 'error'); } };
   const testEvent = async () => { try { await api.post('/api/events/test', {}); toast('Test event sent', 'info'); } catch { toast('Failed', 'error'); } };
   const triggerPhotoSync = async () => {
@@ -119,7 +119,7 @@ export default function SystemPanel() {
   };
 
   const tagExisting = async () => {
-    if (!confirm('Tag all existing gyms with matching chain names?')) return;
+    if (!confirm('Tag all existing spaces with matching chain names?')) return;
     try { const res = await api.post('/api/chains/tag-existing'); toast(res?.message || 'Tagged', 'success'); } catch { toast('Failed', 'error'); }
   };
 
@@ -148,7 +148,7 @@ export default function SystemPanel() {
 
           <CmdGroup label="Crawl Operations">
             <button className="btn" onClick={() => setCrawlCityModal(true)}><Building2 size={13} /> Crawl City</button>
-            <button className="btn" onClick={() => setCrawlGymModal(true)}><Dumbbell size={13} /> Crawl Space</button>
+            <button className="btn" onClick={() => setCrawlSpaceModal(true)}><Dumbbell size={13} /> Crawl Space</button>
             <button className="btn" onClick={() => triggerSchedule('weekly')}><Calendar size={13} /> Weekly Run</button>
             <button className="btn" onClick={() => triggerSchedule('all')}><Globe2 size={13} /> All Cities</button>
           </CmdGroup>
@@ -183,7 +183,7 @@ export default function SystemPanel() {
             </button>
             {photoSync && (
               <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--mono)', paddingTop: 2, gridColumn: '1 / -1' }}>
-                Cycle {(photoSync.completedCycles || 0) + 1} &middot; {photoSync.currentCycleProcessed?.toLocaleString() ?? 0}/{photoSync.currentCycleTotalGyms?.toLocaleString() ?? '?'} gyms
+                Cycle {(photoSync.completedCycles || 0) + 1} &middot; {photoSync.currentCycleProcessed?.toLocaleString() ?? 0}/{photoSync.currentCycleTotalSpaces?.toLocaleString() ?? '?'} spaces
                 {photoSync.lastRunAt && <> &middot; Last: {new Date(photoSync.lastRunAt).toLocaleDateString()}</>}
               </div>
             )}
@@ -276,11 +276,11 @@ export default function SystemPanel() {
         </div>
       </Modal>
 
-      <Modal open={crawlGymModal} onClose={() => setCrawlGymModal(false)} title="🏋️ Queue Specific Gym">
-        <input className="input" placeholder="e.g. Gold's Gym Andheri Mumbai" value={crawlGymInput} onChange={e => setCrawlGymInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitCrawlGym()} autoFocus />
+      <Modal open={crawlSpaceModal} onClose={() => setCrawlSpaceModal(false)} title="🏋️ Queue Specific Space">
+        <input className="input" placeholder="e.g. Gold's Space Andheri Mumbai" value={crawlSpaceInput} onChange={e => setCrawlSpaceInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && submitCrawlSpace()} autoFocus />
         <div className="modal-actions">
-          <button className="btn" onClick={() => setCrawlGymModal(false)}>Cancel</button>
-          <button className="btn primary" onClick={submitCrawlGym}>Queue Gym</button>
+          <button className="btn" onClick={() => setCrawlSpaceModal(false)}>Cancel</button>
+          <button className="btn primary" onClick={submitCrawlSpace}>Queue Space</button>
         </div>
       </Modal>
 

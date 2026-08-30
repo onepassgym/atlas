@@ -3,9 +3,9 @@ const mongoose = require('mongoose');
 const cfg = require('../../config');
 
 const CrawlMetaSchema = new mongoose.Schema({
-  gymId:            { type: mongoose.Schema.Types.ObjectId, ref: 'Gym', required: true },
-  // Denormalized public identifier — populated at write time from parent gym.
-  // Never used for $lookup or joins; gymId (ObjectId) is always the join key.
+  spaceId:            { type: mongoose.Schema.Types.ObjectId, ref: 'Space', required: true },
+  // Denormalized public identifier — populated at write time from parent space.
+  // Never used for $lookup or joins; spaceId (ObjectId) is always the join key.
   opgId:            { type: String, index: true, uppercase: true, trim: true },
   firstCrawledAt:   Date,
   lastCrawledAt:    Date,
@@ -18,7 +18,7 @@ const CrawlMetaSchema = new mongoose.Schema({
   jobId:            String,
 }, { timestamps: true, collection: cfg.collections.spaceCrawlMeta, autoIndex: false });
 
-CrawlMetaSchema.index({ gymId: 1 }, { unique: true });
+CrawlMetaSchema.index({ spaceId: 1 }, { unique: true });
 CrawlMetaSchema.index({ jobId: 1 });
 
 module.exports = mongoose.model('CrawlMeta', CrawlMetaSchema);

@@ -285,7 +285,7 @@ function generate() {
     'uuid': 'UUID generation',
     'dotenv': 'Environment variable loading',
     'swagger-jsdoc': 'Swagger spec from JSDoc',
-    'swagger-ui-express': 'Interactive API documentation',
+    '@scalar/express-api-reference': 'Scalar API Documentation',
     'nodemon': 'Dev auto-restart',
   };
 

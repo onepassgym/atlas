@@ -4,7 +4,7 @@ const cfg = require('../../config');
 
 const SpaceSourceSchema = new mongoose.Schema(
   {
-    spaceId:            { type: mongoose.Schema.Types.ObjectId, ref: 'Gym', required: true, index: true },
+    spaceId:            { type: mongoose.Schema.Types.ObjectId, ref: 'Space', required: true, index: true },
     // Denormalized public identifier for external use; joins still use spaceId.
     opgId:              { type: String, index: true, uppercase: true, trim: true },
     provider:           { type: String, required: true, default: 'google_maps', index: true },

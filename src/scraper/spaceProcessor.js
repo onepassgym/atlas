@@ -1,6 +1,6 @@
 'use strict';
 const slugify     = require('slugify');
-const { upsertGym } = require('../db/upsertSpace');
+const { upsertSpace } = require('../db/upsertSpace');
 const logger      = require('../utils/logger');
 
 const CATEGORY_MAP = {
@@ -14,12 +14,12 @@ const CATEGORY_MAP = {
   swim:        'swimming_club',
   'health club':'health_club',
   fitness:     'fitness_center',
-  gym:         'gym',
+  space:         'space',
   cycle:       'cycling_studio',
   spinning:    'cycling_studio',
   zumba:       'fitness_center',
   functional:  'fitness_center',
-  strength:    'gym',
+  strength:    'space',
 };
 
 function mapCategory(raw = '') {
@@ -37,11 +37,11 @@ function calcCompleteness(d) {
   return Math.round(checks.filter(Boolean).length / checks.length * 100);
 }
 
-async function processGym(raw, areaName, jobId, downloadMedia = true) {
-  const result = { action: null, gymId: null };
+async function processSpace(raw, areaName, jobId, downloadMedia = true) {
+  const result = { action: null, spaceId: null };
 
   try {
-    const slug = slugify(`${raw.name || 'gym'} ${areaName || ''}`, { lower: true, strict: true });
+    const slug = slugify(`${raw.name || 'space'} ${areaName || ''}`, { lower: true, strict: true });
 
     // ── Build structured document ─────────────────────────────────────────
     const doc = {
@@ -111,7 +111,7 @@ async function processGym(raw, areaName, jobId, downloadMedia = true) {
     // ── Media handling (Phase 5: deferred download) ───────────────────────
     // Instead of blocking the scrape loop, we store the raw photoUrls on the document
     if (raw.photoUrls?.length) {
-      // Store the photo URL list directly so the gym is immediately queryable
+      // Store the photo URL list directly so the space is immediately queryable
       doc.photoUrls   = raw.photoUrls;
       doc.totalPhotos = raw.photoUrls.length;
       doc.crawlMeta.mediaStatus = 'captured';
@@ -121,17 +121,17 @@ async function processGym(raw, areaName, jobId, downloadMedia = true) {
     doc.crawlMeta.dataCompleteness = calcCompleteness(doc);
 
     // ── Upsert (dedup + insert-or-update) ─────────────────────────────────
-    const upsertResult = await upsertGym(doc);
+    const upsertResult = await upsertSpace(doc);
 
-    // Map upsertGym actions → the action strings worker.js expects
+    // Map upsertSpace actions → the action strings worker.js expects
     const ACTION_MAP = { inserted: 'created', updated: 'updated', skipped: 'skipped', error: 'error' };
     result.action = ACTION_MAP[upsertResult.action] || upsertResult.action;
-    result.gymId  = upsertResult.gymId;
+    result.spaceId  = upsertResult.spaceId;
     if (upsertResult.error) result.error = upsertResult.error;
 
 
   } catch (err) {
-    logger.error(`processGym error "${raw?.name}": ${err.message}`);
+    logger.error(`processSpace error "${raw?.name}": ${err.message}`);
     result.action = 'error';
     result.error  = err.message;
   }
@@ -139,4 +139,4 @@ async function processGym(raw, areaName, jobId, downloadMedia = true) {
   return result;
 }
 
-module.exports = { processGym };
+module.exports = { processSpace };

@@ -2,8 +2,8 @@
 const express = require('express');
 const { query, validationResult } = require('express-validator');
 const router  = express.Router();
-const Gym     = require('../db/spaceModel');
-const GymChangeLog = require('../db/gymChangeLogModel');
+const Space     = require('../db/spaceModel');
+const SpaceChangeLog = require('../db/spaceChangeLogModel');
 const { Review }   = require('../db/reviewModel');
 const { ok, err, validate } = require('../utils/apiUtils');
 
@@ -28,21 +28,21 @@ router.get('/overview', async (req, res) => {
     const DAY_MS = 86_400_000;
 
     const [
-      totalGyms,
+      totalSpaces,
       missingFields,
       stalenessBuckets,
       qualityDistribution,
       sentimentDistribution,
       ratingDistribution,
-      closedGyms,
+      closedSpaces,
       enrichmentStatus,
       reviewCoverage,
     ] = await Promise.all([
       // Total count
-      Gym.countDocuments(),
+      Space.countDocuments(),
 
       // Missing fields aggregation
-      Gym.aggregate([
+      Space.aggregate([
         {
           $addFields: {
             effectiveCompleteness: { $ifNull: ['$crawl.dataCompleteness', '$crawlMeta.dataCompleteness'] },
@@ -66,7 +66,7 @@ router.get('/overview', async (req, res) => {
       }]),
 
       // Staleness buckets
-      Gym.aggregate([{
+      Space.aggregate([{
         $group: {
           _id: null,
           fresh:     { $sum: { $cond: [{ $gte: ['$updatedAt', new Date(now - 7 * DAY_MS)] }, 1, 0] } },
@@ -77,7 +77,7 @@ router.get('/overview', async (req, res) => {
       }]),
 
       // Quality score distribution (5 buckets) — using $group for robustness
-      Gym.aggregate([{
+      Space.aggregate([{
         $group: {
           _id: null,
           b0:  { $sum: { $cond: [{ $and: [{ $gte: [{ $ifNull: ['$qualityScore', 0] }, 0] },  { $lt: [{ $ifNull: ['$qualityScore', 0] }, 20] }] }, 1, 0] } },
@@ -89,7 +89,7 @@ router.get('/overview', async (req, res) => {
       }]),
 
       // Sentiment distribution (5 buckets)
-      Gym.aggregate([{
+      Space.aggregate([{
         $group: {
           _id: null,
           veryNeg:  { $sum: { $cond: [{ $lt:  [{ $ifNull: ['$sentimentScore', 0] }, -0.5] }, 1, 0] } },
@@ -101,7 +101,7 @@ router.get('/overview', async (req, res) => {
       }]),
 
       // Rating distribution (6 buckets)
-      Gym.aggregate([{
+      Space.aggregate([{
         $match: { rating: { $gt: 0 } },
       }, {
         $group: {
@@ -115,8 +115,8 @@ router.get('/overview', async (req, res) => {
         },
       }]),
 
-      // Closed gyms stats
-      Gym.aggregate([{
+      // Closed spaces stats
+      Space.aggregate([{
         $group: {
           _id: null,
           permanentlyClosed: { $sum: { $cond: ['$permanentlyClosed', 1, 0] } },
@@ -125,7 +125,7 @@ router.get('/overview', async (req, res) => {
       }]),
 
       // Enrichment status breakdown
-      Gym.aggregate([{
+      Space.aggregate([{
         $group: {
           _id: { $ifNull: ['$enrichmentMeta.status', 'never'] },
           count: { $sum: 1 },
@@ -134,8 +134,8 @@ router.get('/overview', async (req, res) => {
 
       // Review coverage
       Review.aggregate([
-        { $group: { _id: '$gymId' } },
-        { $count: 'gymsWithReviews' },
+        { $group: { _id: '$spaceId' } },
+        { $count: 'spacesWithReviews' },
       ]),
     ]);
 
@@ -160,13 +160,13 @@ router.get('/overview', async (req, res) => {
     ];
 
     const fields = missingFields[0] || {};
-    const total = fields.total || totalGyms || 1;
+    const total = fields.total || totalSpaces || 1;
     
     const rd = ratingDistribution[0] || {};
 
     ok(res, {
       health: {
-        totalGyms,
+        totalSpaces,
         avgCompleteness: Math.round(fields.avgCompleteness || 0),
         missingFields: {
           phone:       { count: fields.missingPhone || 0,       pct: Math.round(((fields.missingPhone || 0) / total) * 100) },
@@ -195,15 +195,15 @@ router.get('/overview', async (req, res) => {
           { range: '4–4.5', count: rd.r445 || 0 },
           { range: '4.5–5', count: rd.r45 || 0 },
         ],
-        closedGyms: {
-          permanently: closedGyms[0]?.permanentlyClosed || 0,
-          temporarily: closedGyms[0]?.temporarilyClosed || 0,
+        closedSpaces: {
+          permanently: closedSpaces[0]?.permanentlyClosed || 0,
+          temporarily: closedSpaces[0]?.temporarilyClosed || 0,
         },
         enrichmentStatus: enrichmentStatus.reduce((acc, s) => {
           acc[s._id] = s.count;
           return acc;
         }, {}),
-        gymsWithReviews: reviewCoverage[0]?.gymsWithReviews || 0,
+        spacesWithReviews: reviewCoverage[0]?.spacesWithReviews || 0,
       },
     });
   } catch (e) { err(res, e.message); }
@@ -212,7 +212,7 @@ router.get('/overview', async (req, res) => {
 
 /**
  * GET /api/data-health/worst
- * Returns the lowest-quality gyms for enrichment targeting
+ * Returns the lowest-quality spaces for enrichment targeting
  */
 router.get('/worst',
   query('limit').optional().isInt({ min: 1, max: 50 }),
@@ -220,7 +220,7 @@ router.get('/worst',
     if (validate(req, res)) return;
     const limit = parseInt(req.query.limit || '20', 10);
     try {
-      const gyms = await Gym.find({
+      const spaces = await Space.find({
         permanentlyClosed: { $ne: true },
         googleMapsUrl: { $exists: true, $ne: null },
       })
@@ -229,8 +229,8 @@ router.get('/worst',
         .limit(limit)
         .lean();
 
-      // Calculate what each gym is missing
-      const enriched = gyms.map(g => {
+      // Calculate what each space is missing
+      const enriched = spaces.map(g => {
         const missing = [];
         if (!g.contact?.phone) missing.push('phone');
         if (!g.contact?.website) missing.push('website');
@@ -240,7 +240,7 @@ router.get('/worst',
         return { ...g, missing };
       });
 
-      ok(res, { gyms: enriched, count: enriched.length });
+      ok(res, { spaces: enriched, count: enriched.length });
     } catch (e) { err(res, e.message); }
   }
 );
@@ -248,7 +248,7 @@ router.get('/worst',
 
 /**
  * GET /api/data-health/stale
- * Returns gyms not updated in a given number of days
+ * Returns spaces not updated in a given number of days
  */
 router.get('/stale',
   query('days').optional().isInt({ min: 1, max: 365 }),
@@ -259,7 +259,7 @@ router.get('/stale',
     const limit = parseInt(req.query.limit || '20', 10);
     try {
       const cutoff = new Date(Date.now() - days * 86_400_000);
-      const gyms = await Gym.find({
+      const spaces = await Space.find({
         updatedAt: { $lt: cutoff },
         permanentlyClosed: { $ne: true },
       })
@@ -268,19 +268,19 @@ router.get('/stale',
         .limit(limit)
         .lean();
 
-      const total = await Gym.countDocuments({
+      const total = await Space.countDocuments({
         updatedAt: { $lt: cutoff },
         permanentlyClosed: { $ne: true },
       });
 
-      ok(res, { gyms, total, days, cutoff });
+      ok(res, { spaces, total, days, cutoff });
     } catch (e) { err(res, e.message); }
   }
 );
 
 
 /* ═══════════════════════════════════════════════════════════
-   CHANGE LOG — Gym change tracking feed
+   CHANGE LOG — Space change tracking feed
    ═══════════════════════════════════════════════════════════ */
 
 /**
@@ -306,14 +306,14 @@ router.get('/changes',
 
     try {
       const [changes, total, fieldBreakdown] = await Promise.all([
-        GymChangeLog.find(filter)
+        SpaceChangeLog.find(filter)
           .sort({ changedAt: -1 })
           .limit(limit)
           .skip(skip)
-          .populate('gymId', 'name areaName coverPhoto')
+          .populate('spaceId', 'name areaName coverPhoto')
           .lean(),
-        GymChangeLog.countDocuments(filter),
-        GymChangeLog.aggregate([
+        SpaceChangeLog.countDocuments(filter),
+        SpaceChangeLog.aggregate([
           { $match: { changedAt: { $gte: new Date(Date.now() - days * 86_400_000) } } },
           { $group: { _id: '$field', count: { $sum: 1 } } },
           { $sort: { count: -1 } },
@@ -348,13 +348,13 @@ router.get('/changes/significant',
     try {
       const significantFields = ['rating', 'permanentlyClosed', 'temporarilyClosed', 'totalReviews', 'contact.phone', 'contact.website'];
 
-      const changes = await GymChangeLog.find({
+      const changes = await SpaceChangeLog.find({
         changedAt: { $gte: since },
         field: { $in: significantFields },
       })
         .sort({ changedAt: -1 })
         .limit(limit)
-        .populate('gymId', 'name areaName rating coverPhoto')
+        .populate('spaceId', 'name areaName rating coverPhoto')
         .lean();
 
       // Categorize changes
@@ -409,20 +409,20 @@ router.get('/changes/daily',
     const since = new Date(Date.now() - days * 86_400_000);
 
     try {
-      const dailyChanges = await GymChangeLog.aggregate([
+      const dailyChanges = await SpaceChangeLog.aggregate([
         { $match: { changedAt: { $gte: since } } },
         {
           $group: {
             _id: { $dateToString: { format: '%Y-%m-%d', date: '$changedAt' } },
             total: { $sum: 1 },
-            uniqueGyms: { $addToSet: '$gymId' },
+            uniqueSpaces: { $addToSet: '$spaceId' },
           },
         },
         {
           $project: {
             _id: 1,
             total: 1,
-            gymsAffected: { $size: '$uniqueGyms' },
+            spacesAffected: { $size: '$uniqueSpaces' },
           },
         },
         { $sort: { _id: 1 } },

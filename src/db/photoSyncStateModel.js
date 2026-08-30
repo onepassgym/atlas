@@ -2,22 +2,22 @@
 const mongoose = require('mongoose');
 
 /**
- * Tracks the rolling cursor for the gym photo sync rotation.
+ * Tracks the rolling cursor for the space photo sync rotation.
  * One singleton document keyed by 'photo_sync'.
  */
 const PhotoSyncStateSchema = new mongoose.Schema({
   key: { type: String, required: true, unique: true, default: 'photo_sync' },
 
-  // Rotation cursor — _id of the last gym that was fully processed in this cycle.
-  // On the next run we query gyms whose _id > lastProcessedGymId (sorted ASC).
+  // Rotation cursor — _id of the last space that was fully processed in this cycle.
+  // On the next run we query spaces whose _id > lastProcessedSpaceId (sorted ASC).
   // When we reach the end of the collection we reset to null and start a new cycle.
-  lastProcessedGymId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  lastProcessedSpaceId: { type: mongoose.Schema.Types.ObjectId, default: null },
 
-  // How many gyms have been processed in the current cycle
+  // How many spaces have been processed in the current cycle
   currentCycleProcessed: { type: Number, default: 0 },
 
-  // Total gyms in DB at the start of the latest cycle (informational)
-  currentCycleTotalGyms: { type: Number, default: 0 },
+  // Total spaces in DB at the start of the latest cycle (informational)
+  currentCycleTotalSpaces: { type: Number, default: 0 },
 
   // Cycle counter — increments every time the full rotation completes
   completedCycles: { type: Number, default: 0 },

@@ -9,17 +9,17 @@ const { scrapeWebsitePhotos } = require('./websiteScraper');
 chromium.use(stealthPlugin());
 
 // Phase 6b: Trimmed from 16 →10 categories — removed low-yield entries
-// that heavily overlap with 'gym' and 'fitness center':
-// dropped: functional training gym, strength training gym, health club,
+// that heavily overlap with 'space' and 'fitness center':
+// dropped: functional training space, strength training space, health club,
 //          sports club, zumba class, cycling studio
 const FITNESS_CATEGORIES = [
-  'gym',
+  'space',
   'fitness center',
   'yoga studio',
   'crossfit',
   'pilates studio',
-  'martial arts gym',
-  'boxing gym',
+  'martial arts space',
+  'boxing space',
   'dance fitness studio',
   'personal training studio',
   'swimming club',
@@ -174,10 +174,10 @@ async function isBlocked(page) {
 
 const MAX_SEARCH_RETRIES = 2; // max retry attempts after a Google block per category search
 
-async function searchGymsInCity(page, cityName, category) {
+async function searchSpacesInCity(page, cityName, category) {
   const query = category
     ? `${category} in ${cityName}`
-    : cityName; // direct gym name search
+    : cityName; // direct space name search
 
   const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
 
@@ -227,7 +227,7 @@ async function searchGymsInCity(page, cityName, category) {
       } catch (_) {}
     }
 
-    const gymUrls  = new Set();
+    const spaceUrls  = new Set();
     let   noNewFor = 0;
     let   lastSize = 0;
 
@@ -237,7 +237,7 @@ async function searchGymsInCity(page, cityName, category) {
       for (const a of links) {
         try {
           const href = await a.getAttribute('href');
-          if (href) gymUrls.add(href.split('?')[0].split('/@')[0]);
+          if (href) spaceUrls.add(href.split('?')[0].split('/@')[0]);
         } catch (_) {}
       }
 
@@ -255,20 +255,20 @@ async function searchGymsInCity(page, cityName, category) {
       // Optimized scroll delay
       await sleep(1200, 2000);
 
-      if (gymUrls.size === lastSize) { if (++noNewFor >= 5) break; }
+      if (spaceUrls.size === lastSize) { if (++noNewFor >= 5) break; }
       else noNewFor = 0;
-      lastSize = gymUrls.size;
+      lastSize = spaceUrls.size;
     }
 
     // ── Direct place page detection ──────────────────────────────────────────
-    // Google sometimes redirects exact-name queries directly to the gym's
+    // Google sometimes redirects exact-name queries directly to the space's
     // own detail page instead of showing a list/feed. In that case the scroll
-    // loop above finds zero feed links and gymUrls stays empty.
+    // loop above finds zero feed links and spaceUrls stays empty.
     // Detect this by checking if we are now on a /maps/place/ URL and, if so,
     // wait for the page to fully resolve (Google Maps appends coordinates and
     // CID to the URL after the JS loads), then capture the final settled URL
-    // so that scrapeGymDetail can navigate to a proper place detail page.
-    if (gymUrls.size === 0) {
+    // so that scrapeSpaceDetail can navigate to a proper place detail page.
+    if (spaceUrls.size === 0) {
       try {
         const currentUrl = page.url();
         if (/\/maps\/place\//i.test(currentUrl)) {
@@ -280,11 +280,11 @@ async function searchGymsInCity(page, cityName, category) {
           if (/\/maps\/place\/.+\/@-?\d+\.\d+/i.test(settledUrl) ||
               /\/maps\/place\/.+\/data=/i.test(settledUrl)) {
             const canonicalUrl = settledUrl.split('?')[0].split('/@')[0];
-            // Re-add the coordinates segment so scrapeGymDetail lands on the right place
+            // Re-add the coordinates segment so scrapeSpaceDetail lands on the right place
             const atPart = settledUrl.match(/\/@([^/]+)/)?.[0] || '';
             const dataPart = settledUrl.match(/\/data=[^?]*/)?.[0] || '';
             const fullUrl = canonicalUrl + atPart + dataPart;
-            gymUrls.add(fullUrl);
+            spaceUrls.add(fullUrl);
             logger.info(`  📍 Direct place redirect detected — captured: ${fullUrl.slice(-80)}`);
           } else {
             logger.info(`  📍 Direct place redirect detected but URL did not fully resolve: ${settledUrl.slice(-80)}`);
@@ -293,15 +293,15 @@ async function searchGymsInCity(page, cityName, category) {
       } catch (_) {}
     }
 
-    logger.info(`  ✅ Found ${gymUrls.size} URLs for "${query}"`);
-    return [...gymUrls];
+    logger.info(`  ✅ Found ${spaceUrls.size} URLs for "${query}"`);
+    return [...spaceUrls];
   }
 
   // Safety net — should not reach here
   return [];
 }
 
-async function searchGymsInGrid(page, lat, lng, zoom, category) {
+async function searchSpacesInGrid(page, lat, lng, zoom, category) {
   const url = `https://www.google.com/maps/search/${encodeURIComponent(category)}/@${lat},${lng},${zoom}z/data=!3m1!4b1`;
 
   for (let attempt = 1; attempt <= MAX_SEARCH_RETRIES + 1; attempt++) {
@@ -346,7 +346,7 @@ async function searchGymsInGrid(page, lat, lng, zoom, category) {
       } catch (_) {}
     }
 
-    const gymUrls  = new Set();
+    const spaceUrls  = new Set();
     let   noNewFor = 0;
     let   lastSize = 0;
 
@@ -355,7 +355,7 @@ async function searchGymsInGrid(page, lat, lng, zoom, category) {
       for (const a of links) {
         try {
           const href = await a.getAttribute('href');
-          if (href) gymUrls.add(href.split('?')[0].split('/@')[0]);
+          if (href) spaceUrls.add(href.split('?')[0].split('/@')[0]);
         } catch (_) {}
       }
 
@@ -370,25 +370,25 @@ async function searchGymsInGrid(page, lat, lng, zoom, category) {
       }
       await sleep(1200, 2000);
 
-      if (gymUrls.size === lastSize) { if (++noNewFor >= 5) break; }
+      if (spaceUrls.size === lastSize) { if (++noNewFor >= 5) break; }
       else noNewFor = 0;
-      lastSize = gymUrls.size;
+      lastSize = spaceUrls.size;
     }
 
-    logger.info(`  ✅ Found ${gymUrls.size} URLs for grid [${lat}, ${lng}]`);
-    return [...gymUrls];
+    logger.info(`  ✅ Found ${spaceUrls.size} URLs for grid [${lat}, ${lng}]`);
+    return [...spaceUrls];
   }
 
   return [];
 }
 
-// ── Detail: scrape full gym data from a place page ───────────────────────────
+// ── Detail: scrape full space data from a place page ───────────────────────────
 // Phase 4: mode controls scrape depth
 //   'fast'     → core data only, no reviews/photos tab navigation
 //   'standard' → core + about tab + 30 reviews + 20 photos (default)
 //   'deep'     → core + about tab + 150 reviews + 80 photos
 
-async function scrapeGymDetail(page, url, mode = 'standard') {
+async function scrapeSpaceDetail(page, url, mode = 'standard') {
   // enrichment mode: 500 reviews, 500 photos (URL capture only)
   const maxReviews = mode === 'deep' ? 150 : mode === 'enrichment' ? cfg.scraper.enrichMaxReviews : (mode === 'fast' ? 0 : cfg.scraper.maxReviews);
   const maxPhotos  = mode === 'deep' ? 80  : mode === 'enrichment' ? cfg.scraper.enrichMaxPhotos  : (mode === 'fast' ? 0 : cfg.scraper.maxPhotos);
@@ -523,7 +523,7 @@ async function scrapeGymDetail(page, url, mode = 'standard') {
     };
   });
 
-  if (!core.name) throw new Error('Could not extract gym name — page may not have loaded correctly');
+  if (!core.name) throw new Error('Could not extract space name — page may not have loaded correctly');
 
   // ── Fast mode: return immediately with hero data only ────────────────────
   if (mode === 'fast') {
@@ -557,7 +557,7 @@ async function scrapeGymDetail(page, url, mode = 'standard') {
 }
 
 // ── Enrichment Detail Scraper — Tasks 1–5 (URL capture only, no downloads) ────
-// Navigates directly to a known gym URL and extracts all enrichment data points.
+// Navigates directly to a known space URL and extracts all enrichment data points.
 // Called by processEnrichmentJob(). Returns enrichment-specific fields only.
 
 async function scrapeEnrichmentDetail(page, url) {
@@ -585,13 +585,13 @@ async function scrapeEnrichmentDetail(page, url) {
 
     // Task 5: Contact enrichment
     const phone  = t('button[data-item-id^="phone:tel"] .Io6YTe') || t('[data-tooltip="Copy phone number"] .Io6YTe');
-    // Attempt secondary phone (some gyms list two)
+    // Attempt secondary phone (some spaces list two)
     const allPhones = [...document.querySelectorAll('button[data-item-id^="phone:tel"] .Io6YTe')].map(el => el.textContent?.trim()).filter(Boolean);
     const phone2 = allPhones.length > 1 ? allPhones[1] : null;
     const website = a('a[data-item-id="authority"]', 'href') || a('a[aria-label*="website" i]', 'href');
     // Booking URL — "Book" / "Reserve" CTA buttons
     const bookingUrl = a('a[aria-label*="Book" i], a[aria-label*="Reserve" i], a[data-item-id*="booking" i]', 'href');
-    // Menu URL — some gyms expose a schedule/menu link
+    // Menu URL — some spaces expose a schedule/menu link
     const menuUrl = a('a[aria-label*="menu" i], a[aria-label*="class schedule" i]', 'href');
     // Social links — look for icon-decorated links in the info panel
     const allLinks = [...document.querySelectorAll('a[href]')].map(el => el.href).filter(Boolean);
@@ -914,9 +914,9 @@ async function scrapeSelective(page, url, sections = ['all']) {
   const isAll = sections.includes('all');
   const isDeep = sections.includes('deep');
 
-  // If 'all' or 'deep', delegate to existing scrapeGymDetail
-  if (isAll) return scrapeGymDetail(page, url, 'standard');
-  if (isDeep) return scrapeGymDetail(page, url, 'deep');
+  // If 'all' or 'deep', delegate to existing scrapeSpaceDetail
+  if (isAll) return scrapeSpaceDetail(page, url, 'standard');
+  if (isDeep) return scrapeSpaceDetail(page, url, 'deep');
 
   // Navigate to the page and get core data (always needed for context)
   try {
@@ -972,7 +972,7 @@ async function scrapeSelective(page, url, sections = ['all']) {
     };
   });
 
-  if (!core.name) throw new Error('Could not extract gym name — page may not have loaded correctly');
+  if (!core.name) throw new Error('Could not extract space name — page may not have loaded correctly');
 
   // Build result — start with core, selectively add sections
   const result = { ...core, reviews: [], reviewSummary: null };
@@ -1004,7 +1004,7 @@ async function scrapeSelective(page, url, sections = ['all']) {
 }
 
 module.exports = {
-  BrowserManager, searchGymsInCity, searchGymsInGrid, scrapeGymDetail, scrapeEnrichmentDetail, scrapeSelective,
+  BrowserManager, searchSpacesInCity, searchSpacesInGrid, scrapeSpaceDetail, scrapeEnrichmentDetail, scrapeSelective,
   scrapeAboutTab, scrapeAboutTabExhaustive, scrapeReviews, scrapePhotosTab, scrapePhotosTabEnriched,
   FITNESS_CATEGORIES, isBlocked,
 };

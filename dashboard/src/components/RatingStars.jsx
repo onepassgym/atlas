@@ -2,11 +2,11 @@ import React from 'react';
 import { Star } from 'lucide-react';
 
 export default function RatingStars({ rating }) {
-  if (!rating) return <span className="gym-row-metric dim">—</span>;
+  if (!rating) return <span className="space-row-metric dim">—</span>;
   const full = Math.floor(rating);
   const hasHalf = rating % 1 >= 0.3;
   return (
-    <span className="gym-row-stars" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+    <span className="space-row-stars" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
       {Array.from({ length: 5 }, (_, i) => (
         <Star 
           key={i} 
@@ -16,7 +16,7 @@ export default function RatingStars({ rating }) {
           style={i === full && hasHalf ? { clipPath: 'inset(0 50% 0 0)' } : {}}
         />
       ))}
-      <span className="gym-row-rating-num" style={{ marginLeft: 4, fontWeight: 600 }}>{rating.toFixed(1)}</span>
+      <span className="space-row-rating-num" style={{ marginLeft: 4, fontWeight: 600 }}>{rating.toFixed(1)}</span>
     </span>
   );
 }

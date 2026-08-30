@@ -2,7 +2,7 @@
 /**
  * mediaRoutes.js — Dedicated production-grade media management API
  *
- * Queries the `gym_photos` collection (Photo model) — NOT rawPhotos embedded in Gym.
+ * Queries the `space_photos` collection (Photo model) — NOT rawPhotos embedded in Space.
  * This is the correct source for all 26k+ downloaded media files.
  *
  * Endpoints:
@@ -11,7 +11,7 @@
  *   GET  /api/media/scan          — scan filesystem and return summary
  *   POST /api/media/sync          — upsert missing DB records from filesystem
  *   GET  /api/media/:id           — single photo detail
- *   PATCH /api/media/:id          — update tags/caption/gym link
+ *   PATCH /api/media/:id          — update tags/caption/space link
  *   DELETE /api/media/:id         — soft-delete (mark orphaned)
  *   DELETE /api/media/bulk        — bulk delete
  */
@@ -25,7 +25,7 @@ const axios    = require('axios');
 const { param, query, body, validationResult } = require('express-validator');
 const router   = express.Router();
 const Photo    = require('../db/photoModel');
-const Gym      = require('../db/spaceModel');
+const Space      = require('../db/spaceModel');
 const cfg      = require('../../config');
 const logger   = require('../utils/logger');
 const { ok, err } = require('../utils/apiUtils');
@@ -63,9 +63,9 @@ router.get('/progress', (req, res) => {
 function buildFilter(q) {
   const filter = {};
 
-  // Gym filter
-  if (q.gymId && mongoose.isValidObjectId(q.gymId)) {
-    filter.gymId = new mongoose.Types.ObjectId(q.gymId);
+  // Space filter
+  if (q.spaceId && mongoose.isValidObjectId(q.spaceId)) {
+    filter.spaceId = new mongoose.Types.ObjectId(q.spaceId);
   }
 
   // Type filter
@@ -133,7 +133,7 @@ router.get('/', async (req, res) => {
         .sort(sort)
         .skip(skip)
         .limit(limit)
-        .populate('gymId', 'name areaName slug')
+        .populate('spaceId', 'name areaName slug')
         .lean(),
       Photo.countDocuments(filter),
     ]);
@@ -169,13 +169,13 @@ router.get('/stats', async (req, res) => {
             { $group: { _id: '$type', count: { $sum: 1 }, size: { $sum: '$sizeBytes' } } },
             { $sort: { count: -1 } }
           ],
-          byGymTop: [
-            { $group: { _id: '$gymId', count: { $sum: 1 }, size: { $sum: '$sizeBytes' } } },
+          bySpaceTop: [
+            { $group: { _id: '$spaceId', count: { $sum: 1 }, size: { $sum: '$sizeBytes' } } },
             { $sort: { count: -1 } },
             { $limit: 10 },
-            { $lookup: { from: SPACES_COLLECTION, localField: '_id', foreignField: '_id', as: 'gym' } },
-            { $unwind: { path: '$gym', preserveNullAndEmptyArrays: true } },
-            { $project: { gymName: { $ifNull: ['$gym.name', 'Unknown'] }, count: 1, size: 1 } }
+            { $lookup: { from: SPACES_COLLECTION, localField: '_id', foreignField: '_id', as: 'space' } },
+            { $unwind: { path: '$space', preserveNullAndEmptyArrays: true } },
+            { $project: { spaceName: { $ifNull: ['$space.name', 'Unknown'] }, count: 1, size: 1 } }
           ],
           recentUploads: [
             { $match: { createdAt: { $gte: weekAgo } } },
@@ -192,20 +192,20 @@ router.get('/stats', async (req, res) => {
           largestFiles: [
             { $sort: { sizeBytes: -1 } },
             { $limit: 5 },
-            { $lookup: { from: SPACES_COLLECTION, localField: 'gymId', foreignField: '_id', as: 'gymDoc' } },
-            { $unwind: { path: '$gymDoc', preserveNullAndEmptyArrays: true } },
-            { $addFields: { gymId: { $cond: [{ $gt: ['$gymDoc', null] }, { _id: '$gymDoc._id', name: '$gymDoc.name' }, null] } } },
-            { $project: { gymDoc: 0 } }
+            { $lookup: { from: SPACES_COLLECTION, localField: 'spaceId', foreignField: '_id', as: 'spaceDoc' } },
+            { $unwind: { path: '$spaceDoc', preserveNullAndEmptyArrays: true } },
+            { $addFields: { spaceId: { $cond: [{ $gt: ['$spaceDoc', null] }, { _id: '$spaceDoc._id', name: '$spaceDoc.name' }, null] } } },
+            { $project: { spaceDoc: 0 } }
           ],
           unlinkedCount: [
-            { $match: { gymId: null } },
+            { $match: { spaceId: null } },
             { $count: 'count' }
           ],
         }
       }
     ]);
 
-    const gymPhotoSum = await Gym.aggregate([{ $group: { _id: null, total: { $sum: '$totalPhotos' } } }]);
+    const spacePhotoSum = await Space.aggregate([{ $group: { _id: null, total: { $sum: '$totalPhotos' } } }]);
 
     const totals = facetResult.totals[0] || { totalCount: 0, totalSize: 0, avgSize: 0 };
 
@@ -214,14 +214,14 @@ router.get('/stats', async (req, res) => {
       totalSize:     totals.totalSize || 0,
       avgSize:       totals.avgSize || 0,
       byType:        facetResult.byType,
-      byGymTop:      facetResult.byGymTop,
+      bySpaceTop:      facetResult.bySpaceTop,
       recentUploads: facetResult.recentUploads[0]?.count || 0,
       missingCount:  facetResult.missingCount[0]?.count || 0,
       orphanedCount: facetResult.orphanedCount[0]?.count || 0,
       largestFiles:  facetResult.largestFiles,
       unlinkedCount: facetResult.unlinkedCount[0]?.count || 0,
-      gymPhotoSum:   gymPhotoSum[0]?.total || 0,
-      needsMigration: (gymPhotoSum[0]?.total || 0) > totals.totalCount,
+      spacePhotoSum:   spacePhotoSum[0]?.total || 0,
+      needsMigration: (spacePhotoSum[0]?.total || 0) > totals.totalCount,
     };
 
     _mediaStatsCache = statsResult;
@@ -265,28 +265,28 @@ router.get('/scan', async (req, res) => {
   }
 });
 
-// ── POST /api/media/migrate-from-gyms — bulk-populate gym_photos from Gym.photos arrays ──
-// This is the PRIMARY fix for the 26k discrepancy — gyms store downloaded photo data
-// embedded in Gym.photos field; this migrates all of them into the Photo collection.
-router.post('/migrate-from-gyms', async (req, res) => {
+// ── POST /api/media/migrate-from-spaces — bulk-populate space_photos from Space.photos arrays ──
+// This is the PRIMARY fix for the 26k discrepancy — spaces store downloaded photo data
+// embedded in Space.photos field; this migrates all of them into the Photo collection.
+router.post('/migrate-from-spaces', async (req, res) => {
   res.status(202).json({ success: true, message: 'Migration started in background. Check /api/media/stats for progress.' });
 
   (async () => {
     try {
-      logger.info('[media-migrate] Starting Gym.photos → gym_photos migration...');
+      logger.info('[media-migrate] Starting Space.photos → space_photos migration...');
 
-      const gymSlugs = await Gym.find({}).select('_id slug').lean();
-      const slugMap  = new Map(gymSlugs.map(g => [g.slug, g._id]));
-      logger.info(`[media-migrate] Loaded ${slugMap.size} gym slugs`);
+      const spaceSlugs = await Space.find({}).select('_id slug').lean();
+      const slugMap  = new Map(spaceSlugs.map(g => [g.slug, g._id]));
+      logger.info(`[media-migrate] Loaded ${slugMap.size} space slugs`);
 
-      // Fetch every gym that has coverPhoto.publicUrl OR a non-empty rawPhotos array
-      const gyms = await Gym.find({
+      // Fetch every space that has coverPhoto.publicUrl OR a non-empty rawPhotos array
+      const spaces = await Space.find({
         $or: [
           { 'coverPhoto.publicUrl': { $exists: true, $ne: null } },
           { rawPhotos: { $exists: true, $type: 'array', $ne: [] } },
         ],
       }).select('_id slug coverPhoto rawPhotos').lean();
-      logger.info(`[media-migrate] Found ${gyms.length} gyms with media`);
+      logger.info(`[media-migrate] Found ${spaces.length} spaces with media`);
 
       let processed = 0, upserted = 0, skipped = 0;
       const BATCH = 200;
@@ -304,13 +304,13 @@ router.post('/migrate-from-gyms', async (req, res) => {
         ops = [];
       }
 
-      for (const gym of gyms) {
-        const photoMap = collectPhotos(gym);
+      for (const space of spaces) {
+        const photoMap = collectPhotos(space);
 
         if (photoMap.size === 0) { skipped++; continue; }
 
         for (const { p, isCover } of photoMap.values()) {
-          ops.push(buildOp(gym._id, gym.slug, p, isCover));
+          ops.push(buildOp(space._id, space.slug, p, isCover));
           if (ops.length >= BATCH) {
             await flushBatch();
             if (upserted % 2000 === 0 && upserted > 0)
@@ -326,7 +326,7 @@ router.post('/migrate-from-gyms', async (req, res) => {
       const finalCount = await Photo.countDocuments();
       setProgress('migrate', { status: 'done', phase: 'Migration complete', processed, upserted, skipped, finalCount });
       setTimeout(() => clearProgress('migrate'), 60_000);
-      logger.info(`[media-migrate] ✅ Done: ${processed} gyms, ${upserted} upserted, ${skipped} skipped, ${finalCount} total in gym_photos`);
+      logger.info(`[media-migrate] ✅ Done: ${processed} spaces, ${upserted} upserted, ${skipped} skipped, ${finalCount} total in space_photos`);
     } catch (e) {
       setProgress('migrate', { status: 'error', phase: String(e.message || e) });
       setTimeout(() => clearProgress('migrate'), 30_000);
@@ -359,8 +359,8 @@ router.post('/sync', async (req, res) => {
       logger.info('[media-sync] Starting filesystem → DB sync...');
       setProgress('sync', { status: 'running', phase: 'Scanning filesystem…', done: 0, total: 0 });
 
-      const gymSlugs = await Gym.find({}).select('_id slug').lean();
-      const slugMap  = new Map(gymSlugs.map(g => [g.slug, g._id]));
+      const spaceSlugs = await Space.find({}).select('_id slug').lean();
+      const slugMap  = new Map(spaceSlugs.map(g => [g.slug, g._id]));
 
       const allFiles   = await walkDir(basePath);
       const mediaFiles = allFiles.filter(f => MEDIA_EXTENSIONS.has(path.extname(f.name).toLowerCase()));
@@ -380,7 +380,7 @@ router.post('/sync', async (req, res) => {
           const isThumb  = rel.startsWith('thumbnails/') || f.name.startsWith('th_');
           const parts    = rel.split('/');
           const slug     = (!isThumb && parts.length >= 2) ? parts[1] : null;
-          const gymId    = slug ? (slugMap.get(slug) || null) : null;
+          const spaceId    = slug ? (slugMap.get(slug) || null) : null;
 
           return {
             updateOne: {
@@ -396,9 +396,9 @@ router.post('/sync', async (req, res) => {
                   fsExists:     true,
                   fsVerifiedAt: new Date(),
                   createdAt:    new Date(f.mtimeMs),
-                  ...(gymId ? { gymId } : {}),
+                  ...(spaceId ? { spaceId } : {}),
                 },
-                $set: { fsExists: true, fsVerifiedAt: new Date(), ...(gymId ? { gymId } : {}) },
+                $set: { fsExists: true, fsVerifiedAt: new Date(), ...(spaceId ? { spaceId } : {}) },
               },
               upsert: true,
             },
@@ -448,14 +448,14 @@ router.post('/sync', async (req, res) => {
   })();
 });
 
-// ── POST /api/media/relink-gyms — assign gymId to photos that have folder slugs ──
-router.post('/relink-gyms', async (req, res) => {
+// ── POST /api/media/relink-spaces — assign spaceId to photos that have folder slugs ──
+router.post('/relink-spaces', async (req, res) => {
   try {
-    setProgress('relink', { status: 'running', phase: 'Loading gym slugs…', done: 0, total: 0 });
-    const gymSlugs = await Gym.find({}).select('_id slug').lean();
-    const slugMap  = new Map(gymSlugs.map(g => [g.slug, g._id]));
+    setProgress('relink', { status: 'running', phase: 'Loading space slugs…', done: 0, total: 0 });
+    const spaceSlugs = await Space.find({}).select('_id slug').lean();
+    const slugMap  = new Map(spaceSlugs.map(g => [g.slug, g._id]));
 
-    const unlinked = await Photo.find({ gymId: null, folder: { $regex: /^photos\// } })
+    const unlinked = await Photo.find({ spaceId: null, folder: { $regex: /^photos\// } })
       .select('_id folder')
       .lean();
 
@@ -466,16 +466,16 @@ router.post('/relink-gyms', async (req, res) => {
     for (const p of unlinked) {
       const parts = (p.folder || '').split('/');
       const slug  = parts[1];
-      const gymId = slug ? slugMap.get(slug) : null;
-      if (gymId) {
-        ops.push({ updateOne: { filter: { _id: p._id }, update: { $set: { gymId } } } });
+      const spaceId = slug ? slugMap.get(slug) : null;
+      if (spaceId) {
+        ops.push({ updateOne: { filter: { _id: p._id }, update: { $set: { spaceId } } } });
         linked++;
       }
     }
     if (ops.length) await Photo.bulkWrite(ops, { ordered: false });
     setProgress('relink', { status: 'done', phase: 'Relink complete', done: unlinked.length, total: unlinked.length, linked });
     setTimeout(() => clearProgress('relink'), 30_000);
-    ok(res, { unlinked: unlinked.length, linked, message: `Linked ${linked} photos to gyms` });
+    ok(res, { unlinked: unlinked.length, linked, message: `Linked ${linked} photos to spaces` });
   } catch (e) {
     setProgress('relink', { status: 'error', phase: e.message, done: 0, total: 0 });
     setTimeout(() => clearProgress('relink'), 30_000);
@@ -528,20 +528,20 @@ router.get('/:id', param('id').isMongoId(), async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return err(res, 'Invalid ID', 400);
   try {
-    const photo = await Photo.findById(req.params.id).populate('gymId', 'name areaName slug').lean();
+    const photo = await Photo.findById(req.params.id).populate('spaceId', 'name areaName slug').lean();
     if (!photo) return err(res, 'Photo not found', 404);
     ok(res, { photo });
   } catch (e) { err(res, e.message); }
 });
 
-// ── PATCH /api/media/:id — update tags, caption, gymId ──────────────────────
+// ── PATCH /api/media/:id — update tags, caption, spaceId ──────────────────────
 router.patch('/:id',
   param('id').isMongoId(),
   express.json(),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return err(res, 'Invalid ID', 400);
-    const allowed = ['tags', 'caption', 'gymId', 'type', 'isCover'];
+    const allowed = ['tags', 'caption', 'spaceId', 'type', 'isCover'];
     const set = {};
     for (const k of allowed) {
       if (req.body[k] !== undefined) set[k] = req.body[k];

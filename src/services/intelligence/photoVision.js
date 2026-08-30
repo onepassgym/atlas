@@ -52,7 +52,7 @@ async function analyzePhotoBuffer(buffer) {
     } else if (gMean > rMean * 1.1 && gMean > bMean * 1.1) {
       tags.push('outdoor_greenery');
     } else if (rMean > 100 && gMean < 100 && bMean < 100) {
-      tags.push('equipment'); // Warm tones, often gym mats/equipment
+      tags.push('equipment'); // Warm tones, often space mats/equipment
     } else if (brightness > 180 && contrast < 40) {
       tags.push('document_or_flyer'); // bright but low color variance
       appealScore -= 30; // flyers make bad cover photos

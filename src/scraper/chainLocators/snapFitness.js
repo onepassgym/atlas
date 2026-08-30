@@ -11,7 +11,7 @@ const logger = require('../../utils/logger');
 const chainSlug = 'snap-fitness';
 const CHAIN_NAME = 'Snap Fitness';
 
-const SEARCH_API = 'https://www.snapfitness.com/api/gyms';
+const SEARCH_API = 'https://www.snapfitness.com/api/spaces';
 
 const SEARCH_REGIONS = [
   { lat: 44.9778, lng: -93.2650, label: 'US-Minnesota' },
@@ -69,14 +69,14 @@ async function fetchAllLocations() {
         },
       });
 
-      const gyms = Array.isArray(data) ? data : data?.gyms || data?.results || data?.data || [];
-      for (const gym of gyms) {
-        const loc = normalizeLocation(gym);
+      const spaces = Array.isArray(data) ? data : data?.spaces || data?.results || data?.data || [];
+      for (const space of spaces) {
+        const loc = normalizeLocation(space);
         const key = loc.storeId || `${loc.lat},${loc.lng}`;
         if (!allLocations.has(key)) allLocations.set(key, loc);
       }
 
-      logger.info(`  [SnapFitness] ${region.label}: ${gyms.length} found (unique: ${allLocations.size})`);
+      logger.info(`  [SnapFitness] ${region.label}: ${spaces.length} found (unique: ${allLocations.size})`);
     } catch (err) {
       logger.warn(`  [SnapFitness] ${region.label} failed: ${err.message}`);
     }

@@ -6,9 +6,9 @@ const router = express.Router();
 
 const { addChainJob, getChainQueueStats } = require('../queue/queues');
 const CrawlJob  = require('../db/crawlJobModel');
-const GymChain  = require('../db/gymChainModel');
-const Gym       = require('../db/spaceModel');
-const { tagExistingGyms, tagChain } = require('../services/chainTagger');
+const SpaceChain  = require('../db/spaceChainModel');
+const Space       = require('../db/spaceModel');
+const { tagExistingSpaces, tagChain } = require('../services/chainTagger');
 const logger    = require('../utils/logger');
 const { ok, err, validate } = require('../utils/apiUtils');
 const bus       = require('../services/eventBus');
@@ -30,14 +30,14 @@ async function hasActiveChainJob(chainSlug) {
  * @swagger
  * tags:
  *   name: Chains
- *   description: Gym chain management and chain crawling
+ *   description: Space chain management and chain crawling
  */
 
 /**
  * @swagger
  * /api/chains:
  *   get:
- *     summary: List all registered gym chains
+ *     summary: List all registered space chains
  *     tags: [Chains]
  *     responses:
  *       200:
@@ -45,7 +45,7 @@ async function hasActiveChainJob(chainSlug) {
  */
 router.get('/', async (req, res) => {
   try {
-    const chains = await GymChain.find().sort({ name: 1 }).lean();
+    const chains = await SpaceChain.find().sort({ name: 1 }).lean();
     ok(res, { total: chains.length, chains });
   } catch (e) { err(res, e.message); }
 });
@@ -54,7 +54,7 @@ router.get('/', async (req, res) => {
  * @swagger
  * /api/chains:
  *   post:
- *     summary: Register a new gym chain
+ *     summary: Register a new space chain
  *     tags: [Chains]
  *     requestBody:
  *       required: true
@@ -92,12 +92,12 @@ router.post('/',
   async (req, res) => {
     if (validate(req, res)) return;
     try {
-      const existing = await GymChain.findOne({ slug: req.body.slug }).lean();
+      const existing = await SpaceChain.findOne({ slug: req.body.slug }).lean();
       if (existing) {
         return ok(res, { message: 'Chain already exists', chain: existing }, 409);
       }
 
-      const chain = await GymChain.create(req.body);
+      const chain = await SpaceChain.create(req.body);
       logger.info(`[Chains API] Created chain: ${chain.name} (${chain.slug})`);
       ok(res, { message: 'Chain created', chain }, 201);
     } catch (e) { err(res, e.message); }
@@ -119,16 +119,16 @@ router.post('/',
  */
 router.get('/:slug', async (req, res) => {
   try {
-    const chain = await GymChain.findOne({ slug: req.params.slug }).lean();
+    const chain = await SpaceChain.findOne({ slug: req.params.slug }).lean();
     if (!chain) return err(res, 'Chain not found', 404);
 
-    const gymCount = await Gym.countDocuments({ chainSlug: chain.slug, isChainMember: true });
-    const countries = await Gym.distinct('addressParts.country', { chainSlug: chain.slug });
+    const spaceCount = await Space.countDocuments({ chainSlug: chain.slug, isChainMember: true });
+    const countries = await Space.distinct('addressParts.country', { chainSlug: chain.slug });
 
     ok(res, {
       chain,
       stats: {
-        totalGyms: gymCount,
+        totalSpaces: spaceCount,
         countries: countries.filter(Boolean),
         countryCount: countries.filter(Boolean).length,
       },
@@ -138,9 +138,9 @@ router.get('/:slug', async (req, res) => {
 
 /**
  * @swagger
- * /api/chains/{slug}/gyms:
+ * /api/chains/{slug}/spaces:
  *   get:
- *     summary: List all gyms belonging to a chain
+ *     summary: List all spaces belonging to a chain
  *     tags: [Chains]
  *     parameters:
  *       - in: path
@@ -163,7 +163,7 @@ router.get('/:slug', async (req, res) => {
  *         schema:
  *           type: string
  */
-router.get('/:slug/gyms',
+router.get('/:slug/spaces',
   query('limit').optional().isInt({ min: 1, max: 200 }),
   query('page').optional().isInt({ min: 1 }),
   query('country').optional().isString(),
@@ -172,7 +172,7 @@ router.get('/:slug/gyms',
     const { limit = 50, page = 1, country } = req.query;
 
     try {
-      const chain = await GymChain.findOne({ slug: req.params.slug }).lean();
+      const chain = await SpaceChain.findOne({ slug: req.params.slug }).lean();
       if (!chain) return err(res, 'Chain not found', 404);
 
       const filter = { chainSlug: chain.slug, isChainMember: true };
@@ -180,17 +180,17 @@ router.get('/:slug/gyms',
         filter['addressParts.country'] = { $regex: new RegExp(country, 'i') };
       }
 
-      const [gyms, total] = await Promise.all([
-        Gym.find(filter)
+      const [spaces, total] = await Promise.all([
+        Space.find(filter)
           .select('name address lat lng rating totalReviews contact areaName addressParts coverPhoto')
           .sort({ name: 1 })
           .limit(+limit)
           .skip((+page - 1) * +limit)
           .lean(),
-        Gym.countDocuments(filter),
+        Space.countDocuments(filter),
       ]);
 
-      ok(res, { chainSlug: chain.slug, chainName: chain.name, total, page: +page, limit: +limit, gyms });
+      ok(res, { chainSlug: chain.slug, chainName: chain.name, total, page: +page, limit: +limit, spaces });
     } catch (e) { err(res, e.message); }
   }
 );
@@ -211,7 +211,7 @@ router.put('/:slug',
   async (req, res) => {
     if (validate(req, res)) return;
     try {
-      const chain = await GymChain.findOneAndUpdate(
+      const chain = await SpaceChain.findOneAndUpdate(
         { slug: req.params.slug },
         { $set: req.body },
         { new: true }
@@ -261,7 +261,7 @@ router.post('/crawl/start',
 
     try {
       // Validate chain exists
-      const chain = await GymChain.findOne({ slug: chainSlug }).lean();
+      const chain = await SpaceChain.findOne({ slug: chainSlug }).lean();
       if (!chain) return err(res, `Chain not found: ${chainSlug}`, 404);
 
       // Dedup guard
@@ -340,7 +340,7 @@ router.post('/crawl/batch',
 
       for (const entry of chains) {
         const { slug, countries = [] } = entry;
-        const chain = await GymChain.findOne({ slug }).lean();
+        const chain = await SpaceChain.findOne({ slug }).lean();
         if (!chain) {
           skipped.push({ slug, reason: 'Chain not found' });
           continue;
@@ -395,15 +395,15 @@ router.get('/crawl/queue-stats', async (req, res) => {
  * @swagger
  * /api/chains/tag-existing:
  *   post:
- *     summary: Retroactively tag existing gyms with chain identity
+ *     summary: Retroactively tag existing spaces with chain identity
  *     tags: [Chains]
- *     description: Scans all gyms in the DB and tags those matching known chain name patterns
+ *     description: Scans all spaces in the DB and tags those matching known chain name patterns
  */
 router.post('/tag-existing', async (req, res) => {
   try {
-    const result = await tagExistingGyms();
+    const result = await tagExistingSpaces();
     ok(res, {
-      message: `Tagged ${result.totalTagged} gyms across all chains`,
+      message: `Tagged ${result.totalTagged} spaces across all chains`,
       ...result,
     });
   } catch (e) { err(res, e.message); }
@@ -413,13 +413,13 @@ router.post('/tag-existing', async (req, res) => {
  * @swagger
  * /api/chains/{slug}/tag:
  *   post:
- *     summary: Tag existing gyms for a specific chain
+ *     summary: Tag existing spaces for a specific chain
  *     tags: [Chains]
  */
 router.post('/:slug/tag', async (req, res) => {
   try {
     const result = await tagChain(req.params.slug);
-    ok(res, { message: `Tagged ${result.gymsTagged} gyms for ${result.chainName}`, ...result });
+    ok(res, { message: `Tagged ${result.spacesTagged} spaces for ${result.chainName}`, ...result });
   } catch (e) { err(res, e.message); }
 });
 
@@ -427,14 +427,14 @@ router.post('/:slug/tag', async (req, res) => {
  * @swagger
  * /api/chains/{slug}:
  *   delete:
- *     summary: Delete a chain (does not remove gyms)
+ *     summary: Delete a chain (does not remove spaces)
  *     tags: [Chains]
  */
 router.delete('/:slug', async (req, res) => {
   try {
-    const result = await GymChain.findOneAndDelete({ slug: req.params.slug });
+    const result = await SpaceChain.findOneAndDelete({ slug: req.params.slug });
     if (!result) return err(res, 'Chain not found', 404);
-    ok(res, { message: `Chain "${result.name}" deleted. Gyms are NOT removed.` });
+    ok(res, { message: `Chain "${result.name}" deleted. Spaces are NOT removed.` });
   } catch (e) { err(res, e.message); }
 });
 

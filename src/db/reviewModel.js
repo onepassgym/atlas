@@ -38,9 +38,9 @@ function parseRelativeDate(raw) {
 
 const ReviewSchema = new mongoose.Schema(
   {
-    gymId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Gym', required: true },
-    // Denormalized public identifier — populated at write time from parent gym.
-    // Never used for $lookup or joins; gymId (ObjectId) is always the join key.
+    spaceId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Space', required: true },
+    // Denormalized public identifier — populated at write time from parent space.
+    // Never used for $lookup or joins; spaceId (ObjectId) is always the join key.
     opgId:        { type: String, index: true, uppercase: true, trim: true },
     reviewId:     { type: String, required: true },
 
@@ -79,7 +79,7 @@ const ReviewSchema = new mongoose.Schema(
 // Primary indexes are created imperatively in ensureIndexes.js so they are
 // guaranteed to exist before the first write.  We still declare them here
 // for Mongoose's schema introspection / IDE support.
-ReviewSchema.index({ gymId: 1 });
+ReviewSchema.index({ spaceId: 1 });
 ReviewSchema.index({ reviewId: 1 }, { unique: true });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -88,13 +88,13 @@ ReviewSchema.index({ reviewId: 1 }, { unique: true });
  * Convert an array of raw review objects (as scraped) into properly-shaped
  * documents ready for insertion into the `reviews` collection.
  *
- * @param {ObjectId} gymId
+ * @param {ObjectId} spaceId
  * @param {Array}    rawReviews  — array of review objects from the scraper
  * @returns {Array}
  */
-function buildReviewDocs(gymId, rawReviews = []) {
+function buildReviewDocs(spaceId, rawReviews = []) {
   return rawReviews.map((r) => ({
-    gymId,
+    spaceId,
     reviewId:     r.reviewId   || r.id || String(Math.random()),
     authorName:   r.authorName || r.author || null,
     authorUrl:    r.authorUrl   || null,
@@ -123,12 +123,12 @@ function buildReviewDocs(gymId, rawReviews = []) {
  * Merge updated review fields into an existing review document.
  * Used by enrichment pass to update ownerReply if it changed.
  *
- * @param {ObjectId} gymId
+ * @param {ObjectId} spaceId
  * @param {Array}    rawReviews
- * @param {Object}   changeLogWriter — function(gymId, diffs, now) for logging ownerResponse changes
+ * @param {Object}   changeLogWriter — function(spaceId, diffs, now) for logging ownerResponse changes
  * @returns {{ updated: number }}
  */
-async function mergeReviewEnrichment(gymId, rawReviews = [], changeLogWriter) {
+async function mergeReviewEnrichment(spaceId, rawReviews = [], changeLogWriter) {
   if (!rawReviews.length) return { updated: 0 };
   let updated = 0;
   const now = new Date();
@@ -152,7 +152,7 @@ async function mergeReviewEnrichment(gymId, rawReviews = [], changeLogWriter) {
       };
       // Log the owner response change
       if (changeLogWriter) {
-        await changeLogWriter(gymId, [{
+        await changeLogWriter(spaceId, [{
           field:    'ownerResponse',
           oldValue: oldReplyText,
           newValue: newReplyText,

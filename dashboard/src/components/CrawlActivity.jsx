@@ -13,9 +13,9 @@ const STATUS_CONFIG = {
 };
 
 const ACTION_META = {
-  'gym-start':    { bg: 'rgba(59,130,246,0.08)',  border: 'rgba(59,130,246,0.25)',  dot: '#3b82f6',  icon: '⚡' },
-  'gym-done':     { bg: 'rgba(16,185,129,0.08)',  border: 'rgba(16,185,129,0.25)',  dot: '#10b981',  icon: '✅' },
-  'gym-failed':   { bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.25)',   dot: '#ef4444',  icon: '❌' },
+  'space-start':    { bg: 'rgba(59,130,246,0.08)',  border: 'rgba(59,130,246,0.25)',  dot: '#3b82f6',  icon: '⚡' },
+  'space-done':     { bg: 'rgba(16,185,129,0.08)',  border: 'rgba(16,185,129,0.25)',  dot: '#10b981',  icon: '✅' },
+  'space-failed':   { bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.25)',   dot: '#ef4444',  icon: '❌' },
   'batch-start':  { bg: 'rgba(139,92,246,0.08)',  border: 'rgba(139,92,246,0.25)',  dot: '#8b5cf6',  icon: '📦' },
   'batch-done':   { bg: 'rgba(16,185,129,0.08)',  border: 'rgba(16,185,129,0.25)',  dot: '#10b981',  icon: '🏁' },
   'search-start': { bg: 'rgba(6,182,212,0.08)',   border: 'rgba(6,182,212,0.25)',   dot: '#06b6d4',  icon: '🔎' },
@@ -38,9 +38,9 @@ function formatCategory(cat) {
 
 function getActionText(a) {
   switch (a.type) {
-    case 'gym-start':    return `Scraping: ${decodeURIComponent(a.url || '?').slice(0, 50)}`;
-    case 'gym-done':     return `Done: ${a.name} — ${((a.duration || 0)/1000).toFixed(1)}s`;
-    case 'gym-failed':   return `${a.isBlock ? '🛑 Blocked' : 'Failed'}: ${a.error?.slice(0, 55) || '?'} (attempt ${a.attempt})`;
+    case 'space-start':    return `Scraping: ${decodeURIComponent(a.url || '?').slice(0, 50)}`;
+    case 'space-done':     return `Done: ${a.name} — ${((a.duration || 0)/1000).toFixed(1)}s`;
+    case 'space-failed':   return `${a.isBlock ? '🛑 Blocked' : 'Failed'}: ${a.error?.slice(0, 55) || '?'} (attempt ${a.attempt})`;
     case 'batch-start':  return `Batch #${a.batch} — ${a.city} · ${a.urls} URLs`;
     case 'batch-done':   return `Batch #${a.batch} done · ✅${a.stats?.created||0} 🔄${a.stats?.updated||0} ❌${a.stats?.failed||0}`;
     case 'search-start': return `Discovery: "${formatCategory(a.category)}" in ${a.city}`;
@@ -150,8 +150,8 @@ function Sparkline({ actions }) {
   const recent = actions.slice(0, 15).reverse();
   const points = recent.map((a, i) => ({
     x: pad + (i / Math.max(recent.length - 1, 1)) * (W - pad * 2),
-    y: H - pad - (a.type === 'gym-done' ? H - pad * 2 : a.type === 'gym-failed' ? (H - pad * 2) * 0.2 : (H - pad * 2) * 0.6),
-    color: a.type === 'gym-done' ? '#10b981' : a.type === 'gym-failed' ? '#ef4444' : '#3b82f6',
+    y: H - pad - (a.type === 'space-done' ? H - pad * 2 : a.type === 'space-failed' ? (H - pad * 2) * 0.2 : (H - pad * 2) * 0.6),
+    color: a.type === 'space-done' ? '#10b981' : a.type === 'space-failed' ? '#ef4444' : '#3b82f6',
   }));
 
   const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
@@ -261,12 +261,12 @@ function EventRow({ action, index }) {
 /* ─── Main Component ─────────────────────────────────────── */
 export default function CrawlActivity() {
   const { crawlActivity } = useApp();
-  const { currentGym, batch, throttle, recentActions, status } = crawlActivity;
+  const { currentSpace, batch, throttle, recentActions, status } = crawlActivity;
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.idle;
 
   // Count stats from recent actions
-  const doneCount  = recentActions.filter(a => a.type === 'gym-done').length;
-  const failCount  = recentActions.filter(a => a.type === 'gym-failed').length;
+  const doneCount  = recentActions.filter(a => a.type === 'space-done').length;
+  const failCount  = recentActions.filter(a => a.type === 'space-failed').length;
   const blockCount = recentActions.filter(a => a.type === 'block').length;
 
   const throttleLabel =
@@ -330,24 +330,24 @@ export default function CrawlActivity() {
 
           {/* Current URL progress */}
           <AnimatePresence>
-            {status !== 'idle' && currentGym && (
+            {status !== 'idle' && currentSpace && (
               <motion.div
-                key={currentGym.url}
+                key={currentSpace.url}
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 style={{ marginTop: 8 }}
               >
                 <ProgressBand
-                  value={currentGym.urlIndex}
-                  total={currentGym.total}
+                  value={currentSpace.urlIndex}
+                  total={currentSpace.total}
                   label={status === 'searching' ? 'Discovery' : 'Batch'}
                   color={cfg.color}
                 />
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontFamily: 'var(--mono)', wordBreak: 'break-all' }}>
                   {status === 'searching'
-                    ? `Searching: "${formatCategory(currentGym.url)}"`
-                    : decodeURIComponent(currentGym.url || '').slice(0, 60)}
+                    ? `Searching: "${formatCategory(currentSpace.url)}"`
+                    : decodeURIComponent(currentSpace.url || '').slice(0, 60)}
                 </div>
               </motion.div>
             )}

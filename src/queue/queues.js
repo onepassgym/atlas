@@ -37,7 +37,7 @@ function makeQueue(name, jobOpts = {}) {
 
 const crawlQueue      = makeQueue('atlas-crawl');
 const chainCrawlQueue = makeQueue('atlas-chain-crawl');
-// Enrichment queue — targeted per-gym enrichment jobs (Tasks 1-5)
+// Enrichment queue — targeted per-space enrichment jobs (Tasks 1-5)
 const enrichmentQueue = makeQueue('atlas-enrichment', {
   attempts:         2,
   backoff:          { type: 'exponential', delay: 8000 },
@@ -68,10 +68,10 @@ async function addGridJob(jobId, regionName, lat, lng, zoom, categories) {
 }
 
 
-async function addGymNameJob(jobId, spaceName) {
+async function addSpaceNameJob(jobId, spaceName) {
   const job = await crawlQueue.add(
-    'gym-name-crawl',
-    { type: 'gym_name', jobId, input: { spaceName } },
+    'space-name-crawl',
+    { type: 'space_name', jobId, input: { spaceName } },
     { jobId, priority: 1 }
   );
   logger.info(`📥 Queued space name: ${spaceName} (BullMQ #${job.id})`);
@@ -112,18 +112,18 @@ async function getChainQueueStats() {
 
 
 /**
- * Enqueue a gym-enrichment job.
- * Input: { gymId, placeUrl, cityName }
+ * Enqueue a space-enrichment job.
+ * Input: { spaceId, placeUrl, cityName }
  * Priority 2 — below active city-crawls (priority 1).
  */
-async function addEnrichmentJob(gymId, placeUrl, cityName) {
-  const jobId = `enrich:${gymId}`;
+async function addEnrichmentJob(spaceId, placeUrl, cityName) {
+  const jobId = `enrich:${spaceId}`;
   const job = await enrichmentQueue.add(
-    'gym-enrichment',
-    { type: 'enrichment', gymId: String(gymId), input: { gymId: String(gymId), placeUrl, cityName } },
+    'space-enrichment',
+    { type: 'enrichment', spaceId: String(spaceId), input: { spaceId: String(spaceId), placeUrl, cityName } },
     { jobId, priority: 2, removeOnComplete: true }
   );
-  logger.info(`📥 Queued enrichment: ${cityName || gymId} gym ${gymId} (BullMQ #${job.id})`);
+  logger.info(`📥 Queued enrichment: ${cityName || spaceId} space ${spaceId} (BullMQ #${job.id})`);
   return job;
 }
 
@@ -285,7 +285,7 @@ module.exports = {
   enrichmentQueue,
   addCityJob,
   addGridJob,
-  addGymNameJob,
+  addSpaceNameJob,
   addChainJob,
   addEnrichmentJob,
   addBatchScrapeJob,

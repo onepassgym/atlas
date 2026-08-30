@@ -3,12 +3,12 @@ const mongoose = require('mongoose');
 
 const EnrichmentLogSchema = new mongoose.Schema(
   {
-    gymId: { 
+    spaceId: { 
       type: mongoose.Schema.Types.ObjectId, 
-      ref: 'Gym', 
+      ref: 'Space', 
       required: true 
     },
-    gymName: String, // Denormalized for quick list view
+    spaceName: String, // Denormalized for quick list view
     status: { 
       type: String, 
       enum: ['success', 'failed', 'timeout', 'skipped'], 
@@ -28,7 +28,7 @@ const EnrichmentLogSchema = new mongoose.Schema(
   }
 );
 
-EnrichmentLogSchema.index({ gymId: 1 });
+EnrichmentLogSchema.index({ spaceId: 1 });
 EnrichmentLogSchema.index({ startedAt: -1 });
 EnrichmentLogSchema.index({ status: 1 });
 

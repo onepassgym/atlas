@@ -16,35 +16,35 @@ async function ensureIndexes() {
   const c = cfg.collections;
 
   // ── spaces ────────────────────────────────────────────────────────────────
-  const gyms = db.collection(c.spaces);
-  await gyms.createIndex({ slug: 1 },           { unique: true, sparse: true, name: 'slug_unique' });
-  await gyms.createIndex({ googleMapsUrl: 1 },  { name: 'googleMapsUrl_1' });
-  await gyms.createIndex({ placeId: 1 },        { sparse: true, name: 'placeId_sparse' });
-  await gyms.createIndex({ location: '2dsphere' }, { sparse: true, name: 'location_2dsphere' });
+  const spaces = db.collection(c.spaces);
+  await spaces.createIndex({ slug: 1 },           { unique: true, sparse: true, name: 'slug_unique' });
+  await spaces.createIndex({ googleMapsUrl: 1 },  { name: 'googleMapsUrl_1' });
+  await spaces.createIndex({ placeId: 1 },        { sparse: true, name: 'placeId_sparse' });
+  await spaces.createIndex({ location: '2dsphere' }, { sparse: true, name: 'location_2dsphere' });
   // Dedup tier 5: phone lookup — avoids COLLSCAN on regex phone match
-  await gyms.createIndex({ 'contact.phone': 1 }, { sparse: true, name: 'contact_phone_sparse' });
+  await spaces.createIndex({ 'contact.phone': 1 }, { sparse: true, name: 'contact_phone_sparse' });
   // Suggestions / filter indexes — avoids COLLSCAN on areaName and chainName
-  await gyms.createIndex({ areaName: 1 },        { name: 'areaName_1' });
-  await gyms.createIndex({ chainName: 1 },       { sparse: true, name: 'chainName_sparse' });
-  await gyms.createIndex({ primaryCategorySlug: 1 }, { name: 'primaryCategorySlug_1' });
-  await gyms.createIndex({ areaName: 1, primaryCategorySlug: 1 }, { name: 'areaName_primaryCategorySlug' });
+  await spaces.createIndex({ areaName: 1 },        { name: 'areaName_1' });
+  await spaces.createIndex({ chainName: 1 },       { sparse: true, name: 'chainName_sparse' });
+  await spaces.createIndex({ primaryCategorySlug: 1 }, { name: 'primaryCategorySlug_1' });
+  await spaces.createIndex({ areaName: 1, primaryCategorySlug: 1 }, { name: 'areaName_primaryCategorySlug' });
 
   // ── space_reviews ─────────────────────────────────────────────────────────
   const reviews = db.collection(c.spaceReviews);
-  await reviews.createIndex({ gymId: 1 },    { name: 'reviews_gymId' });
+  await reviews.createIndex({ spaceId: 1 },    { name: 'reviews_spaceId' });
   await reviews.createIndex({ reviewId: 1 }, { unique: true, name: 'reviewId_unique' });
 
   // ── space_change_logs ─────────────────────────────────────────────────────
   const logs = db.collection(c.spaceChangeLogs);
-  await logs.createIndex({ gymId: 1 },    { name: 'changeLogs_gymId' });
+  await logs.createIndex({ spaceId: 1 },    { name: 'changeLogs_spaceId' });
   await logs.createIndex({ changedAt: -1 }, { name: 'changeLogs_changedAt' });
 
   // ── space_photos ──────────────────────────────────────────────────────────
   const photos = db.collection(c.spacePhotos);
-  await photos.createIndex({ gymId: 1 },           { name: 'photos_gymId' });
+  await photos.createIndex({ spaceId: 1 },           { name: 'photos_spaceId' });
   await photos.createIndex({ publicUrl: 1 },       { unique: true, sparse: true, name: 'photos_publicUrl_unique' });
-  await photos.createIndex({ gymId: 1, type: 1 },  { name: 'photos_gymId_type' });
-  await photos.createIndex({ gymId: 1, createdAt: -1 }, { name: 'photos_gymId_createdAt' });
+  await photos.createIndex({ spaceId: 1, type: 1 },  { name: 'photos_spaceId_type' });
+  await photos.createIndex({ spaceId: 1, createdAt: -1 }, { name: 'photos_spaceId_createdAt' });
   await photos.createIndex({ type: 1, createdAt: -1 },  { name: 'photos_type_createdAt' });
   await photos.createIndex({ createdAt: -1 },       { name: 'photos_createdAt' });
   await photos.createIndex({ sizeBytes: -1 },       { name: 'photos_sizeBytes' });
@@ -54,17 +54,17 @@ async function ensureIndexes() {
   await photos.createIndex({ tags: 1 },             { name: 'photos_tags' });
   // Missing indexes identified in audit:
   await photos.createIndex({ isOrphaned: 1 },       { name: 'photos_isOrphaned' });
-  await photos.createIndex({ fsExists: 1, gymId: 1 }, { name: 'photos_fsExists_gymId' });
-  await photos.createIndex({ gymId: 1 }, { name: 'photos_unlinked_partial', partialFilterExpression: { gymId: null } });
+  await photos.createIndex({ fsExists: 1, spaceId: 1 }, { name: 'photos_fsExists_spaceId' });
+  await photos.createIndex({ spaceId: 1 }, { name: 'photos_unlinked_partial', partialFilterExpression: { spaceId: null } });
   // Task 7: enrichment-specific indexes
-  await photos.createIndex({ gymId: 1, sourceType: 1 }, { name: 'photos_gymId_sourceType' });
-  await photos.createIndex({ downloaded: 1, gymId: 1 }, { name: 'photos_downloaded_gymId' });
-  // Supports upsertCapturedPhotoUrls filter: { originalUrl, gymId }
-  await photos.createIndex({ originalUrl: 1, gymId: 1 }, { sparse: true, name: 'photos_originalUrl_gymId' });
+  await photos.createIndex({ spaceId: 1, sourceType: 1 }, { name: 'photos_spaceId_sourceType' });
+  await photos.createIndex({ downloaded: 1, spaceId: 1 }, { name: 'photos_downloaded_spaceId' });
+  // Supports upsertCapturedPhotoUrls filter: { originalUrl, spaceId }
+  await photos.createIndex({ originalUrl: 1, spaceId: 1 }, { sparse: true, name: 'photos_originalUrl_spaceId' });
 
   // ── space_crawl_meta ──────────────────────────────────────────────────────
   const crawlMeta = db.collection(c.spaceCrawlMeta);
-  await crawlMeta.createIndex({ gymId: 1 },  { unique: true, name: 'crawlMeta_gymId_unique' });
+  await crawlMeta.createIndex({ spaceId: 1 },  { unique: true, name: 'crawlMeta_spaceId_unique' });
   await crawlMeta.createIndex({ jobId: 1 },  { name: 'crawlMeta_jobId' });
 
   // ── space_crawl_jobs ──────────────────────────────────────────────────────
@@ -122,24 +122,24 @@ async function ensureIndexes() {
     { unique: true, name: 'opgIdCounters_prefix_unique' }
   );
 
-  // ── enrichment-specific gyms indexes (Task 7) ────────────────────────────
-  // Supports dashboard query: list gyms by city that need re-enrichment
-  await gyms.createIndex(
+  // ── enrichment-specific spaces indexes (Task 7) ────────────────────────────
+  // Supports dashboard query: list spaces by city that need re-enrichment
+  await spaces.createIndex(
     { 'atlas.city': 1, 'operationalData.lastHoursVerifiedAt': 1 },
-    { sparse: true, name: 'gyms_city_lastHoursVerifiedAt' }
+    { sparse: true, name: 'spaces_city_lastHoursVerifiedAt' }
   );
   // Supports enrichment targeting by areaName + enrichment status
-  await gyms.createIndex(
+  await spaces.createIndex(
     { areaName: 1, 'enrichmentMeta.status': 1 },
-    { name: 'gyms_areaName_enrichmentStatus' }
+    { name: 'spaces_areaName_enrichmentStatus' }
   );
-  await gyms.createIndex(
+  await spaces.createIndex(
     { 'crawl.mediaStatus': 1 },
-    { sparse: true, name: 'gyms_crawl_mediaStatus' }
+    { sparse: true, name: 'spaces_crawl_mediaStatus' }
   );
 
   // ── opgId indexes (Task 3) ────────────────────────────────────────────────
-  // gyms: unique+sparse allows safe backfill without blocking existing docs
+  // spaces: unique+sparse allows safe backfill without blocking existing docs
   await db.collection(c.spaces).createIndex(
     { opgId: 1 }, { unique: true, sparse: true, name: 'opgId_unique' }
   );

@@ -3,7 +3,7 @@ const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const router = express.Router();
 
-const Gym = require('../db/spaceModel');
+const Space = require('../db/spaceModel');
 const EnrichmentLog = require('../db/enrichmentLogModel');
 const logger = require('../utils/logger');
 const { ok, err, validate } = require('../utils/apiUtils');
@@ -11,7 +11,7 @@ const {
   pauseEnrichment,
   resumeEnrichment,
   isPaused,
-  pushPriorityGym,
+  pushPrioritySpace,
   getEnrichmentStats,
   getPriorityQueue,
 } = require('../services/enrichmentService');
@@ -20,7 +20,7 @@ const {
  * @swagger
  * tags:
  *   name: Enrichment
- *   description: Continuous gym enrichment queue management
+ *   description: Continuous space enrichment queue management
  */
 
 /**
@@ -30,21 +30,21 @@ router.get('/status', async (req, res) => {
   try {
     const stats = await getEnrichmentStats();
 
-    // Also get count of gyms needing enrichment (oldest-updated first)
-    const totalGyms = await Gym.countDocuments({
+    // Also get count of spaces needing enrichment (oldest-updated first)
+    const totalSpaces = await Space.countDocuments({
       permanentlyClosed: { $ne: true },
       googleMapsUrl: { $exists: true, $ne: null },
     });
 
-    // Gyms not updated in last 7 days
-    const staleCount = await Gym.countDocuments({
+    // Spaces not updated in last 7 days
+    const staleCount = await Space.countDocuments({
       permanentlyClosed: { $ne: true },
       googleMapsUrl: { $exists: true, $ne: null },
       updatedAt: { $lt: new Date(Date.now() - 7 * 86_400_000) },
     });
 
-    // Next gym in queue (oldest updatedAt)
-    const nextInQueue = await Gym.findOne({
+    // Next space in queue (oldest updatedAt)
+    const nextInQueue = await Space.findOne({
       permanentlyClosed: { $ne: true },
       googleMapsUrl: { $exists: true, $ne: null },
     })
@@ -55,8 +55,8 @@ router.get('/status', async (req, res) => {
     ok(res, {
       enrichment: {
         ...stats,
-        totalEligibleGyms: totalGyms,
-        staleGyms: staleCount,
+        totalEligibleSpaces: totalSpaces,
+        staleSpaces: staleCount,
         nextInQueue: nextInQueue ? {
           id: nextInQueue._id,
           name: nextInQueue.name,
@@ -107,27 +107,27 @@ router.post('/toggle', async (req, res) => {
 });
 
 /**
- * POST /api/enrichment/priority — push a specific gym to top of enrichment queue
+ * POST /api/enrichment/priority — push a specific space to top of enrichment queue
  */
 router.post('/priority',
-  body('gymId').notEmpty().isMongoId(),
+  body('spaceId').notEmpty().isMongoId(),
   body('sections').optional().isArray(),
   body('sections.*').optional().isIn(['all', 'reviews', 'photos', 'contact', 'hours', 'amenities', 'deep']),
   async (req, res) => {
     if (validate(req, res)) return;
     try {
-      const { gymId, sections } = req.body;
-      const gym = await Gym.findById(gymId).select('name areaName googleMapsUrl').lean();
-      if (!gym) return err(res, 'Gym not found', 404);
-      if (!gym.googleMapsUrl) return err(res, 'Gym has no Google Maps URL — cannot enrich', 400);
+      const { spaceId, sections } = req.body;
+      const space = await Space.findById(spaceId).select('name areaName googleMapsUrl').lean();
+      if (!space) return err(res, 'Space not found', 404);
+      if (!space.googleMapsUrl) return err(res, 'Space has no Google Maps URL — cannot enrich', 400);
 
-      await pushPriorityGym(gymId, gym.name, sections);
+      await pushPrioritySpace(spaceId, space.name, sections);
 
       const sectionLabel = (!sections || sections.includes('all')) ? 'full' : sections.join(', ');
       ok(res, {
-        message: `"${gym.name}" pushed to enrichment priority queue [${sectionLabel}] — will be enriched next`,
-        gymId,
-        gymName: gym.name,
+        message: `"${space.name}" pushed to enrichment priority queue [${sectionLabel}] — will be enriched next`,
+        spaceId,
+        spaceName: space.name,
         sections: sections || ['all'],
       });
     } catch (e) { err(res, e.message); }
@@ -135,29 +135,29 @@ router.post('/priority',
 );
 
 /**
- * POST /api/enrichment/priority/batch — push multiple gyms to priority queue
+ * POST /api/enrichment/priority/batch — push multiple spaces to priority queue
  */
 router.post('/priority/batch',
-  body('gymIds').isArray({ min: 1, max: 50 }),
-  body('gymIds.*').isMongoId(),
+  body('spaceIds').isArray({ min: 1, max: 50 }),
+  body('spaceIds.*').isMongoId(),
   body('sections').optional().isArray(),
   async (req, res) => {
     if (validate(req, res)) return;
     try {
-      const { gymIds, sections } = req.body;
-      const gyms = await Gym.find({
-        _id: { $in: gymIds },
+      const { spaceIds, sections } = req.body;
+      const spaces = await Space.find({
+        _id: { $in: spaceIds },
         googleMapsUrl: { $exists: true, $ne: null },
       }).select('_id name').lean();
 
-      for (const gym of gyms) {
-        await pushPriorityGym(gym._id.toString(), gym.name, sections);
+      for (const space of spaces) {
+        await pushPrioritySpace(space._id.toString(), space.name, sections);
       }
 
       ok(res, {
-        message: `${gyms.length} gyms pushed to enrichment priority queue`,
-        pushed: gyms.map(g => ({ id: g._id, name: g.name })),
-        skipped: gymIds.length - gyms.length,
+        message: `${spaces.length} spaces pushed to enrichment priority queue`,
+        pushed: spaces.map(g => ({ id: g._id, name: g.name })),
+        skipped: spaceIds.length - spaces.length,
         sections: sections || ['all'],
       });
     } catch (e) { err(res, e.message); }
@@ -175,13 +175,13 @@ router.get('/queue', async (req, res) => {
 });
 
 /**
- * GET /api/enrichment/candidates — preview next N gyms in the enrichment queue
+ * GET /api/enrichment/candidates — preview next N spaces in the enrichment queue
  */
 router.get('/candidates', async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
 
-    const candidates = await Gym.find({
+    const candidates = await Space.find({
       permanentlyClosed: { $ne: true },
       googleMapsUrl: { $exists: true, $ne: null },
     })
@@ -224,22 +224,22 @@ router.get('/logs', async (req, res) => {
 });
 
 /**
- * GET /api/enrichment/logs/:gymId — enrichment history for a specific gym
+ * GET /api/enrichment/logs/:spaceId — enrichment history for a specific space
  */
-router.get('/logs/:gymId',
-  param('gymId').isMongoId(),
+router.get('/logs/:spaceId',
+  param('spaceId').isMongoId(),
   async (req, res) => {
     if (validate(req, res)) return;
     try {
-      const { gymId } = req.params;
+      const { spaceId } = req.params;
       const limit = Math.min(parseInt(req.query.limit || '10', 10), 50);
 
-      const logs = await EnrichmentLog.find({ gymId })
+      const logs = await EnrichmentLog.find({ spaceId })
         .sort({ startedAt: -1 })
         .limit(limit)
         .lean();
 
-      ok(res, { logs, gymId, count: logs.length });
+      ok(res, { logs, spaceId, count: logs.length });
     } catch (e) { err(res, e.message); }
   }
 );

@@ -133,8 +133,8 @@ export default function JobDrawer({ jobId, onClose }) {
               <div className="drawer-section-title">Results</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                 {[
-                  { label: 'New', value: p.newGyms || 0, color: 'var(--success)', icon: <CheckCircle size={14} /> },
-                  { label: 'Updated', value: p.updatedGyms || 0, color: 'var(--accent)', icon: <RefreshCw size={14} /> },
+                  { label: 'New', value: p.newSpaces || 0, color: 'var(--success)', icon: <CheckCircle size={14} /> },
+                  { label: 'Updated', value: p.updatedSpaces || 0, color: 'var(--accent)', icon: <RefreshCw size={14} /> },
                   { label: 'Failed', value: p.failed || 0, color: 'var(--danger)', icon: <XCircle size={14} /> },
                   { label: 'Skipped', value: p.skipped || 0, color: 'var(--text-muted)', icon: <Clock size={14} /> },
                 ].map(s => (

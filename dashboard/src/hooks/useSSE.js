@@ -25,9 +25,9 @@ export function useSSE(onEvent, onLog, onConnectionChange, deps = []) {
     const eventTypes = [
       'job:queued', 'job:started', 'job:progress', 'job:completed', 'job:failed', 'job:cancelled',
       'job:batches-queued', 'job:promoted',
-      'gym:created', 'gym:updated', 'schedule:fired', 'system:startup', 'test:ping', 'system:log',
+      'space:created', 'space:updated', 'schedule:fired', 'system:startup', 'test:ping', 'system:log',
       // Granular crawl events
-      'crawl:gym-start', 'crawl:gym-done', 'crawl:gym-failed',
+      'crawl:space-start', 'crawl:space-done', 'crawl:space-failed',
       'crawl:batch-start', 'crawl:batch-done',
       'crawl:search-start', 'crawl:search-done',
       'crawl:throttle', 'crawl:block', 'crawl:human-pause',

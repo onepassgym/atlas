@@ -79,7 +79,7 @@ export default function Enrichment() {
             Enrichment Intelligence
           </h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-            Historical performance and end-to-end processing metrics for gym data enrichment.
+            Historical performance and end-to-end processing metrics for space data enrichment.
           </p>
         </div>
         <button 
@@ -193,7 +193,7 @@ export default function Enrichment() {
             <thead>
               <tr>
                 <th>Time</th>
-                <th>Gym Name</th>
+                <th>Space Name</th>
                 <th>Status</th>
                 <th>Duration</th>
                 <th>Updates</th>
@@ -216,8 +216,8 @@ export default function Enrichment() {
                         </div>
                       </td>
                       <td>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>{log.gymName}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>{log.gymId}</div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{log.spaceName}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>{log.spaceId}</div>
                       </td>
                       <td>
                         <span className={`badge ${log.status === 'success' ? 'success' : 'danger'}`}>

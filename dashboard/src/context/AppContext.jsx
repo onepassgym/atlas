@@ -26,7 +26,7 @@ export function AppProvider({ children }) {
 
   // Live crawler activity state — derived from crawl:* events
   const [crawlActivity, setCrawlActivity] = useState({
-    currentGym: null,    // { url, urlIndex, total, startedAt }
+    currentSpace: null,    // { url, urlIndex, total, startedAt }
     batch: null,         // { cityName, batchIndex, urlCount, startedAt }
     throttle: 1.0,       // Current throttle multiplier
     recentActions: [],   // Last 15 actions for timeline
@@ -51,7 +51,7 @@ export function AppProvider({ children }) {
 
   // Init API env
   useEffect(() => {
-    const prodUrl = isProdHost ? window.location.origin : 'https://atlas.onepassgym.com';
+    const prodUrl = isProdHost ? window.location.origin : 'https://atlas.onepassspace.com';
     setEnv(env, prodUrl);
   }, [env, isProdHost]);
 
@@ -79,26 +79,26 @@ export function AppProvider({ children }) {
     };
 
     switch (event.type) {
-      case 'crawl:gym-start':
-        setCrawlActivity(prev => ({ ...prev, currentGym: { url: d.url, urlIndex: d.urlIndex, total: d.total, startedAt: event.timestamp }, status: 'scraping' }));
-        addAction({ type: 'gym-start', url: d.url, index: `${d.urlIndex}/${d.total}` });
+      case 'crawl:space-start':
+        setCrawlActivity(prev => ({ ...prev, currentSpace: { url: d.url, urlIndex: d.urlIndex, total: d.total, startedAt: event.timestamp }, status: 'scraping' }));
+        addAction({ type: 'space-start', url: d.url, index: `${d.urlIndex}/${d.total}` });
         break;
-      case 'crawl:gym-done':
-        addAction({ type: 'gym-done', name: d.gymName, duration: d.duration });
+      case 'crawl:space-done':
+        addAction({ type: 'space-done', name: d.spaceName, duration: d.duration });
         break;
-      case 'crawl:gym-failed':
-        addAction({ type: 'gym-failed', url: d.url, error: d.error, attempt: d.attempt, isBlock: d.isBlock });
+      case 'crawl:space-failed':
+        addAction({ type: 'space-failed', url: d.url, error: d.error, attempt: d.attempt, isBlock: d.isBlock });
         break;
       case 'crawl:batch-start':
         setCrawlActivity(prev => ({ ...prev, batch: { cityName: d.cityName, batchIndex: d.batchIndex, urlCount: d.urlCount, startedAt: event.timestamp }, status: 'scraping' }));
         addAction({ type: 'batch-start', city: d.cityName, batch: d.batchIndex, urls: d.urlCount });
         break;
       case 'crawl:batch-done':
-        setCrawlActivity(prev => ({ ...prev, batch: null, currentGym: null, status: 'idle' }));
+        setCrawlActivity(prev => ({ ...prev, batch: null, currentSpace: null, status: 'idle' }));
         addAction({ type: 'batch-done', city: d.cityName, batch: d.batchIndex, stats: d.stats });
         break;
       case 'crawl:search-start':
-        setCrawlActivity(prev => ({ ...prev, status: 'searching', currentGym: { url: d.category, urlIndex: d.categoryIndex, total: d.totalCategories, startedAt: event.timestamp } }));
+        setCrawlActivity(prev => ({ ...prev, status: 'searching', currentSpace: { url: d.category, urlIndex: d.categoryIndex, total: d.totalCategories, startedAt: event.timestamp } }));
         addAction({ type: 'search-start', city: d.cityName, category: d.category });
         break;
       case 'crawl:search-done':

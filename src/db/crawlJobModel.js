@@ -4,7 +4,7 @@ const cfg = require('../../config');
 
 const CrawlJobSchema = new mongoose.Schema({
   jobId:  { type: String, required: true, unique: true },
-  type:   { type: String, enum: ['city', 'grid', 'gym_name', 'retry', 'chain', 'enrichment'], default: 'city' },
+  type:   { type: String, enum: ['city', 'grid', 'space_name', 'retry', 'chain', 'enrichment'], default: 'city' },
 
   input: {
     cityName:   String,
@@ -30,8 +30,8 @@ const CrawlJobSchema = new mongoose.Schema({
     scraped:     { type: Number, default: 0 },
     failed:      { type: Number, default: 0 },
     skipped:     { type: Number, default: 0 },
-    newGyms:     { type: Number, default: 0 },
-    updatedGyms: { type: Number, default: 0 },
+    newSpaces:     { type: Number, default: 0 },
+    updatedSpaces: { type: Number, default: 0 },
   },
 
   queuedAt:    { type: Date, default: Date.now },
@@ -39,9 +39,9 @@ const CrawlJobSchema = new mongoose.Schema({
   completedAt: Date,
   durationMs:  Number,
 
-  gymIds:     [{ type: mongoose.Schema.Types.ObjectId, ref: 'Gym' }],
-  // Denormalized public identifier — set when job processes a single gym target.
-  // Never used for $lookup or joins; gymIds (ObjectId array) is always the join key.
+  spaceIds:     [{ type: mongoose.Schema.Types.ObjectId, ref: 'Space' }],
+  // Denormalized public identifier — set when job processes a single space target.
+  // Never used for $lookup or joins; spaceIds (ObjectId array) is always the join key.
   opgId:      { type: String, index: true, uppercase: true, trim: true },
   jobErrors:  [{ message: String, url: String, at: Date }],  // renamed from 'errors' (reserved)
   errorCount: { type: Number, default: 0 },

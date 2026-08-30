@@ -339,7 +339,7 @@ select.input {
 .badge-type { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
 .badge-type.city     { background: rgba(6, 182, 212, 0.15); color: var(--cyan); }
 .badge-type.chain    { background: rgba(139, 92, 246, 0.15); color: var(--purple); }
-.badge-type.gym_name { background: rgba(249, 115, 22, 0.15); color: var(--orange); }
+.badge-type.space_name { background: rgba(249, 115, 22, 0.15); color: var(--orange); }
 .badge-type.retry    { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
 
 .freq-badge { font-size: 10px; padding: 1px 8px; border-radius: 10px; font-weight: 600; display: inline-block; }
@@ -611,14 +611,14 @@ select.input {
   letter-spacing: 0.5px; color: var(--text-muted); margin-top: 4px;
 }
 
-.enrich-next-gym {
+.enrich-next-space {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 12px; border-radius: 8px;
   background: var(--bg-surface); border: 1px solid var(--border);
   font-size: 12px; color: var(--text-secondary);
   transition: all 0.2s;
 }
-.enrich-next-gym:hover { border-color: var(--border-glow); }
+.enrich-next-space:hover { border-color: var(--border-glow); }
 
 @keyframes enrichPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
@@ -633,7 +633,7 @@ select.input {
   font-size: 10px; font-weight: 700; border: 1px solid rgba(249, 115, 22, 0.3);
 }
 
-/* ── Gym Drawer — Enrichment Panel ────────────────────────── */
+/* ── Space Drawer — Enrichment Panel ────────────────────────── */
 .enrich-panel {
   padding: 14px 16px;
   margin-bottom: 16px;
@@ -708,7 +708,7 @@ select.input {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   GYM EXPLORER — Search Hero, Suggestions, Filters, Results
+   SPACE EXPLORER — Search Hero, Suggestions, Filters, Results
    ═══════════════════════════════════════════════════════════ */
 
 /* ── Search Hero Bar ────────────────────────────────────── */
@@ -1306,10 +1306,10 @@ select.input {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   GYM ROW CARD — Enhanced gym list item
+   SPACE ROW CARD — Enhanced space list item
    ═══════════════════════════════════════════════════════════ */
 
-.gym-row-card {
+.space-row-card {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -1319,13 +1319,13 @@ select.input {
   transition: all 0.18s ease;
   position: relative;
 }
-.gym-row-card:hover {
+.space-row-card:hover {
   background: var(--row-hover);
 }
-.gym-row-card:active {
+.space-row-card:active {
   transform: scale(0.998);
 }
-.gym-row-card::after {
+.space-row-card::after {
   content: '';
   position: absolute;
   left: 0;
@@ -1337,24 +1337,24 @@ select.input {
   border-radius: 0 2px 2px 0;
   transition: height 0.2s;
 }
-.gym-row-card:hover::after {
+.space-row-card:hover::after {
   height: 60%;
 }
 
 /* Thumbnail */
-.gym-row-thumb {
+.space-row-thumb {
   width: 44px;
   height: 44px;
   border-radius: 8px;
   overflow: hidden;
   flex-shrink: 0;
 }
-.gym-row-thumb img {
+.space-row-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.gym-row-thumb-fallback {
+.space-row-thumb-fallback {
   width: 100%;
   height: 100%;
   display: flex;
@@ -1366,11 +1366,11 @@ select.input {
 }
 
 /* Content */
-.gym-row-content {
+.space-row-content {
   flex: 1;
   min-width: 0;
 }
-.gym-row-title {
+.space-row-title {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1379,7 +1379,7 @@ select.input {
   color: var(--text-primary);
   line-height: 1.3;
 }
-.gym-row-chain-badge {
+.space-row-chain-badge {
   font-size: 10px;
   font-weight: 600;
   padding: 1px 8px;
@@ -1389,7 +1389,7 @@ select.input {
   white-space: nowrap;
   flex-shrink: 0;
 }
-.gym-row-subtitle {
+.space-row-subtitle {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1398,7 +1398,7 @@ select.input {
   font-size: 12px;
   color: var(--text-muted);
 }
-.gym-row-location {
+.space-row-location {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -1407,7 +1407,7 @@ select.input {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.gym-row-category {
+.space-row-category {
   font-size: 10px;
   padding: 1px 7px;
   border-radius: 8px;
@@ -1415,7 +1415,7 @@ select.input {
   color: var(--cyan);
   font-weight: 600;
 }
-.gym-row-contact {
+.space-row-contact {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -1424,25 +1424,25 @@ select.input {
 }
 
 /* Metrics */
-.gym-row-metrics {
+.space-row-metrics {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
 }
-.gym-row-stars {
+.space-row-stars {
   display: flex;
   align-items: center;
   gap: 1px;
 }
-.gym-row-rating-num {
+.space-row-rating-num {
   font-size: 12px;
   font-weight: 700;
   font-family: var(--mono);
   color: var(--warning);
   margin-left: 4px;
 }
-.gym-row-metric {
+.space-row-metric {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1451,11 +1451,11 @@ select.input {
   color: var(--text-secondary);
   font-weight: 600;
 }
-.gym-row-metric.dim {
+.space-row-metric.dim {
   color: var(--text-muted);
   font-weight: 400;
 }
-.gym-row-quality {
+.space-row-quality {
   display: flex;
   align-items: center;
   gap: 3px;
@@ -1487,10 +1487,10 @@ select.input {
 @media (max-width: 768px) {
   .explorer-search-hero { padding: 16px 14px 12px; }
   .explorer-filters-grid { grid-template-columns: repeat(2, 1fr); }
-  .gym-row-metrics { gap: 8px; }
-  .gym-row-stars { display: none; }
-  .gym-row-contact { display: none; }
-  .gym-row-thumb { width: 38px; height: 38px; }
+  .space-row-metrics { gap: 8px; }
+  .space-row-stars { display: none; }
+  .space-row-contact { display: none; }
+  .space-row-thumb { width: 38px; height: 38px; }
 }
 
 /* ── Explorer Responsive — Mobile ───────────────────────── */
@@ -1506,15 +1506,15 @@ select.input {
   .explorer-filters-grid { grid-template-columns: 1fr; gap: 10px; }
   .explorer-filters-panel { padding: 12px; }
   
-  .gym-row-card { padding: 10px 12px; gap: 10px; }
-  .gym-row-thumb { width: 36px; height: 36px; border-radius: 6px; }
-  .gym-row-title { font-size: 13px; flex-wrap: wrap; }
-  .gym-row-chain-badge { font-size: 9px; }
-  .gym-row-subtitle { gap: 6px; }
-  .gym-row-location { max-width: 160px; font-size: 11px; }
-  .gym-row-category { display: none; }
-  .gym-row-metrics { flex-direction: column; gap: 2px; align-items: flex-end; }
-  .gym-row-quality { font-size: 10px; padding: 1px 6px; }
+  .space-row-card { padding: 10px 12px; gap: 10px; }
+  .space-row-thumb { width: 36px; height: 36px; border-radius: 6px; }
+  .space-row-title { font-size: 13px; flex-wrap: wrap; }
+  .space-row-chain-badge { font-size: 9px; }
+  .space-row-subtitle { gap: 6px; }
+  .space-row-location { max-width: 160px; font-size: 11px; }
+  .space-row-category { display: none; }
+  .space-row-metrics { flex-direction: column; gap: 2px; align-items: flex-end; }
+  .space-row-quality { font-size: 10px; padding: 1px 6px; }
   
   .explorer-active-filters { gap: 4px; }
   .explorer-filter-chip { font-size: 10px; padding: 3px 10px; }

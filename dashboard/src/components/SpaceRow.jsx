@@ -81,7 +81,7 @@ function QualityBadge({ score }) {
   else { color = '#ef4444'; bg = 'rgba(239,68,68,0.12)'; label = 'Low'; }
   
   return (
-    <span className="gym-row-quality" style={{ color, background: bg, borderColor: `${color}33` }}>
+    <span className="space-row-quality" style={{ color, background: bg, borderColor: `${color}33` }}>
       <Award size={10} /> {score}
     </span>
   );
@@ -89,16 +89,16 @@ function QualityBadge({ score }) {
 
 // RatingStars imported from ./RatingStars
 
-export default React.memo(function GymRow({ gym, onClick, searchTerm = '' }) {
-  const categoryLabel = formatCategory(gym.category) || (gym.categoryId?.label ? formatCategory(gym.categoryId.label) : null);
+export default React.memo(function SpaceRow({ space, onClick, searchTerm = '' }) {
+  const categoryLabel = formatCategory(space.category) || (space.categoryId?.label ? formatCategory(space.categoryId.label) : null);
 
   return (
-    <div className="gym-row-card" onClick={() => onClick?.(gym._id)} id={`gym-${gym._id}`}>
+    <div className="space-row-card" onClick={() => onClick?.(space._id)} id={`space-${space._id}`}>
       {/* Thumbnail */}
-      <div className="gym-row-thumb">
-        {gym.coverPhoto?.thumbnailUrl || gym.coverPhoto?.publicUrl || typeof gym.coverPhoto === 'string' ? (
+      <div className="space-row-thumb">
+        {space.coverPhoto?.thumbnailUrl || space.coverPhoto?.publicUrl || typeof space.coverPhoto === 'string' ? (
           <img 
-            src={getProxyUrl(gym.coverPhoto?.thumbnailUrl || gym.coverPhoto?.publicUrl || gym.coverPhoto)} 
+            src={getProxyUrl(space.coverPhoto?.thumbnailUrl || space.coverPhoto?.publicUrl || space.coverPhoto)} 
             alt="" 
             loading="lazy"
             onError={(e) => {
@@ -107,49 +107,49 @@ export default React.memo(function GymRow({ gym, onClick, searchTerm = '' }) {
             }}
           />
         ) : null}
-        <div className="gym-row-thumb-fallback" style={{ display: (gym.coverPhoto?.thumbnailUrl || gym.coverPhoto?.publicUrl || typeof gym.coverPhoto === 'string') ? 'none' : 'flex' }}>
+        <div className="space-row-thumb-fallback" style={{ display: (space.coverPhoto?.thumbnailUrl || space.coverPhoto?.publicUrl || typeof space.coverPhoto === 'string') ? 'none' : 'flex' }}>
           <MapPin size={18} />
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="gym-row-content">
-        <div className="gym-row-title">
-          <HighlightText text={gym.name} search={searchTerm} />
-          {gym.isChainMember && gym.chainName && (
-            <span className="gym-row-chain-badge">
-              🔗 <HighlightText text={gym.chainName} search={searchTerm} />
+      <div className="space-row-content">
+        <div className="space-row-title">
+          <HighlightText text={space.name} search={searchTerm} />
+          {space.isChainMember && space.chainName && (
+            <span className="space-row-chain-badge">
+              🔗 <HighlightText text={space.chainName} search={searchTerm} />
             </span>
           )}
         </div>
-        <div className="gym-row-subtitle">
-          <span className="gym-row-location">
+        <div className="space-row-subtitle">
+          <span className="space-row-location">
             <MapPin size={11} />
-            <HighlightText text={gym.areaName || gym.address || '—'} search={searchTerm} />
+            <HighlightText text={space.areaName || space.address || '—'} search={searchTerm} />
           </span>
           {categoryLabel && (
-            <span className="gym-row-category">{categoryLabel}</span>
+            <span className="space-row-category">{categoryLabel}</span>
           )}
-          {gym.contact?.phone && (
-            <span className="gym-row-contact"><Phone size={10} /> {gym.contact.phone}</span>
+          {space.contact?.phone && (
+            <span className="space-row-contact"><Phone size={10} /> {space.contact.phone}</span>
           )}
         </div>
       </div>
 
       {/* Metrics */}
-      <div className="gym-row-metrics">
-        <RatingStars rating={gym.rating} />
-        <span className="gym-row-metric">
+      <div className="space-row-metrics">
+        <RatingStars rating={space.rating} />
+        <span className="space-row-metric">
           <MessageCircle size={11} />
-          <span>{(gym.totalReviews || 0).toLocaleString()}</span>
+          <span>{(space.totalReviews || 0).toLocaleString()}</span>
         </span>
-        {gym.totalPhotos > 0 && (
-          <span className="gym-row-metric dim">
+        {space.totalPhotos > 0 && (
+          <span className="space-row-metric dim">
             <ImageIcon size={11} />
-            <span>{gym.totalPhotos}</span>
+            <span>{space.totalPhotos}</span>
           </span>
         )}
-        <QualityBadge score={gym.qualityScore} />
+        <QualityBadge score={space.qualityScore} />
       </div>
     </div>
   );

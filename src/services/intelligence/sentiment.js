@@ -45,7 +45,7 @@ function analyzeTextSentiment(text) {
  * @param {Array<Object>} reviews - Array of review objects containing `text` or `originalText`.
  * @returns {{ score: number, tags: { positive: string[], negative: string[] } }}
  */
-function analyzeGymSentiment(reviews = []) {
+function analyzeSpaceSentiment(reviews = []) {
   if (!reviews || !reviews.length) {
     return { score: 0, tags: { positive: [], negative: [] } };
   }
@@ -103,4 +103,4 @@ function analyzeGymSentiment(reviews = []) {
   };
 }
 
-module.exports = { analyzeTextSentiment, analyzeGymSentiment };
+module.exports = { analyzeTextSentiment, analyzeSpaceSentiment };

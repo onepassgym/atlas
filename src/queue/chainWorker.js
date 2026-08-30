@@ -1,16 +1,16 @@
 'use strict';
 /**
- * Chain Worker — Dedicated worker process for gym chain crawling.
+ * Chain Worker — Dedicated worker process for space chain crawling.
  *
- * Runs as a SEPARATE Node.js process from the city/gym worker.
+ * Runs as a SEPARATE Node.js process from the city/space worker.
  * Usage:  npm run worker:chain
  *
  * Architecture:
  *   - Listens on queue: 'atlas-chain-crawl'
  *   - Each chain job: fetches all locations from store locator, then
  *     enriches via Google Maps in parallel using p-limit.
- *   - Reuses existing processGym() + upsertGym() pipeline for DB writes.
- *   - Skip-if-fresh: gyms crawled within 7 days are skipped.
+ *   - Reuses existing processSpace() + upsertSpace() pipeline for DB writes.
+ *   - Skip-if-fresh: spaces crawled within 7 days are skipped.
  */
 
 require('dotenv').config();
@@ -20,11 +20,11 @@ const pLimit            = require('p-limit');
 const { connectDB }     = require('../db/connection');
 const { getLocator }    = require('../scraper/chainLocators');
 const { fetchByBrand }  = require('../scraper/chainLocators/osmFallback');
-const { BrowserManager, scrapeGymDetail } = require('../scraper/googleMapsScraper');
-const { processGym }    = require('../scraper/gymProcessor');
+const { BrowserManager, scrapeSpaceDetail } = require('../scraper/googleMapsScraper');
+const { processSpace }    = require('../scraper/spaceProcessor');
 const CrawlJob          = require('../db/crawlJobModel');
-const Gym               = require('../db/spaceModel');
-const GymChain          = require('../db/gymChainModel');
+const Space               = require('../db/spaceModel');
+const SpaceChain          = require('../db/spaceChainModel');
 const SystemState       = require('../db/systemStateModel');
 const { isJobCancelled, clearCancelFlag } = require('./queues');
 const cfg               = require('../../config');
@@ -77,15 +77,15 @@ async function shouldStop(jobId) {
   return false;
 }
 
-// ── Freshness check: skip gyms crawled within N days ──────────────────────────
+// ── Freshness check: skip spaces crawled within N days ──────────────────────────
 
 async function checkFreshness(location) {
   const cutoff = new Date(Date.now() - FRESHNESS_DAYS * 86_400_000);
 
-  // Try to find existing gym by geo proximity + name
+  // Try to find existing space by geo proximity + name
   if (location.lat && location.lng && location.name) {
     try {
-      const nearby = await Gym.find({
+      const nearby = await Space.find({
         location: {
           $nearSphere: {
             $geometry: { type: 'Point', coordinates: [location.lng, location.lat] },
@@ -94,22 +94,22 @@ async function checkFreshness(location) {
         },
       }).limit(5).lean();
 
-      for (const gym of nearby) {
-        // Fuzzy name match — chain gyms often have slight name variations
+      for (const space of nearby) {
+        // Fuzzy name match — chain spaces often have slight name variations
         const normLoc = (location.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const normGym = (gym.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normSpace = (space.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-        if (normLoc.includes(normGym) || normGym.includes(normLoc) ||
-            (location.chainSlug && gym.chainSlug === location.chainSlug)) {
-          // Found existing gym
-          const lastCrawled = gym.crawl?.lastCrawledAt || gym.rawCrawlMeta?.lastCrawledAt || gym.crawlMeta?.lastCrawledAt || gym.updatedAt;
+        if (normLoc.includes(normSpace) || normSpace.includes(normLoc) ||
+            (location.chainSlug && space.chainSlug === location.chainSlug)) {
+          // Found existing space
+          const lastCrawled = space.crawl?.lastCrawledAt || space.rawCrawlMeta?.lastCrawledAt || space.crawlMeta?.lastCrawledAt || space.updatedAt;
           const isFresh = lastCrawled && lastCrawled > cutoff;
 
           return {
             exists: true,
-            gymId: gym._id,
+            spaceId: space._id,
             isFresh,
-            needsChainTag: !gym.isChainMember || gym.chainSlug !== location.chainSlug,
+            needsChainTag: !space.isChainMember || space.chainSlug !== location.chainSlug,
             lastCrawled,
           };
         }
@@ -119,13 +119,13 @@ async function checkFreshness(location) {
     }
   }
 
-  return { exists: false, gymId: null, isFresh: false, needsChainTag: false };
+  return { exists: false, spaceId: null, isFresh: false, needsChainTag: false };
 }
 
-// ── Tag a gym with chain identity (fast $set, no scraping) ────────────────────
+// ── Tag a space with chain identity (fast $set, no scraping) ────────────────────
 
-async function tagWithChain(gymId, chainId, chainSlug, chainName) {
-  await Gym.findByIdAndUpdate(gymId, {
+async function tagWithChain(spaceId, chainId, chainSlug, chainName) {
+  await Space.findByIdAndUpdate(spaceId, {
     $set: {
       chainId,
       chainSlug,
@@ -152,14 +152,14 @@ async function enrichViaGoogleMaps(page, location, chainId, chainSlug, chainName
     let scraped;
     if (directPlace) {
       // Directly on place page — scrape it
-      scraped = await scrapeGymDetail(page, page.url());
+      scraped = await scrapeSpaceDetail(page, page.url());
     } else {
       // On list — try to click first result
       const firstResult = page.locator('a[href*="/maps/place/"]').first();
       if (await firstResult.isVisible({ timeout: 3000 }).catch(() => false)) {
         const href = await firstResult.getAttribute('href');
         if (href) {
-          scraped = await scrapeGymDetail(page, href.split('?')[0]);
+          scraped = await scrapeSpaceDetail(page, href.split('?')[0]);
         }
       }
     }
@@ -173,7 +173,7 @@ async function enrichViaGoogleMaps(page, location, chainId, chainSlug, chainName
         lng: location.lng,
         phone: location.phone,
         website: location.website,
-        category: 'gym',
+        category: 'space',
         openingHours: [],
         reviews: [],
         photoUrls: [],
@@ -185,11 +185,11 @@ async function enrichViaGoogleMaps(page, location, chainId, chainSlug, chainName
     }
 
     // Inject chain identity into scraped data
-    const result = await processGym(scraped, areaName, jobId, true);
+    const result = await processSpace(scraped, areaName, jobId, true);
 
-    // Tag with chain regardless of processGym result
-    if (result.gymId) {
-      await tagWithChain(result.gymId, chainId, chainSlug, chainName);
+    // Tag with chain regardless of processSpace result
+    if (result.spaceId) {
+      await tagWithChain(result.spaceId, chainId, chainSlug, chainName);
     }
 
     return result;
@@ -205,7 +205,7 @@ async function enrichViaGoogleMaps(page, location, chainId, chainSlug, chainName
       lng: location.lng,
       phone: location.phone,
       website: location.website,
-      category: 'gym',
+      category: 'space',
       openingHours: [],
       reviews: [],
       photoUrls: [],
@@ -213,9 +213,9 @@ async function enrichViaGoogleMaps(page, location, chainId, chainSlug, chainName
       placeId: null,
     };
 
-    const result = await processGym(fallbackData, areaName, jobId, false);
-    if (result.gymId) {
-      await tagWithChain(result.gymId, chainId, chainSlug, chainName);
+    const result = await processSpace(fallbackData, areaName, jobId, false);
+    if (result.spaceId) {
+      await tagWithChain(result.spaceId, chainId, chainSlug, chainName);
     }
     return result;
   }
@@ -232,10 +232,10 @@ async function processChainJob(job) {
   await updateJob(jobId, { status: 'running', startedAt: new Date(), bullJobId: String(job.id) });
   bus.publish('job:started', { jobId, type: 'chain', chainSlug: slug, chainName });
 
-  // Resolve or create the GymChain record
-  let chain = await GymChain.findOne({ slug });
+  // Resolve or create the SpaceChain record
+  let chain = await SpaceChain.findOne({ slug });
   if (!chain) {
-    chain = await GymChain.create({ slug, name: chainName, isActive: true });
+    chain = await SpaceChain.create({ slug, name: chainName, isActive: true });
     logger.info(`[ChainWorker] Created new chain record: ${chainName}`);
   }
   const chainId = chain._id;
@@ -291,7 +291,7 @@ async function processChainJob(job) {
       if (check.exists && check.isFresh) {
         // Fresh — skip scraping, just ensure chain tag
         if (check.needsChainTag) {
-          await tagWithChain(check.gymId, chainId, slug, chainName);
+          await tagWithChain(check.spaceId, chainId, slug, chainName);
           stats.tagged++;
         }
         stats.fresh++;
@@ -382,17 +382,17 @@ async function processChainJob(job) {
       if (result.action === 'created') {
         stats.created++;
         await updateJob(jobId, {
-          $inc: { 'progress.newGyms': 1, 'progress.scraped': 1 },
-          $push: { gymIds: result.gymId },
+          $inc: { 'progress.newSpaces': 1, 'progress.scraped': 1 },
+          $push: { spaceIds: result.spaceId },
         });
-        bus.publish('gym:created', { name: location.name, area: areaName, gymId: String(result.gymId), chain: chainName });
+        bus.publish('space:created', { name: location.name, area: areaName, spaceId: String(result.spaceId), chain: chainName });
       } else if (result.action === 'updated') {
         stats.updated++;
         await updateJob(jobId, {
-          $inc: { 'progress.updatedGyms': 1, 'progress.scraped': 1 },
-          $push: { gymIds: result.gymId },
+          $inc: { 'progress.updatedSpaces': 1, 'progress.scraped': 1 },
+          $push: { spaceIds: result.spaceId },
         });
-        bus.publish('gym:updated', { name: location.name, area: areaName, gymId: String(result.gymId), chain: chainName });
+        bus.publish('space:updated', { name: location.name, area: areaName, spaceId: String(result.spaceId), chain: chainName });
       } else if (result.action === 'skipped') {
         stats.skipped++;
         await updateJob(jobId, { $inc: { 'progress.skipped': 1 } });
@@ -445,10 +445,10 @@ async function processChainJob(job) {
 
 async function updateChainStats(chainId, chainSlug) {
   try {
-    const count = await Gym.countDocuments({ chainSlug, isChainMember: true });
-    const countries = await Gym.distinct('addressParts.country', { chainSlug, isChainMember: true });
+    const count = await Space.countDocuments({ chainSlug, isChainMember: true });
+    const countries = await Space.distinct('addressParts.country', { chainSlug, isChainMember: true });
 
-    await GymChain.findByIdAndUpdate(chainId, {
+    await SpaceChain.findByIdAndUpdate(chainId, {
       $set: {
         totalLocations: count,
         countriesPresent: countries.filter(Boolean),
@@ -471,7 +471,7 @@ async function start() {
   try {
     const chainsConfig = require('../../config/chains.json');
     for (const chainData of chainsConfig) {
-      await GymChain.findOneAndUpdate(
+      await SpaceChain.findOneAndUpdate(
         { slug: chainData.slug },
         { $setOnInsert: chainData },
         { upsert: true, new: true },

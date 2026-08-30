@@ -13,14 +13,14 @@ const {
   getScheduleConfig,
   saveScheduleConfig,
   runScheduledCrawl,
-  queueStaleGyms,
-  queueIncompleteGyms,
+  queueStaleSpaces,
+  queueIncompleteSpaces,
   scheduleNCRCrawl,
   queueCity,
 } = require('../services/schedulerService');
-const Gym = require('../db/spaceModel');
+const Space = require('../db/spaceModel');
 const { calculateQualityScore } = require('../services/intelligence/scoring');
-const { analyzeGymSentiment } = require('../services/intelligence/sentiment');
+const { analyzeSpaceSentiment } = require('../services/intelligence/sentiment');
 const { Review } = require('../db/reviewModel');
 const { crawlQueue, chainCrawlQueue } = require('../queue/queues');
 const SystemState = require('../db/systemStateModel');
@@ -490,23 +490,23 @@ router.post('/schedule/trigger', express.json(),
   }
 );
 
-// POST /api/system/schedule/trigger/stale — re-crawl stale gyms
+// POST /api/system/schedule/trigger/stale — re-crawl stale spaces
 router.post('/schedule/trigger/stale', async (req, res) => {
   try {
-    const results = await queueStaleGyms('manual-trigger');
+    const results = await queueStaleSpaces('manual-trigger');
     ok(res, {
-      message: `${results.length} stale gyms queued for re-crawl`,
+      message: `${results.length} stale spaces queued for re-crawl`,
       jobs: results,
     }, 202);
   } catch (e) { err(res, e.message); }
 });
 
-// POST /api/system/schedule/trigger/enrichment — re-crawl incomplete gyms
+// POST /api/system/schedule/trigger/enrichment — re-crawl incomplete spaces
 router.post('/schedule/trigger/enrichment', async (req, res) => {
   try {
-    const results = await queueIncompleteGyms('manual-trigger');
+    const results = await queueIncompleteSpaces('manual-trigger');
     ok(res, {
-      message: `${results.length} incomplete gyms queued for enrichment re-crawl`,
+      message: `${results.length} incomplete spaces queued for enrichment re-crawl`,
       jobs: results,
     }, 202);
   } catch (e) { err(res, e.message); }
@@ -528,40 +528,40 @@ router.post('/vacuum-logs', async (req, res) => {
   } catch (e) { err(res, e.message); }
 });
 
-// POST /api/system/recalculate-scores — Bulk recalculate all gym scores/sentiment
+// POST /api/system/recalculate-scores — Bulk recalculate all space scores/sentiment
 router.post('/recalculate-scores', async (req, res) => {
   res.status(202).json({ success: true, message: 'Recalculation started in background' });
   
   // Run in background
   (async () => {
     try {
-      const gyms = await Gym.find({}).limit(5000); // Sanity limit
-      logger.info(`Starting bulk recalculation for ${gyms.length} gyms...`);
+      const spaces = await Space.find({}).limit(5000); // Sanity limit
+      logger.info(`Starting bulk recalculation for ${spaces.length} spaces...`);
       
       let processed = 0;
-      for (const gym of gyms) {
+      for (const space of spaces) {
         // Recalculate Quality Score
-        const qScore = calculateQualityScore(gym);
-        gym.qualityScore = qScore.score;
-        gym.scoreBreakdown = qScore.breakdown;
+        const qScore = calculateQualityScore(space);
+        space.qualityScore = qScore.score;
+        space.scoreBreakdown = qScore.breakdown;
 
         // Recalculate Sentiment
-        const reviews = await Review.find({ gymId: gym._id }).lean();
+        const reviews = await Review.find({ spaceId: space._id }).lean();
         if (reviews.length > 0) {
-          const sentiment = analyzeGymSentiment(reviews);
-          gym.sentimentScore = sentiment.score;
-          gym.sentimentTags = sentiment.tags;
+          const sentiment = analyzeSpaceSentiment(reviews);
+          space.sentimentScore = sentiment.score;
+          space.sentimentTags = sentiment.tags;
         }
 
-        await gym.save();
+        await space.save();
         processed++;
         if (processed % 100 === 0) {
-           bus.publish('system:diag', { message: `Recalculated ${processed}/${gyms.length} gyms` });
-           logger.info(`Recalculated ${processed}/${gyms.length} gyms`);
+           bus.publish('system:diag', { message: `Recalculated ${processed}/${spaces.length} spaces` });
+           logger.info(`Recalculated ${processed}/${spaces.length} spaces`);
         }
       }
-      logger.info(`Bulk recalculation completed for ${processed} gyms`);
-      bus.publish('test:ping', { message: `✅ Recalculated ${processed} gym scores/sentiment` });
+      logger.info(`Bulk recalculation completed for ${processed} spaces`);
+      bus.publish('test:ping', { message: `✅ Recalculated ${processed} space scores/sentiment` });
     } catch (e) {
       logger.error('Recalculation failed:', e);
     }

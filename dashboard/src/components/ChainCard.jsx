@@ -9,7 +9,7 @@ function timeAgo(date) {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export default function ChainCard({ chain, onCrawl, onViewGyms, onTag }) {
+export default function ChainCard({ chain, onCrawl, onViewSpaces, onTag }) {
   return (
     <div className="card" style={{ padding: 18, cursor: 'default' }}>
       <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>{chain.name}</div>
@@ -35,7 +35,7 @@ export default function ChainCard({ chain, onCrawl, onViewGyms, onTag }) {
         <button className="btn sm primary" onClick={() => onCrawl?.(chain.slug, chain.name)}>
           <Rocket size={12} /> Crawl
         </button>
-        <button className="btn sm" onClick={() => onViewGyms?.(chain.slug, chain.name)}>
+        <button className="btn sm" onClick={() => onViewSpaces?.(chain.slug, chain.name)}>
           <Eye size={12} /> Locations
         </button>
         <button className="btn sm" onClick={() => onTag?.(chain.slug)}>

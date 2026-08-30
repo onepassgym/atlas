@@ -51,7 +51,7 @@ function StatCard({ label, value, icon: Icon, color = '#10b981', sub, warn }) {
 /* ── MigrationBanner ─────────────────────────────────────────────────────────── */
 function MigrationBanner({ stats, onMigrate, onSync, migrating, syncing }) {
   if (!stats?.needsMigration) return null;
-  const diff = (stats.gymPhotoSum || 0) - (stats.totalCount || 0);
+  const diff = (stats.spacePhotoSum || 0) - (stats.totalCount || 0);
   return (
     <motion.div initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }}
       style={{ padding:'14px 20px', background:'rgba(245,158,11,.08)', border:'1px solid rgba(245,158,11,.4)', borderRadius:10, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
@@ -60,14 +60,14 @@ function MigrationBanner({ stats, onMigrate, onSync, migrating, syncing }) {
         <div>
           <div style={{ fontWeight:700, fontSize:13, color:'#f59e0b' }}>⚠ Media Sync Required</div>
           <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>
-            DB has <strong style={{ color:'var(--text-primary)' }}>{(stats.totalCount||0).toLocaleString()}</strong> records but gyms reference <strong style={{ color:'#f59e0b' }}>{(stats.gymPhotoSum||0).toLocaleString()}</strong> photos ({diff.toLocaleString()} missing). Run Migration to populate.
+            DB has <strong style={{ color:'var(--text-primary)' }}>{(stats.totalCount||0).toLocaleString()}</strong> records but spaces reference <strong style={{ color:'#f59e0b' }}>{(stats.spacePhotoSum||0).toLocaleString()}</strong> photos ({diff.toLocaleString()} missing). Run Migration to populate.
           </div>
         </div>
       </div>
       <div style={{ display:'flex', gap:8 }}>
         <button onClick={onMigrate} disabled={migrating}
           style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 16px', background:'rgba(245,158,11,.15)', border:'1px solid rgba(245,158,11,.5)', borderRadius:7, color:'#f59e0b', cursor:'pointer', fontWeight:700, fontSize:12, opacity: migrating?.6:1 }}>
-          <Database size={13}/> {migrating ? 'Migrating…' : 'Migrate from Gyms'}
+          <Database size={13}/> {migrating ? 'Migrating…' : 'Migrate from Spaces'}
         </button>
         <button onClick={onSync} disabled={syncing}
           style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 16px', background:'rgba(16,185,129,.1)', border:'1px solid rgba(16,185,129,.4)', borderRadius:7, color:'#10b981', cursor:'pointer', fontWeight:700, fontSize:12, opacity: syncing?.6:1 }}>
@@ -90,9 +90,9 @@ function PhotoCard({ photo, selected, onSelect, onClick, base }) {
         style={{ position:'absolute', top:6, left:6, zIndex:2 }}>
         {selected ? <CheckSquare size={16} color="var(--accent)"/> : <Square size={16} color="rgba(255,255,255,.45)"/>}
       </div>
-      {photo.gymId?.name && (
+      {photo.spaceId?.name && (
         <div style={{ position:'absolute', top:6, right:6, zIndex:2, background:'rgba(0,0,0,.6)', borderRadius:3, padding:'1px 6px', fontSize:8, color:'#fff', maxWidth:80, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-          {photo.gymId.name}
+          {photo.spaceId.name}
         </div>
       )}
       <div onClick={() => onClick(photo)} style={{ aspectRatio:'4/3', background:'rgba(0,0,0,.2)' }}>
@@ -161,7 +161,7 @@ function Lightbox({ photo, onClose, base }) {
         <img src={proxyUrl} alt={photo.caption || ''} style={{ width:'100%', maxHeight:'66vh', objectFit:'contain', background:'#000', display:'block' }}/>
         <div style={{ padding:'14px 20px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8 }}>
           <div>
-            <div style={{ fontWeight:700, fontSize:14 }}>{photo.gymId?.name || photo.filename || 'Unknown'}</div>
+            <div style={{ fontWeight:700, fontSize:14 }}>{photo.spaceId?.name || photo.filename || 'Unknown'}</div>
             <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2, fontFamily:'var(--mono)' }}>{photo.folder || ''}</div>
           </div>
           <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
@@ -197,7 +197,7 @@ function Lightbox({ photo, onClose, base }) {
 /* ══════════════════════════════════════════════════════════════════════════════
    PROGRESS PANEL — shows live job status while migrate/sync is running
 ══════════════════════════════════════════════════════════════════════════════ */
-const JOB_LABELS = { migrate: 'Migration', sync: 'FS Sync', relink: 'Relink Gyms' };
+const JOB_LABELS = { migrate: 'Migration', sync: 'FS Sync', relink: 'Relink Spaces' };
 const JOB_COLORS = { migrate: '#f59e0b', sync: '#10b981', relink: '#8b5cf6' };
 
 function ProgressPanel({ jobs }) {
@@ -425,11 +425,11 @@ export default function MediaStorage() {
     } catch (e) { toast(e.message, 'error'); }
   };
 
-  /* ── migrate from gyms ──────────────────────────────────────────────────── */
+  /* ── migrate from spaces ──────────────────────────────────────────────────── */
   const triggerMigrate = async () => {
     setMigrating(true); setActionMsg('');
     try {
-      const res = await api.post('/api/media/migrate-from-gyms', {});
+      const res = await api.post('/api/media/migrate-from-spaces', {});
       setActionMsg(res.message || 'Migration started — refreshing in 15s…');
       toast('Migration started! Refreshing in 15s…', 'info');
       setTimeout(() => { fetchStats(); fetchPage(1, search, typeFilter, sortBy); setActionMsg(''); }, 15000);
@@ -449,10 +449,10 @@ export default function MediaStorage() {
     finally { setSyncing(false); }
   };
 
-  /* ── relink gyms ─────────────────────────────────────────────────────────── */
+  /* ── relink spaces ─────────────────────────────────────────────────────────── */
   const triggerRelink = async () => {
     try {
-      const res = await api.post('/api/media/relink-gyms', {});
+      const res = await api.post('/api/media/relink-spaces', {});
       toast(res.message || 'Relink done', 'success');
       fetchStats();
     } catch (e) { toast(e.message, 'error'); }
@@ -474,7 +474,7 @@ export default function MediaStorage() {
           <div>
             <h1 style={{ margin:0, fontSize:22, fontWeight:900, letterSpacing:-.5 }}>MEDIA VAULT</h1>
             <p style={{ margin:'3px 0 0', fontSize:12, color:'var(--text-muted)' }}>
-              {total.toLocaleString()} indexed · {stats?.gymPhotoSum ? `${stats.gymPhotoSum.toLocaleString()} in gyms` : ''} · gym_photos collection
+              {total.toLocaleString()} indexed · {stats?.spacePhotoSum ? `${stats.spacePhotoSum.toLocaleString()} in spaces` : ''} · space_photos collection
             </p>
           </div>
         </div>
@@ -485,7 +485,7 @@ export default function MediaStorage() {
               <Trash2 size={13}/> Delete {selected.size}
             </button>
           )}
-          <button onClick={triggerRelink} title="Link unlinked photos to gyms by folder slug"
+          <button onClick={triggerRelink} title="Link unlinked photos to spaces by folder slug"
             style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 12px', background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text-muted)', cursor:'pointer', fontSize:12 }}>
             <Link2 size={13}/> Relink
           </button>
@@ -524,8 +524,8 @@ export default function MediaStorage() {
       {/* ── Stats grid ── */}
       {stats && (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(155px,1fr))', gap:10 }}>
-          <StatCard label="Indexed Media"  value={(stats.totalCount||0).toLocaleString()}    icon={FileImage}    color="#10b981" sub="in gym_photos"/>
-          <StatCard label="Gym Photos Sum" value={(stats.gymPhotoSum||0).toLocaleString()}   icon={TrendingUp}   color="#3b82f6" sub="from gym docs" warn={stats.needsMigration}/>
+          <StatCard label="Indexed Media"  value={(stats.totalCount||0).toLocaleString()}    icon={FileImage}    color="#10b981" sub="in space_photos"/>
+          <StatCard label="Space Photos Sum" value={(stats.spacePhotoSum||0).toLocaleString()}   icon={TrendingUp}   color="#3b82f6" sub="from space docs" warn={stats.needsMigration}/>
           <StatCard label="Storage Used"   value={fmtBytes(stats.totalSize)}                 icon={HardDrive}    color="var(--accent)"/>
           <StatCard label="Missing Files"  value={(stats.missingCount||0).toLocaleString()}  icon={AlertCircle}  color="#ef4444" warn={stats.missingCount > 0}/>
           <StatCard label="Unlinked"       value={(stats.unlinkedCount||0).toLocaleString()} icon={Unlink}       color="#f97316"/>
@@ -539,7 +539,7 @@ export default function MediaStorage() {
         <div style={{ flex:'1 1 260px', position:'relative' }}>
           <Search size={14} style={{ position:'absolute', left:11, top:'50%', transform:'translateY(-50%)', color:'var(--text-muted)', pointerEvents:'none' }}/>
           <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search filename, gym, folder, tags…"
+            placeholder="Search filename, space, folder, tags…"
             style={{ width:'100%', padding:'8px 12px 8px 34px', background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text-primary)', fontSize:13, boxSizing:'border-box', outline:'none' }}
           />
           {search && (
@@ -598,7 +598,7 @@ export default function MediaStorage() {
             <div style={{ fontWeight:600 }}>No media found</div>
             <div style={{ fontSize:12, marginTop:6 }}>
               {total === 0
-                ? 'Run "Migrate" to pull from gym records, or "FS Sync" to index from filesystem.'
+                ? 'Run "Migrate" to pull from space records, or "FS Sync" to index from filesystem.'
                 : 'Try adjusting your search or filters.'}
             </div>
           </div>
@@ -618,7 +618,7 @@ export default function MediaStorage() {
               <tr style={{ borderBottom:'1px solid var(--border)', color:'var(--text-muted)', textAlign:'left' }}>
                 <th style={{ padding:'6px 8px', width:28 }}><Square size={12}/></th>
                 <th style={{ padding:'6px 8px' }}>File</th>
-                <th style={{ padding:'6px 8px' }}>Gym</th>
+                <th style={{ padding:'6px 8px' }}>Space</th>
                 <th style={{ padding:'6px 8px' }}>Type</th>
                 <th style={{ padding:'6px 8px' }}>Size</th>
                 <th style={{ padding:'6px 8px' }}>Actions</th>
@@ -636,7 +636,7 @@ export default function MediaStorage() {
                     onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                     <td style={{ padding:'7px 8px' }}><input type="checkbox" checked={selected.has(p._id)} onChange={() => toggleSelect(p._id)} style={{ cursor:'pointer' }}/></td>
                     <td style={{ padding:'7px 8px', fontFamily:'var(--mono)', color:'var(--text-muted)', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.filename || p._id}</td>
-                    <td style={{ padding:'7px 8px', maxWidth:150, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.gymId?.name || <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
+                    <td style={{ padding:'7px 8px', maxWidth:150, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.spaceId?.name || <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
                     <td style={{ padding:'7px 8px' }}><span style={{ background:'rgba(255,255,255,.07)', borderRadius:3, padding:'2px 6px', fontSize:9, textTransform:'uppercase' }}>{p.type||'photo'}</span></td>
                     <td style={{ padding:'7px 8px', fontFamily:'var(--mono)', color:'var(--text-muted)', whiteSpace:'nowrap' }}>{fmtBytes(p.sizeBytes||0)}</td>
                     <td style={{ padding:'7px 8px' }}>

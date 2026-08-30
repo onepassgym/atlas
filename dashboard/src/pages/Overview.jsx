@@ -1,13 +1,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, Sector } from 'recharts';
-import { Building2, MessageCircle, Camera, Zap, Target, Link2, Activity, TrendingUp, XCircle, RefreshCw } from 'lucide-react';
+import { Building2, MessageCircle, Camera, Zap, Target, Link2, Activity, TrendingUp, XCircle, RefreshCw, BookOpen } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import CrawlActivity from '../components/CrawlActivity';
 import EnrichmentPanel from '../components/EnrichmentPanel';
 import Skeleton from '../components/Skeleton';
-import GymRow from '../components/GymRow';
-import GymPreviewModal from '../components/GymPreviewModal';
+import SpaceRow from '../components/SpaceRow';
+import SpacePreviewModal from '../components/SpacePreviewModal';
 import SystemPanel from '../components/SystemPanel';
 import SystemHealth from '../components/SystemHealth';
 import JobsPanel from '../components/JobsPanel';
@@ -68,9 +68,9 @@ export default function Overview() {
   const [queueStats, setQueueStats] = useState(null);
   const [mediaQueueStats, setMediaQueueStats] = useState(null);
   const [chainStats, setChainStats] = useState({ count: 0, totalLocs: 0 });
-  const [latestGyms, setLatestGyms] = useState([]);
+  const [latestSpaces, setLatestSpaces] = useState([]);
   const [jobs, setJobs] = useState([]);
-  const [selectedGym, setSelectedGym] = useState(null);
+  const [selectedSpace, setSelectedSpace] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
   const [isGlobalPaused, setIsGlobalPaused] = useState(false);
@@ -79,7 +79,7 @@ export default function Overview() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [gymRes, queueRes, chainRes, latestRes, jobsRes, stateRes] = await Promise.all([
+      const [spaceRes, queueRes, chainRes, latestRes, jobsRes, stateRes] = await Promise.all([
         api.get('/api/spaces/stats').catch(() => null),
         api.get('/api/crawl/queue/stats').catch(() => null),
         api.get('/api/chains').catch(() => ({ chains: [] })),
@@ -92,7 +92,7 @@ export default function Overview() {
       if (stateRes?.state?.crawlPace !== undefined) setCrawlPace(stateRes.state.crawlPace);
       if (stateRes?.state?.mediaQueuePaused !== undefined) setIsMediaPaused(stateRes.state.mediaQueuePaused);
       
-      if (gymRes?.success) setStats(gymRes.stats);
+      if (spaceRes?.success) setStats(spaceRes.stats);
       if (queueRes?.success) {
         setQueueStats(queueRes.queue);
         setMediaQueueStats(queueRes.mediaQueue);
@@ -102,7 +102,7 @@ export default function Overview() {
         const totalLocs = chainRes.chains.reduce((s, c) => s + (c.totalLocations || 0), 0);
         setChainStats({ count: chainRes.chains.length, totalLocs });
       }
-      if (latestRes?.success) setLatestGyms(latestRes.gyms || []);
+      if (latestRes?.success) setLatestSpaces(latestRes.spaces || []);
       if (jobsRes?.success) setJobs(jobsRes.jobs || []);
     } catch {} finally {
       setLoading(false);
@@ -120,21 +120,21 @@ export default function Overview() {
     
     // Determine what to refetch based on event type
     let refetchJobs = false;
-    let refetchGyms = false;
+    let refetchSpaces = false;
     
     if (type.startsWith('job:') && type !== 'job:progress') refetchJobs = true;
-    if (type === 'gym:created' || type === 'gym:updated') refetchGyms = true;
+    if (type === 'space:created' || type === 'space:updated') refetchSpaces = true;
     
-    if (!refetchJobs && !refetchGyms) return;
+    if (!refetchJobs && !refetchSpaces) return;
     
     // Debounce: wait 2s after last relevant event before refetching
     const timer = setTimeout(() => {
       if (refetchJobs) {
         api.get('/api/crawl/jobs?limit=6').then(r => r?.success && setJobs(r.jobs || [])).catch(() => {});
       }
-      if (refetchGyms) {
+      if (refetchSpaces) {
         api.get('/api/spaces/stats').then(r => r?.success && setStats(r.stats)).catch(() => {});
-        api.get('/api/spaces?limit=6&sortBy=createdAt').then(r => r?.success && setLatestGyms(r.gyms || [])).catch(() => {});
+        api.get('/api/spaces?limit=6&sortBy=createdAt').then(r => r?.success && setLatestSpaces(r.spaces || [])).catch(() => {});
       }
     }, 2000);
     
@@ -238,6 +238,20 @@ export default function Overview() {
 
         {/* System Controls */}
         <div style={{ position: 'relative', zIndex: 2, display: 'flex', gap: 12, flexWrap: 'wrap', flex: '1 1 auto', justifyContent: 'flex-end', minWidth: 'min(100%, 300px)' }}>
+          <a
+            href="/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '8px 16px',
+              borderRadius: 8, fontWeight: 600, cursor: 'pointer', border: '1px solid var(--accent)',
+              background: 'rgba(139, 92, 246, 0.1)', color: 'var(--accent)', textDecoration: 'none',
+              transition: 'all 0.2s', flex: '1 1 auto', whiteSpace: 'nowrap'
+            }}
+          >
+            <BookOpen size={14} />
+            API Docs
+          </a>
           <select 
             className="btn" 
             style={{ 
@@ -293,7 +307,7 @@ export default function Overview() {
 
       {/* ── Stat Cards ────── */}
       <div className="grid">
-        <StatCard title="Total Gyms" value={stats?.total} label="venues in database" icon={<Building2 size={18} />} color="blue" />
+        <StatCard title="Total Spaces" value={stats?.total} label="venues in database" icon={<Building2 size={18} />} color="blue" />
         <StatCard title="Total Photos" value={stats?.totalPhotos} label="venue images" icon={<Camera size={18} />} color="orange" />
         <StatCard title="Crawl Queue" value={queueStats?.active ?? 0} label={`${queueStats?.waiting || 0} waiting`} icon={<Zap size={18} />} color="cyan" />
         <StatCard title="Photo Queue" value={mediaQueueStats?.active ?? 0} label={`${mediaQueueStats?.waiting || 0} downloading`} icon={<Camera size={18} />} color="indigo" />
@@ -435,9 +449,9 @@ export default function Overview() {
       </div>
 
       {/* ── Reconnaissance Targets (Chains) ────── */}
-      <ChainsPanel onSelectGym={setSelectedGym} />
+      <ChainsPanel onSelectSpace={setSelectedSpace} />
 
-      {/* ── Latest Gyms + Jobs ────── */}
+      {/* ── Latest Spaces + Jobs ────── */}
       <div className="fluid-grid">
         <div className="card">
           <div className="card-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 12 }}>
@@ -449,9 +463,9 @@ export default function Overview() {
             </span>
           </div>
           <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
-            {latestGyms.length > 0 ? latestGyms.map(g => (
-              <GymRow key={g._id} gym={g} onClick={setSelectedGym} />
-            )) : <div className="empty-state">No gyms yet</div>}
+            {latestSpaces.length > 0 ? latestSpaces.map(g => (
+              <SpaceRow key={g._id} space={g} onClick={setSelectedSpace} />
+            )) : <div className="empty-state">No spaces yet</div>}
           </div>
         </div>
 
@@ -471,8 +485,8 @@ export default function Overview() {
         <SystemHealth />
       </div>
 
-      {/* ── Gym Preview Popup ────── */}
-      {selectedGym && <GymPreviewModal gymId={selectedGym} onClose={() => setSelectedGym(null)} />}
+      {/* ── Space Preview Popup ────── */}
+      {selectedSpace && <SpacePreviewModal spaceId={selectedSpace} onClose={() => setSelectedSpace(null)} />}
     </motion.div>
   );
 }

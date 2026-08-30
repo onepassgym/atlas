@@ -9,7 +9,7 @@ import RatingStars from '../components/RatingStars';
 export default function SpaceDetails() {
   const { id } = useParams();
   const { toast } = useApp();
-  const [gym, setGym] = useState(null);
+  const [space, setSpace] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -17,7 +17,7 @@ export default function SpaceDetails() {
     setLoading(true);
     api.get(`/api/spaces/${id}`)
       .then(res => {
-        if (res?.success) setGym(res.gym);
+        if (res?.success) setSpace(res.space);
         else toast('Failed to load space details', 'error');
       })
       .catch(e => toast(e.message, 'error'))
@@ -33,7 +33,7 @@ export default function SpaceDetails() {
     );
   }
 
-  if (!gym) {
+  if (!space) {
     return (
       <div className="container" style={{ padding: '40px 0', textAlign: 'center' }}>
         <div className="empty-state">
@@ -51,10 +51,10 @@ export default function SpaceDetails() {
         <Link to="/" className="btn sm">
           <ArrowLeft size={14} /> Back
         </Link>
-        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{gym.name}</h1>
-        {gym.chainName && (
+        <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{space.name}</h1>
+        {space.chainName && (
           <span className="badge" style={{ background: 'var(--purple)', color: '#fff' }}>
-            🔗 {gym.chainName}
+            🔗 {space.chainName}
           </span>
         )}
       </div>
@@ -63,10 +63,10 @@ export default function SpaceDetails() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {/* Header & Main Image */}
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            {(gym.photos?.[0]?.proxyUrl || gym.photos?.[0]?.url || gym.coverPhoto) ? (
+            {(space.photos?.[0]?.proxyUrl || space.photos?.[0]?.url || space.coverPhoto) ? (
               <img 
-                src={getProxyUrl(gym.photos?.[0]?.proxyUrl || gym.photos?.[0]?.url || gym.coverPhoto?.publicUrl || gym.coverPhoto)} 
-                alt={gym.name} 
+                src={getProxyUrl(space.photos?.[0]?.proxyUrl || space.photos?.[0]?.url || space.coverPhoto?.publicUrl || space.coverPhoto)} 
+                alt={space.name} 
                 style={{ width: '100%', height: 350, objectFit: 'cover' }} 
                 onError={(e) => {
                   e.target.style.display = 'none';
@@ -74,38 +74,38 @@ export default function SpaceDetails() {
                 }}
               />
             ) : null}
-            <div style={{ width: '100%', height: 350, background: 'var(--bg-surface)', display: (gym.photos?.[0]?.proxyUrl || gym.photos?.[0]?.url || gym.coverPhoto) ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+            <div style={{ width: '100%', height: 350, background: 'var(--bg-surface)', display: (space.photos?.[0]?.proxyUrl || space.photos?.[0]?.url || space.coverPhoto) ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
               <MapPin size={48} />
             </div>
             
             <div style={{ padding: 24 }}>
               <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <RatingStars rating={gym.rating} />
-                  <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>({(gym.totalReviews || 0).toLocaleString()} reviews)</span>
+                  <RatingStars rating={space.rating} />
+                  <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>({(space.totalReviews || 0).toLocaleString()} reviews)</span>
                 </div>
-                {gym.qualityScore > 0 && (
-                  <span style={{ color: 'var(--success)', fontSize: 14, fontWeight: 600 }}>🎯 Quality: {gym.qualityScore}</span>
+                {space.qualityScore > 0 && (
+                  <span style={{ color: 'var(--success)', fontSize: 14, fontWeight: 600 }}>🎯 Quality: {space.qualityScore}</span>
                 )}
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, color: 'var(--text-secondary)' }}>
-                {gym.areaName && (
+                {space.areaName && (
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                     <MapPin size={16} style={{ marginTop: 2, color: 'var(--text-muted)' }} />
-                    <span>{gym.address || gym.areaName}</span>
+                    <span>{space.address || space.areaName}</span>
                   </div>
                 )}
-                {gym.contactPhone && (
+                {space.contactPhone && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Phone size={16} style={{ color: 'var(--text-muted)' }} />
-                    <a href={`tel:${gym.contactPhone}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{gym.contactPhone}</a>
+                    <a href={`tel:${space.contactPhone}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{space.contactPhone}</a>
                   </div>
                 )}
-                {gym.websiteUrl && (
+                {space.websiteUrl && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Globe size={16} style={{ color: 'var(--text-muted)' }} />
-                    <a href={gym.websiteUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>{new URL(gym.websiteUrl).hostname}</a>
+                    <a href={space.websiteUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>{new URL(space.websiteUrl).hostname}</a>
                   </div>
                 )}
               </div>
@@ -118,11 +118,11 @@ export default function SpaceDetails() {
               <Dumbbell size={18} color="var(--accent)" /> Overview & Amenities
             </h3>
             <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 24 }}>
-              {gym.description || 'No description available for this space.'}
+              {space.description || 'No description available for this space.'}
             </p>
-            {gym.amenityIds?.length > 0 && (
+            {space.amenityIds?.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {gym.amenityIds.map(am => (
+                {space.amenityIds.map(am => (
                   <span key={am._id} style={{ padding: '6px 12px', background: 'var(--bg-surface)', borderRadius: 20, fontSize: 13, border: '1px solid var(--border)' }}>
                     {am.label}
                   </span>
@@ -145,8 +145,8 @@ export default function SpaceDetails() {
               <button className="btn" style={{ width: '100%', justifyContent: 'center' }}>
                 Full Enrichment
               </button>
-              {gym.googleMapsUrl && (
-                <a href={gym.googleMapsUrl} target="_blank" rel="noreferrer" className="btn" style={{ width: '100%', justifyContent: 'center', display: 'flex' }}>
+              {space.googleMapsUrl && (
+                <a href={space.googleMapsUrl} target="_blank" rel="noreferrer" className="btn" style={{ width: '100%', justifyContent: 'center', display: 'flex' }}>
                   <Map size={14} /> Open in Google Maps
                 </a>
               )}
@@ -159,9 +159,9 @@ export default function SpaceDetails() {
               Enrichment Info
             </h3>
             <div style={{ fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8, color: 'var(--text-secondary)' }}>
-              <div>Status: <strong style={{ color: 'var(--text-primary)' }}>{gym.enrichmentMeta?.status || 'never'}</strong></div>
-              <div>Last Attempt: <strong style={{ color: 'var(--text-primary)' }}>{gym.enrichmentMeta?.lastAttempt ? new Date(gym.enrichmentMeta.lastAttempt).toLocaleDateString() : '—'}</strong></div>
-              <div>Last Success: <strong style={{ color: 'var(--text-primary)' }}>{gym.enrichmentMeta?.lastSuccess ? new Date(gym.enrichmentMeta.lastSuccess).toLocaleDateString() : '—'}</strong></div>
+              <div>Status: <strong style={{ color: 'var(--text-primary)' }}>{space.enrichmentMeta?.status || 'never'}</strong></div>
+              <div>Last Attempt: <strong style={{ color: 'var(--text-primary)' }}>{space.enrichmentMeta?.lastAttempt ? new Date(space.enrichmentMeta.lastAttempt).toLocaleDateString() : '—'}</strong></div>
+              <div>Last Success: <strong style={{ color: 'var(--text-primary)' }}>{space.enrichmentMeta?.lastSuccess ? new Date(space.enrichmentMeta.lastSuccess).toLocaleDateString() : '—'}</strong></div>
             </div>
           </div>
         </div>

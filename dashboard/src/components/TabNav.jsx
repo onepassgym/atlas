@@ -3,7 +3,7 @@ import { LayoutDashboard, Search, Link2, ClipboardList, Settings, Globe2, Zap, H
 
 const tabs = [
   { to: '/overview',     icon: LayoutDashboard, label: 'Overview' },
-  { to: '/explorer',     icon: Search,          label: 'Gym Explorer' },
+  { to: '/explorer',     icon: Search,          label: 'Space Explorer' },
   { to: '/data-health',  icon: HeartPulse,      label: 'Data Health' },
   { to: '/enrichment',   icon: Zap,             label: 'Enrichment' },
   { to: '/globe',        icon: Globe2,          label: 'Globe' },

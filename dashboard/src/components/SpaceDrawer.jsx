@@ -16,9 +16,9 @@ const SECTIONS = [
   { key: 'amenities', label: 'Amenities',     icon: Dumbbell,      color: '#ec4899' },
 ];
 
-export default function GymDrawer({ gymId, onClose }) {
+export default function SpaceDrawer({ spaceId, onClose }) {
   const { toast } = useApp();
-  const [gym, setGym] = useState(null);
+  const [space, setSpace] = useState(null);
   const [loading, setLoading] = useState(true);
   const [enriching, setEnriching] = useState(false);
   const [selectedSections, setSelectedSections] = useState([]);
@@ -35,12 +35,12 @@ export default function GymDrawer({ gymId, onClose }) {
 
   // Full enrich (all sections)
   const handleFullEnrich = async () => {
-    if (!gym?._id) return;
+    if (!space?._id) return;
     setEnriching(true);
     try {
-      const res = await api.post('/api/enrichment/priority', { gymId: gym._id, sections: ['all'] });
+      const res = await api.post('/api/enrichment/priority', { spaceId: space._id, sections: ['all'] });
       if (res?.success) {
-        toast(`⚡ ${gym.name} → full enrichment queued`, 'info');
+        toast(`⚡ ${space.name} → full enrichment queued`, 'info');
         loadEnrichLogs();
       } else {
         toast(res?.error || 'Failed to enrich', 'error');
@@ -54,12 +54,12 @@ export default function GymDrawer({ gymId, onClose }) {
 
   // Deep enrich (150 reviews + 80 photos)
   const handleDeepEnrich = async () => {
-    if (!gym?._id) return;
+    if (!space?._id) return;
     setEnriching(true);
     try {
-      const res = await api.post('/api/enrichment/priority', { gymId: gym._id, sections: ['deep'] });
+      const res = await api.post('/api/enrichment/priority', { spaceId: space._id, sections: ['deep'] });
       if (res?.success) {
-        toast(`🔬 ${gym.name} → deep enrichment queued (150 reviews + 80 photos)`, 'info');
+        toast(`🔬 ${space.name} → deep enrichment queued (150 reviews + 80 photos)`, 'info');
         loadEnrichLogs();
       } else {
         toast(res?.error || 'Failed to enrich', 'error');
@@ -73,12 +73,12 @@ export default function GymDrawer({ gymId, onClose }) {
 
   // Selective enrich (chosen sections only)
   const handleSelectiveEnrich = async () => {
-    if (!gym?._id || selectedSections.length === 0) return;
+    if (!space?._id || selectedSections.length === 0) return;
     setEnriching(true);
     try {
-      const res = await api.post('/api/enrichment/priority', { gymId: gym._id, sections: selectedSections });
+      const res = await api.post('/api/enrichment/priority', { spaceId: space._id, sections: selectedSections });
       if (res?.success) {
-        toast(`⚡ ${gym.name} → enriching: ${selectedSections.join(', ')}`, 'info');
+        toast(`⚡ ${space.name} → enriching: ${selectedSections.join(', ')}`, 'info');
         setSelectedSections([]);
         loadEnrichLogs();
       } else {
@@ -91,26 +91,26 @@ export default function GymDrawer({ gymId, onClose }) {
     }
   };
 
-  // Load enrichment history for this gym
+  // Load enrichment history for this space
   const loadEnrichLogs = useCallback(async () => {
-    if (!gymId) return;
+    if (!spaceId) return;
     setLogsLoading(true);
     try {
-      const res = await api.get(`/api/enrichment/logs/${gymId}?limit=5`);
+      const res = await api.get(`/api/enrichment/logs/${spaceId}?limit=5`);
       if (res?.success) setEnrichLogs(res.logs || []);
     } catch (_) {}
     finally { setLogsLoading(false); }
-  }, [gymId]);
+  }, [spaceId]);
 
   useEffect(() => {
-    if (!gymId) return;
+    if (!spaceId) return;
     setLoading(true);
-    api.get(`/api/spaces/${gymId}`)
-      .then(res => { if (res?.success) setGym(res.gym); })
+    api.get(`/api/spaces/${spaceId}`)
+      .then(res => { if (res?.success) setSpace(res.space); })
       .catch(() => {})
       .finally(() => setLoading(false));
     loadEnrichLogs();
-  }, [gymId, loadEnrichLogs]);
+  }, [spaceId, loadEnrichLogs]);
 
   // Lock body scroll when drawer is open
   useEffect(() => {
@@ -121,10 +121,10 @@ export default function GymDrawer({ gymId, onClose }) {
     };
   }, []);
 
-  if (!gymId) return null;
+  if (!spaceId) return null;
 
-  const enrichMeta = gym?.enrichmentMeta;
-  const hasGmapsUrl = !!gym?.googleMapsUrl;
+  const enrichMeta = space?.enrichmentMeta;
+  const hasGmapsUrl = !!space?.googleMapsUrl;
 
   return (
     <AnimatePresence>
@@ -143,7 +143,7 @@ export default function GymDrawer({ gymId, onClose }) {
         transition={{ type: 'spring', damping: 30, stiffness: 300 }}
       >
         <div className="drawer-header">
-          <h3 style={{ fontSize: 15, fontWeight: 700 }}>Gym Details</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 700 }}>Space Details</h3>
           <button onClick={onClose} style={{ fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)', background: 'none', border: 'none', padding: '4px 8px' }}>
             <X size={18} />
           </button>
@@ -151,32 +151,32 @@ export default function GymDrawer({ gymId, onClose }) {
         <div className="drawer-body">
           {loading ? (
             <div className="empty-state"><div className="empty-state-icon">⏳</div><div>Loading…</div></div>
-          ) : !gym ? (
-            <div className="empty-state">Failed to load gym details</div>
+          ) : !space ? (
+            <div className="empty-state">Failed to load space details</div>
           ) : (
             <>
-              {(gym.photos?.[0]?.url || gym.coverPhoto) && (
+              {(space.photos?.[0]?.url || space.coverPhoto) && (
                 <img
-                  src={gym.photos?.[0]?.url || gym.coverPhoto}
-                  alt={gym.name}
+                  src={space.photos?.[0]?.url || space.coverPhoto}
+                  alt={space.name}
                   style={{ width: '100%', height: 180, objectFit: 'cover', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}
                   onError={e => e.target.style.display = 'none'}
                 />
               )}
-              <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{gym.name}</h2>
+              <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{space.name}</h2>
               <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
                 <span style={{ color: 'var(--warning)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Star size={14} /> {gym.rating?.toFixed(1) || '—'}
-                  <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>({(gym.totalReviews || 0).toLocaleString()} reviews)</span>
+                  <Star size={14} /> {space.rating?.toFixed(1) || '—'}
+                  <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>({(space.totalReviews || 0).toLocaleString()} reviews)</span>
                 </span>
-                <span style={{ color: 'var(--success)', display: 'flex', alignItems: 'center', gap: 4 }}>🎯 Quality: {gym.qualityScore || 0}</span>
-                <span style={{ color: (gym.sentimentScore || 0) > 0 ? 'var(--success)' : 'var(--danger)' }}>
-                  😊 Sentiment: {gym.sentimentScore?.toFixed(2) || '—'}
+                <span style={{ color: 'var(--success)', display: 'flex', alignItems: 'center', gap: 4 }}>🎯 Quality: {space.qualityScore || 0}</span>
+                <span style={{ color: (space.sentimentScore || 0) > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                  😊 Sentiment: {space.sentimentScore?.toFixed(2) || '—'}
                 </span>
               </div>
-              {gym.chainName && (
+              {space.chainName && (
                 <div style={{ marginBottom: 16 }}>
-                  <span style={{ padding: '4px 12px', background: 'rgba(139,92,246,0.15)', color: 'var(--purple)', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>🔗 {gym.chainName}</span>
+                  <span style={{ padding: '4px 12px', background: 'rgba(139,92,246,0.15)', color: 'var(--purple)', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>🔗 {space.chainName}</span>
                 </div>
               )}
 
@@ -268,9 +268,9 @@ export default function GymDrawer({ gymId, onClose }) {
                 </AnimatePresence>
 
                 {/* Last Updated */}
-                {gym.updatedAt && (
+                {space.updatedAt && (
                   <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    Last updated: {new Date(gym.updatedAt).toLocaleDateString()} at {new Date(gym.updatedAt).toLocaleTimeString()}
+                    Last updated: {new Date(space.updatedAt).toLocaleDateString()} at {new Date(space.updatedAt).toLocaleTimeString()}
                   </span>
                 )}
               </div>
@@ -338,15 +338,15 @@ export default function GymDrawer({ gymId, onClose }) {
               <div className="drawer-section">
                 <div className="drawer-section-title">Contact & Location</div>
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {gym.address && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><MapPin size={13} /> {gym.address}</span>}
-                  {(gym.contact?.phone || gym.phone) && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Phone size={13} /> {gym.contact?.phone || gym.phone}</span>}
-                  {(gym.contact?.website || gym.website) && (
-                    <a href={gym.contact?.website || gym.website} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Globe size={13} /> {(gym.contact?.website || gym.website).replace(/https?:\/\//, '').slice(0, 40)}
+                  {space.address && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><MapPin size={13} /> {space.address}</span>}
+                  {(space.contact?.phone || space.phone) && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Phone size={13} /> {space.contact?.phone || space.phone}</span>}
+                  {(space.contact?.website || space.website) && (
+                    <a href={space.contact?.website || space.website} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Globe size={13} /> {(space.contact?.website || space.website).replace(/https?:\/\//, '').slice(0, 40)}
                     </a>
                   )}
-                  {gym.googleMapsUrl && (
-                    <a href={gym.googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {space.googleMapsUrl && (
+                    <a href={space.googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Map size={13} /> View on Google Maps <ExternalLink size={10} />
                     </a>
                   )}
@@ -356,7 +356,7 @@ export default function GymDrawer({ gymId, onClose }) {
               {/* ── Opening Hours ─────────────────────────────────────────────── */}
               <div className="drawer-section">
                 <div className="drawer-section-title">Opening Hours</div>
-                {(gym.openingHours || []).length > 0 ? gym.openingHours.map((h, i) => (
+                {(space.openingHours || []).length > 0 ? space.openingHours.map((h, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0' }}>
                     <span>{h.day || h}</span>
                     <span style={{ color: 'var(--text-primary)' }}>{h.hours || ''}</span>
@@ -365,11 +365,11 @@ export default function GymDrawer({ gymId, onClose }) {
               </div>
 
               {/* ── Amenities ────────────────────────────────────────────────── */}
-              {(gym.amenityIds || []).length > 0 && (
+              {(space.amenityIds || []).length > 0 && (
                 <div className="drawer-section">
                   <div className="drawer-section-title">Amenities</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-                    {gym.amenityIds.map((a, i) => (
+                    {space.amenityIds.map((a, i) => (
                       <span key={i} style={{ display: 'inline-block', padding: '3px 10px', background: 'rgba(59,130,246,0.1)', borderRadius: 20, fontSize: 11, margin: 2, color: 'var(--accent)' }}>
                         {a.icon || '•'} {a.label || a.slug}
                       </span>
@@ -381,7 +381,7 @@ export default function GymDrawer({ gymId, onClose }) {
               {/* ── Reviews ──────────────────────────────────────────────────── */}
               <div className="drawer-section">
                 <div className="drawer-section-title">Reviews</div>
-                {(gym.reviews || []).length > 0 ? gym.reviews.slice(0, 5).map((r, i) => (
+                {(space.reviews || []).length > 0 ? space.reviews.slice(0, 5).map((r, i) => (
                   <div key={i} style={{ padding: '8px 0', borderBottom: '1px solid rgba(75,85,99,0.1)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                       <span style={{ fontWeight: 600, fontSize: 12 }}>{r.authorName || 'Anonymous'}</span>
@@ -395,17 +395,17 @@ export default function GymDrawer({ gymId, onClose }) {
               </div>
 
               {/* ── Photo Gallery (AI Enriched) ──────────────────────────────────────────────── */}
-              {gym.photos && gym.photos.length > 0 && (
+              {space.photos && space.photos.length > 0 && (
                 <div className="drawer-section">
                   <div className="drawer-section-title">
-                    Media Gallery <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>({gym.photos.length})</span>
+                    Media Gallery <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>({space.photos.length})</span>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8, marginTop: 8 }}>
-                    {gym.photos.map((photo, i) => (
+                    {space.photos.map((photo, i) => (
                       <div key={i} style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', height: 120, background: '#1f2937' }}>
                         <img 
                           src={photo.thumbnailUrl || photo.url} 
-                          alt="Gym" 
+                          alt="Space" 
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           loading="lazy"
                         />
@@ -436,7 +436,7 @@ export default function GymDrawer({ gymId, onClose }) {
                 </div>
               )}
 
-              <div style={{ marginTop: 16, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>ID: {gym._id}</div>
+              <div style={{ marginTop: 16, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>ID: {space._id}</div>
             </>
           )}
         </div>

@@ -17,8 +17,8 @@ export default function ChangeFeed({ changes = [], loading = false }) {
       {changes.map((c, i) => {
         const s = SEVERITY_STYLES[c.severity] || SEVERITY_STYLES.info;
         const Icon = s.icon;
-        const gymName = c.gymId?.name || 'Unknown Gym';
-        const area = c.gymId?.areaName || '';
+        const spaceName = c.spaceId?.name || 'Unknown Space';
+        const area = c.spaceId?.areaName || '';
         return (
           <motion.div
             key={c._id || i}
@@ -33,7 +33,7 @@ export default function ChangeFeed({ changes = [], loading = false }) {
             <Icon size={15} style={{ color: s.color, flexShrink: 0, marginTop: 2 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--text-primary)' }}>{gymName}</span>
+                <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--text-primary)' }}>{spaceName}</span>
                 <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--mono)', flexShrink: 0 }}>
                   {new Date(c.changedAt).toLocaleDateString()}
                 </span>

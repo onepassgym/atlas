@@ -1,6 +1,6 @@
 'use strict';
 const { getDistance } = require('geolib');
-const Gym    = require('../db/spaceModel');
+const Space    = require('../db/spaceModel');
 const cfg    = require('../../config');
 const logger = require('./logger');
 
@@ -10,7 +10,7 @@ function normalizeName(name = '') {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
-    .replace(/\b(gym|fitness|studio|centre|center|club|the|and|&|pvt|ltd|inc)\b/g, '')
+    .replace(/\b(space|fitness|studio|centre|center|club|the|and|&|pvt|ltd|inc)\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -26,13 +26,13 @@ function jaccardSim(a, b) {
 async function findDuplicate({ placeId, name, lat, lng, address }) {
   // 1. Exact placeId
   if (placeId) {
-    const found = await Gym.findOne({ placeId }).lean();
-    if (found) return { gym: found, confidence: 'high', method: 'placeId' };
+    const found = await Space.findOne({ placeId }).lean();
+    if (found) return { space: found, confidence: 'high', method: 'placeId' };
   }
 
   // 2. Spatial proximity ($nearSphere) + name similarity
   if (lat && lng) {
-    const nearby = await Gym.find({
+    const nearby = await Space.find({
       location: {
         $nearSphere: {
           $geometry: { type: 'Point', coordinates: [lng, lat] },
@@ -50,7 +50,7 @@ async function findDuplicate({ placeId, name, lat, lng, address }) {
       
       const sim = jaccardSim(name, c.name);
       if (sim >= 0.45) {
-        return { gym: c, confidence: dist < 15 ? 'high' : 'medium', method: 'geoNear+name', dist, sim };
+        return { space: c, confidence: dist < 15 ? 'high' : 'medium', method: 'geoNear+name', dist, sim };
       }
     }
   }
@@ -58,24 +58,24 @@ async function findDuplicate({ placeId, name, lat, lng, address }) {
   // 3. Name + partial address
   if (name && address) {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const found = await Gym.findOne({
+    const found = await Space.findOne({
       name:    { $regex: new RegExp(`^${escaped}$`, 'i') },
       address: { $regex: new RegExp(address.slice(0, 25), 'i') },
     }).lean();
-    if (found) return { gym: found, confidence: 'medium', method: 'name+address' };
+    if (found) return { space: found, confidence: 'medium', method: 'name+address' };
   }
 
   return null;
 }
 
 /**
- * Merge scraped data into existing gym — only fills missing fields.
+ * Merge scraped data into existing space — only fills missing fields.
  * 
  * @deprecated This function is no longer used in the main pipeline.
- * Dedup + merge logic has been integrated into upsertGym.js.
+ * Dedup + merge logic has been integrated into upsertSpace.js.
  * Kept here only for potential standalone script usage.
  */
-function mergeGymData(existing, incoming) {
+function mergeSpaceData(existing, incoming) {
   const set = {};
   const filled = [];
 
@@ -151,4 +151,4 @@ function mergeGymData(existing, incoming) {
   return { set, newPhotos, filledFields: filled };
 }
 
-module.exports = { findDuplicate, mergeGymData, jaccardSim };
+module.exports = { findDuplicate, mergeSpaceData, jaccardSim };

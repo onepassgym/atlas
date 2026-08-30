@@ -4,10 +4,10 @@
  * enrichmentWorker.js — Continuous Enrichment Loop Worker
  *
  * Runs as a standalone process (npm run worker:enrich) that:
- *   1. Checks for priority gym IDs in the Redis priority queue
- *   2. If none, picks the oldest-updated gym from MongoDB
- *   3. Opens browser, re-scrapes the gym's Google Maps page
- *   4. Updates the gym document with enriched data
+ *   1. Checks for priority space IDs in the Redis priority queue
+ *   2. If none, picks the oldest-updated space from MongoDB
+ *   3. Opens browser, re-scrapes the space's Google Maps page
+ *   4. Updates the space document with enriched data
  *   5. Sleeps briefly, then repeats
  *
  * Respects pause/resume flag — when paused, polls every 5s until resumed.
@@ -16,15 +16,15 @@
 require('dotenv').config();
 
 const { connectDB } = require('../db/connection');
-const Gym = require('../db/spaceModel');
+const Space = require('../db/spaceModel');
 const SystemState = require('../db/systemStateModel');
 const EnrichmentLog = require('../db/enrichmentLogModel');
-const { BrowserManager, scrapeGymDetail, scrapeSelective } = require('../scraper/googleMapsScraper');
+const { BrowserManager, scrapeSpaceDetail, scrapeSelective } = require('../scraper/googleMapsScraper');
 const { scrapeWebsitePhotos } = require('../scraper/websiteScraper');
-const { processGym } = require('../scraper/gymProcessor');
+const { processSpace } = require('../scraper/spaceProcessor');
 const {
   isPaused,
-  popPriorityGym,
+  popPrioritySpace,
   setStatus,
   getStatus,
 } = require('../services/enrichmentService');
@@ -32,7 +32,7 @@ const cfg = require('../../config');
 const logger = require('../utils/logger');
 const bus = require('../services/eventBus');
 
-const DELAY_BETWEEN_GYMS = parseInt(process.env.ENRICHMENT_DELAY || '3000', 10);
+const DELAY_BETWEEN_SPACES = parseInt(process.env.ENRICHMENT_DELAY || '3000', 10);
 const PAUSE_POLL_INTERVAL = 5000;
 const BATCH_SIZE = parseInt(process.env.ENRICHMENT_BATCH_SIZE || '10', 10);
 const MAX_ERRORS_BEFORE_COOLDOWN = 5;
@@ -60,23 +60,23 @@ function checkDayRollover() {
 }
 
 /**
- * Get the next gym to enrich:
- *   1. Priority queue (Redis) — specific gym requested by user
- *   2. Oldest updatedAt gym from MongoDB (FIFO enrichment)
+ * Get the next space to enrich:
+ *   1. Priority queue (Redis) — specific space requested by user
+ *   2. Oldest updatedAt space from MongoDB (FIFO enrichment)
  */
-async function getNextGym() {
+async function getNextSpace() {
   // 1. Check priority queue
-  const priority = await popPriorityGym();
+  const priority = await popPrioritySpace();
   if (priority) {
-    const gym = await Gym.findById(priority.gymId).lean();
-    if (gym) {
-      return { gym, source: 'priority', gymName: priority.gymName, sections: priority.sections || ['all'] };
+    const space = await Space.findById(priority.spaceId).lean();
+    if (space) {
+      return { space, source: 'priority', spaceName: priority.spaceName, sections: priority.sections || ['all'] };
     }
-    logger.warn(`Priority gym ${priority.gymId} not found in DB — skipping`);
+    logger.warn(`Priority space ${priority.spaceId} not found in DB — skipping`);
   }
 
-  // 2. Pick oldest-updated gym that isn't permanently closed
-  const gym = await Gym.findOne({
+  // 2. Pick oldest-updated space that isn't permanently closed
+  const space = await Space.findOne({
     permanentlyClosed: { $ne: true },
     googleMapsUrl: { $exists: true, $ne: null },
   })
@@ -84,44 +84,44 @@ async function getNextGym() {
     .select('_id name slug areaName googleMapsUrl updatedAt')
     .lean();
 
-  return gym ? { gym, source: 'queue', sections: ['all'] } : null;
+  return space ? { space, source: 'queue', sections: ['all'] } : null;
 }
 
 /**
- * Enrich a single gym by re-scraping its Google Maps page.
+ * Enrich a single space by re-scraping its Google Maps page.
  */
-async function enrichGym(browser, gym, source, sections = ['all']) {
+async function enrichSpace(browser, space, source, sections = ['all']) {
   const startTime = Date.now();
-  const gymName = gym.name || 'Unknown';
-  const gymId = gym._id.toString();
+  const spaceName = space.name || 'Unknown';
+  const spaceId = space._id.toString();
   const isSelective = !sections.includes('all') && !sections.includes('deep');
   const sectionLabel = isSelective ? sections.join(', ') : (sections.includes('deep') ? 'deep' : 'full');
 
-  bus.publish('enrichment:gym-start', {
-    gymId,
-    gymName,
+  bus.publish('enrichment:space-start', {
+    spaceId,
+    spaceName,
     source,
     sections,
-    url: gym.googleMapsUrl,
-    updatedAt: gym.updatedAt,
+    url: space.googleMapsUrl,
+    updatedAt: space.updatedAt,
   });
 
-  logger.info(`  🔄 Enriching: ${gymName} [${source}] [${sectionLabel}] (last updated: ${gym.updatedAt ? new Date(gym.updatedAt).toLocaleDateString() : 'never'})`);
+  logger.info(`  🔄 Enriching: ${spaceName} [${source}] [${sectionLabel}] (last updated: ${space.updatedAt ? new Date(space.updatedAt).toLocaleDateString() : 'never'})`);
 
   const page = await browser.newPage();
 
   try {
     // Use selective scraper for targeted sections, full scraper otherwise
     const scraped = isSelective
-      ? await scrapeSelective(page, gym.googleMapsUrl, sections)
-      : await scrapeGymDetail(page, gym.googleMapsUrl, sections.includes('deep') ? 'deep' : 'standard');
+      ? await scrapeSelective(page, space.googleMapsUrl, sections)
+      : await scrapeSpaceDetail(page, space.googleMapsUrl, sections.includes('deep') ? 'deep' : 'standard');
 
     if (!scraped?.name) {
-      throw new Error('Could not extract gym data from page');
+      throw new Error('Could not extract space data from page');
     }
 
     // ── Multi-Source Data Fusion: Extract supplementary photos from official website
-    const websiteUrl = scraped.website || gym.contact?.website;
+    const websiteUrl = scraped.website || space.contact?.website;
     if (websiteUrl && sections.includes('photos') || sections.includes('all')) {
       try {
         const websitePhotos = await scrapeWebsitePhotos(page, websiteUrl);
@@ -134,12 +134,12 @@ async function enrichGym(browser, gym, source, sections = ['all']) {
     }
 
     // Process and upsert the enriched data
-    const result = await processGym(scraped, gym.areaName || '', `enrich:${gymId}`, true);
+    const result = await processSpace(scraped, space.areaName || '', `enrich:${spaceId}`, true);
     const duration = Date.now() - startTime;
 
-    // ── Update Gym Meta ──
+    // ── Update Space Meta ──
     try {
-      await Gym.findByIdAndUpdate(gymId, {
+      await Space.findByIdAndUpdate(spaceId, {
         $set: {
           'enrichmentMeta.lastAttempt': new Date(startTime),
           'enrichmentMeta.lastSuccess': new Date(),
@@ -148,13 +148,13 @@ async function enrichGym(browser, gym, source, sections = ['all']) {
           'enrichmentMeta.error': null,
         }
       });
-    } catch (e) { logger.warn(`Failed to update gym meta for ${gymId}: ${e.message}`); }
+    } catch (e) { logger.warn(`Failed to update space meta for ${spaceId}: ${e.message}`); }
 
     // ── Create History Log ──
     try {
       await EnrichmentLog.create({
-        gymId,
-        gymName: scraped.name,
+        spaceId,
+        spaceName: scraped.name,
         status: 'success',
         durationMs: duration,
         startedAt: new Date(startTime),
@@ -163,14 +163,14 @@ async function enrichGym(browser, gym, source, sections = ['all']) {
         photosAdded: result.newPhotos || 0,
         reviewsAdded: result.newReviews || 0
       });
-    } catch (e) { logger.warn(`Failed to create enrichment log for ${gymId}: ${e.message}`); }
+    } catch (e) { logger.warn(`Failed to create enrichment log for ${spaceId}: ${e.message}`); }
 
     processedTotal++;
     processedToday++;
 
-    bus.publish('enrichment:gym-done', {
-      gymId,
-      gymName: scraped.name,
+    bus.publish('enrichment:space-done', {
+      spaceId,
+      spaceName: scraped.name,
       source,
       action: result.action,
       duration,
@@ -181,11 +181,11 @@ async function enrichGym(browser, gym, source, sections = ['all']) {
     return { success: true, action: result.action, duration };
   } catch (err) {
     const duration = Date.now() - startTime;
-    logger.warn(`  ❌ Enrichment failed for "${gymName}": ${err.message}`);
+    logger.warn(`  ❌ Enrichment failed for "${spaceName}": ${err.message}`);
 
-    // ── Update Gym Meta (Fail) ──
+    // ── Update Space Meta (Fail) ──
     try {
-      await Gym.findByIdAndUpdate(gymId, {
+      await Space.findByIdAndUpdate(spaceId, {
         $set: {
           'enrichmentMeta.lastAttempt': new Date(startTime),
           'enrichmentMeta.status': 'failed',
@@ -193,31 +193,31 @@ async function enrichGym(browser, gym, source, sections = ['all']) {
         },
         $inc: { 'enrichmentMeta.consecutiveErrors': 1 }
       });
-    } catch (e) { logger.warn(`Failed to update gym fail meta for ${gymId}: ${e.message}`); }
+    } catch (e) { logger.warn(`Failed to update space fail meta for ${spaceId}: ${e.message}`); }
 
     // ── Create History Log (Fail) ──
     try {
       await EnrichmentLog.create({
-        gymId,
-        gymName,
+        spaceId,
+        spaceName,
         status: 'failed',
         error: err.message,
         durationMs: duration,
         startedAt: new Date(startTime),
         finishedAt: new Date(),
       });
-    } catch (e) { logger.warn(`Failed to create enrichment fail log for ${gymId}: ${e.message}`); }
+    } catch (e) { logger.warn(`Failed to create enrichment fail log for ${spaceId}: ${e.message}`); }
 
-    bus.publish('enrichment:gym-failed', {
-      gymId,
-      gymName,
+    bus.publish('enrichment:space-failed', {
+      spaceId,
+      spaceName,
       error: err.message.slice(0, 120),
       duration,
     });
 
-    // Touch updatedAt so this gym goes to the back of the queue
+    // Touch updatedAt so this space goes to the back of the queue
     try {
-      await Gym.findByIdAndUpdate(gym._id, { $set: { updatedAt: new Date() } });
+      await Space.findByIdAndUpdate(space._id, { $set: { updatedAt: new Date() } });
     } catch (_) {}
 
     return { success: false, error: err.message, duration };
@@ -231,7 +231,7 @@ async function enrichGym(browser, gym, source, sections = ['all']) {
 async function runLoop() {
   await connectDB();
   logger.info('\n🔁 Enrichment Worker started');
-  logger.info(`   • Delay between gyms: ${DELAY_BETWEEN_GYMS}ms`);
+  logger.info(`   • Delay between spaces: ${DELAY_BETWEEN_SPACES}ms`);
   logger.info(`   • Batch size: ${BATCH_SIZE}`);
   logger.info(`   • Cooldown after ${MAX_ERRORS_BEFORE_COOLDOWN} errors\n`);
 
@@ -277,10 +277,10 @@ async function runLoop() {
       await setStatus({ state: 'running', processedTotal, processedToday });
     }
 
-    // ── Get next gym ─────────────────────────────────────────────────────
-    const next = await getNextGym();
+    // ── Get next space ─────────────────────────────────────────────────────
+    const next = await getNextSpace();
     if (!next) {
-      logger.info('  💤 No gyms to enrich — sleeping 30s...');
+      logger.info('  💤 No spaces to enrich — sleeping 30s...');
       await setStatus({ state: 'idle', processedTotal, processedToday });
       await sleep(30000);
       continue;
@@ -292,8 +292,8 @@ async function runLoop() {
       await browser.launch();
     }
 
-    // ── Enrich the gym ───────────────────────────────────────────────────
-    const result = await enrichGym(browser, next.gym, next.source, next.sections);
+    // ── Enrich the space ───────────────────────────────────────────────────
+    const result = await enrichSpace(browser, next.space, next.source, next.sections);
 
     if (result.success) {
       consecutiveErrors = 0;
@@ -319,13 +319,13 @@ async function runLoop() {
       state: 'running',
       processedTotal,
       processedToday,
-      lastGym: next.gym.name,
+      lastSpace: next.space.name,
       lastAction: result.action || 'failed',
       lastDuration: result.duration,
     });
 
-    // ── Inter-gym delay (human-like) ─────────────────────────────────────
-    await randomDelay(DELAY_BETWEEN_GYMS, DELAY_BETWEEN_GYMS * 1.5);
+    // ── Inter-space delay (human-like) ─────────────────────────────────────
+    await randomDelay(DELAY_BETWEEN_SPACES, DELAY_BETWEEN_SPACES * 1.5);
   }
 
   // ── Cleanup ────────────────────────────────────────────────────────────

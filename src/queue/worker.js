@@ -3,11 +3,11 @@ require('dotenv').config();
 
 const { Worker } = require('bullmq');
 const { connectDB }   = require('../db/connection');
-const { BrowserManager, searchGymsInCity, searchGymsInGrid, scrapeGymDetail, scrapeEnrichmentDetail, FITNESS_CATEGORIES, isBlocked } = require('../scraper/googleMapsScraper');
-const { processGym }  = require('../scraper/gymProcessor');
+const { BrowserManager, searchSpacesInCity, searchSpacesInGrid, scrapeSpaceDetail, scrapeEnrichmentDetail, FITNESS_CATEGORIES, isBlocked } = require('../scraper/googleMapsScraper');
+const { processSpace }  = require('../scraper/spaceProcessor');
 const { processEnrichmentJob } = require('../scraper/enrichmentProcessor');
 const CrawlJob        = require('../db/crawlJobModel');
-const Gym             = require('../db/spaceModel');
+const Space             = require('../db/spaceModel');
 const SystemState     = require('../db/systemStateModel');
 const { isJobCancelled, clearCancelFlag, addBatchScrapeJob, enrichmentQueue } = require('./queues');
 const cfg             = require('../../config');
@@ -134,7 +134,7 @@ class AdaptiveThrottle {
  * @param {BrowserManager} browser  - Active BrowserManager instance
  * @param {string[]}       urls     - Full list of URLs to process
  * @param {string}         jobId    - For cancellation checks and DB updates
- * @param {string}         cityName - City label for processGym
+ * @param {string}         cityName - City label for processSpace
  * @param {object}         stats    - Shared stats object (mutated in place)
  * @param {object}         bullJob  - BullMQ job for progress updates
  * @param {string}         mode     - Scrape mode: 'fast' | 'standard' | 'deep'
@@ -183,20 +183,20 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
 
       await bullJob.updateProgress(25 + Math.floor((idx / total) * 75));
 
-      // Publish gym-start event
-      bus.publish('crawl:gym-start', { jobId, url: urlShort, urlIndex: idx, total });
-      const gymStartTime = Date.now();
+      // Publish space-start event
+      bus.publish('crawl:space-start', { jobId, url: urlShort, urlIndex: idx, total });
+      const spaceStartTime = Date.now();
 
       let scraped = null;
       let lastError = null;
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try { scraped = await scrapeGymDetail(page, url, mode); break; }
+        try { scraped = await scrapeSpaceDetail(page, url, mode); break; }
         catch (err) {
           lastError = err;
           const isBlock = err.message.includes('Google blocked');
           logger.warn(`  ⚠  Attempt ${attempt}/${MAX_RETRIES} [${url.slice(-40)}]: ${err.message}`);
-          bus.publish('crawl:gym-failed', { jobId, url: urlShort, error: err.message.slice(0, 120), attempt, maxRetries: MAX_RETRIES, isBlock });
+          bus.publish('crawl:space-failed', { jobId, url: urlShort, error: err.message.slice(0, 120), attempt, maxRetries: MAX_RETRIES, isBlock });
 
           // If Google blocked us, add a MUCH longer backoff
           if (isBlock) {
@@ -216,7 +216,7 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
         throttle.onFailure(false, jobId);
         await updateJob(jobId, {
           $inc: { 'progress.failed': 1, errorCount: 1 },
-          $push: { jobErrors: { message: lastError?.message || 'Could not extract gym data', url, at: new Date() } },
+          $push: { jobErrors: { message: lastError?.message || 'Could not extract space data', url, at: new Date() } },
         });
 
         // Adaptive backoff: if many consecutive failures, Google is likely blocking
@@ -231,27 +231,27 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
 
       // Success — let throttle speed up if appropriate
       throttle.onSuccess(jobId);
-      const gymDuration = Date.now() - gymStartTime;
-      bus.publish('crawl:gym-done', { jobId, gymName: scraped.name, url: urlShort, action: 'pending', duration: gymDuration });
+      const spaceDuration = Date.now() - spaceStartTime;
+      bus.publish('crawl:space-done', { jobId, spaceName: scraped.name, url: urlShort, action: 'pending', duration: spaceDuration });
 
-      const res = await processGym(scraped, cityName, jobId, true);
+      const res = await processSpace(scraped, cityName, jobId, true);
 
       if (res.action === 'created') {
         stats.created++;
-        await updateJob(jobId, { $inc: { 'progress.newGyms': 1, 'progress.scraped': 1 }, $push: { gymIds: res.gymId } });
-        bus.publish('gym:created', { name: scraped.name, area: cityName, gymId: String(res.gymId) });
+        await updateJob(jobId, { $inc: { 'progress.newSpaces': 1, 'progress.scraped': 1 }, $push: { spaceIds: res.spaceId } });
+        bus.publish('space:created', { name: scraped.name, area: cityName, spaceId: String(res.spaceId) });
       }
       if (res.action === 'updated') {
         stats.updated++;
-        await updateJob(jobId, { $inc: { 'progress.updatedGyms': 1, 'progress.scraped': 1 }, $push: { gymIds: res.gymId } });
-        bus.publish('gym:updated', { name: scraped.name, area: cityName, gymId: String(res.gymId), changes: 1 });
+        await updateJob(jobId, { $inc: { 'progress.updatedSpaces': 1, 'progress.scraped': 1 }, $push: { spaceIds: res.spaceId } });
+        bus.publish('space:updated', { name: scraped.name, area: cityName, spaceId: String(res.spaceId), changes: 1 });
       }
       if (res.action === 'skipped') { stats.skipped++; await updateJob(jobId, { $inc: { 'progress.skipped': 1 } }); }
       if (res.action === 'error')   {
         stats.failed++;
         await updateJob(jobId, {
           $inc: { 'progress.failed': 1, errorCount: 1 },
-          $push: { jobErrors: { message: res.error || 'processGym error', url, at: new Date() } },
+          $push: { jobErrors: { message: res.error || 'processSpace error', url, at: new Date() } },
         });
       }
 
@@ -274,7 +274,7 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
 /**
  * Opens SEARCH_POOL browser pages simultaneously and splits 'categories'
  * across them using work-stealing so all pages stay busy.
- * Returns a Set of unique gym URLs found across all categories.
+ * Returns a Set of unique space URLs found across all categories.
  */
 async function searchAllCategories(browser, cityName, categories, jobId, bullJob) {
   const cats    = Array.isArray(categories) ? categories : FITNESS_CATEGORIES;
@@ -299,7 +299,7 @@ async function searchAllCategories(browser, cityName, categories, jobId, bullJob
 
       bus.publish('crawl:search-start', { jobId, cityName, category: cat, categoryIndex: ci, totalCategories: cats.length });
       try {
-        const urls = await searchGymsInCity(page, cityName, cat);
+        const urls = await searchSpacesInCity(page, cityName, cat);
         urls.forEach(u => allUrls.add(u));
         bus.publish('crawl:search-done', { jobId, cityName, category: cat, urlsFound: urls.length, totalUnique: allUrls.size });
         await bullJob.updateProgress(Math.floor(((ci + 1) / categories.length) * 25));
@@ -319,9 +319,9 @@ async function searchAllCategories(browser, cityName, categories, jobId, bullJob
 
 // ── Phase 7: Pre-filter URLs already crawled recently ────────────────────────
 /**
- * Loads googleMapsUrl values for gyms in this city that were crawled
+ * Loads googleMapsUrl values for spaces in this city that were crawled
  * within SKIP_RECENT_DAYS. Removes those from the URL list so we
- * don't waste scrape time on unchanged gyms.
+ * don't waste scrape time on unchanged spaces.
  */
 async function preFilterUrls(urls, cityName) {
   if (!SKIP_RECENT_DAYS || SKIP_RECENT_DAYS <= 0) return [...urls];
@@ -329,7 +329,7 @@ async function preFilterUrls(urls, cityName) {
   try {
     const cutoff = new Date(Date.now() - SKIP_RECENT_DAYS * 86_400_000);
 
-    const recentGyms = await Gym.aggregate([
+    const recentSpaces = await Space.aggregate([
       {
         $match: {
           areaName: { $regex: new RegExp(cityName.split(',')[0].trim(), 'i') },
@@ -350,7 +350,7 @@ async function preFilterUrls(urls, cityName) {
     ]);
 
     const knownUrls = new Set(
-      recentGyms
+      recentSpaces
         .map(g => g.googleMapsUrl)
         .filter(Boolean)
         .map(u => u.split('?')[0].split('/@')[0])
@@ -372,7 +372,7 @@ async function preFilterUrls(urls, cityName) {
 
 // ── City crawl job handler (Phase 9: discovery-only → enqueue batches) ───────
 //
-// The city job no longer scrapes any gym details itself.
+// The city job no longer scrapes any space details itself.
 // It opens a browser, searches all categories (parallel), pre-filters URLs,
 // splits them into BATCH_SIZE chunks, and enqueues each chunk as a separate
 // 'batch-scrape' BullMQ job. Multiple worker replicas then pick up batches
@@ -482,7 +482,7 @@ async function searchAllCategoriesForGrid(browser, lat, lng, zoom, regionName, c
 
       bus.publish('crawl:search-start', { jobId, regionName, category: cat, categoryIndex: ci, totalCategories: cats.length });
       try {
-        const urls = await searchGymsInGrid(page, lat, lng, zoom, cat);
+        const urls = await searchSpacesInGrid(page, lat, lng, zoom, cat);
         urls.forEach(u => allUrls.add(u));
         bus.publish('crawl:search-done', { jobId, regionName, category: cat, urlsFound: urls.length, totalUnique: allUrls.size });
         await bullJob.updateProgress(Math.floor(((ci + 1) / categories.length) * 25));
@@ -669,17 +669,17 @@ async function processBatchJob(job) {
   }
 }
 
-// ── Gym-name crawl job handler ───────────────────────────────────────────────
+// ── Space-name crawl job handler ───────────────────────────────────────────────
 
-async function processGymNameJob(job) {
+async function processSpaceNameJob(job) {
   const { jobId, input } = job.data;
-  const { spaceName, gymName, mode = 'standard' } = input;
-  const targetName = spaceName || gymName;
+  const { spaceName, mode = 'standard' } = input;
+  const targetName = spaceName;
   const startTime = Date.now();
 
   await connectDB();
   await updateJob(jobId, { status: 'running', startedAt: new Date(), bullJobId: String(job.id) });
-  bus.publish('job:started', { jobId, type: 'gym_name', spaceName: targetName, mode });
+  bus.publish('job:started', { jobId, type: 'space_name', spaceName: targetName, mode });
 
   const browser = new BrowserManager();
   const stats   = { created: 0, updated: 0, failed: 0 };
@@ -689,30 +689,30 @@ async function processGymNameJob(job) {
     await browser.launch();
     const page = await browser.newPage();
     await job.updateProgress(10);
-    const urls = await searchGymsInCity(page, targetName, '');
+    const urls = await searchSpacesInCity(page, targetName, '');
 
     // ── Fallback search when exact-name returns 0 URLs ─────────────────────
     // If Google Maps found nothing for the verbatim name (e.g. no results
     // page, or not indexed under that exact name), try progressively shorter
     // name variants before falling back to a broader locality-category search.
-    // This handles small local gyms that aren't indexed by full name but ARE
+    // This handles small local spaces that aren't indexed by full name but ARE
     // discoverable by partial name or by browsing the locality.
     if (urls.length === 0) {
-      logger.warn(`  ⚠️  Gym-name search returned 0 URLs for "${targetName}" — trying fallback strategies`);
+      logger.warn(`  ⚠️  Space-name search returned 0 URLs for "${targetName}" — trying fallback strategies`);
       await updateJob(jobId, {
         $push: { jobErrors: { message: `Initial name search returned 0 URLs, trying fallback strategies`, at: new Date() } },
       });
 
-      const GENERIC_WORDS = new Set(['gym', 'fitness', 'center', 'centre', 'studio', 'club', 'health', 'the', 'and']);
+      const GENERIC_WORDS = new Set(['space', 'fitness', 'center', 'centre', 'studio', 'club', 'health', 'the', 'and']);
       const nameParts = targetName.trim().split(/\s+/);
 
       // Strategy 1: Try progressively shorter name variants by dropping
-      // generic trailing words (e.g. "RK FITNESS GYM NAHAL" → "RK FITNESS NAHAL" → "RK NAHAL")
+      // generic trailing words (e.g. "RK FITNESS SPACE NAHAL" → "RK FITNESS NAHAL" → "RK NAHAL")
       const meaningful = nameParts.filter(w => !GENERIC_WORDS.has(w.toLowerCase()));
       if (meaningful.length >= 2 && meaningful.length < nameParts.length) {
         const shortName = meaningful.join(' ');
         logger.info(`  🔄 Fallback 1: shortened name "${shortName}"`);
-        const fallback1 = await searchGymsInCity(page, shortName, '');
+        const fallback1 = await searchSpacesInCity(page, shortName, '');
         if (fallback1.length > 0) {
           logger.info(`  ✅ Fallback 1 found ${fallback1.length} URL(s)`);
           urls.push(...fallback1);
@@ -724,7 +724,7 @@ async function processGymNameJob(job) {
       if (urls.length === 0 && nameParts.length > 2) {
         const dropLast = nameParts.slice(0, -1).join(' ');
         logger.info(`  🔄 Fallback 2: name without last word "${dropLast}"`);
-        const fallback2 = await searchGymsInCity(page, dropLast, '');
+        const fallback2 = await searchSpacesInCity(page, dropLast, '');
         if (fallback2.length > 0) {
           logger.info(`  ✅ Fallback 2 found ${fallback2.length} URL(s)`);
           urls.push(...fallback2);
@@ -735,13 +735,13 @@ async function processGymNameJob(job) {
       if (urls.length === 0) {
         const locality = nameParts[nameParts.length - 1];
         if (locality && locality.length > 2 && !GENERIC_WORDS.has(locality.toLowerCase())) {
-          logger.info(`  🔄 Fallback 3: "gym in ${locality}"`);
-          const fallback3 = await searchGymsInCity(page, locality, 'gym');
+          logger.info(`  🔄 Fallback 3: "space in ${locality}"`);
+          const fallback3 = await searchSpacesInCity(page, locality, 'space');
           if (fallback3.length > 0) {
             logger.info(`  ✅ Fallback 3 found ${fallback3.length} URL(s)`);
             urls.push(...fallback3);
           } else {
-            logger.warn(`  ⚠️  All fallback strategies exhausted — gym may not be indexed on Google Maps`);
+            logger.warn(`  ⚠️  All fallback strategies exhausted — space may not be indexed on Google Maps`);
           }
         }
       }
@@ -758,14 +758,14 @@ async function processGymNameJob(job) {
       i++;
       await job.updateProgress(40 + Math.floor((i / Math.min(urls.length, 15)) * 60));
       try {
-        const scraped = await scrapeGymDetail(page, url, mode);
+        const scraped = await scrapeSpaceDetail(page, url, mode);
         if (!scraped?.name) continue;
-        const res = await processGym(scraped, targetName, jobId, true);
-        if (res.action === 'created') { stats.created++; await updateJob(jobId, { $inc: { 'progress.newGyms': 1, 'progress.scraped': 1 }, $push: { gymIds: res.gymId } }); }
-        if (res.action === 'updated') { stats.updated++; await updateJob(jobId, { $inc: { 'progress.updatedGyms': 1, 'progress.scraped': 1 }, $push: { gymIds: res.gymId } }); }
+        const res = await processSpace(scraped, targetName, jobId, true);
+        if (res.action === 'created') { stats.created++; await updateJob(jobId, { $inc: { 'progress.newSpaces': 1, 'progress.scraped': 1 }, $push: { spaceIds: res.spaceId } }); }
+        if (res.action === 'updated') { stats.updated++; await updateJob(jobId, { $inc: { 'progress.updatedSpaces': 1, 'progress.scraped': 1 }, $push: { spaceIds: res.spaceId } }); }
       } catch (err) {
         stats.failed++;
-        logger.warn(`gym-name job err: ${err.message}`);
+        logger.warn(`space-name job err: ${err.message}`);
         await updateJob(jobId, {
           $inc: { errorCount: 1 },
           $push: { jobErrors: { message: err.message, url, at: new Date() } },
@@ -798,18 +798,18 @@ async function processGymNameJob(job) {
   }
 }
 
-// ── Task 6: Gym enrichment job handler ────────────────────────────────────────
+// ── Task 6: Space enrichment job handler ────────────────────────────────────────
 async function processEnrichmentJobHandler(job) {
-  const { gymId, input = {} } = job.data;
+  const { spaceId, input = {} } = job.data;
   const { placeUrl, cityName } = input;
   const startTime = Date.now();
 
-  if (!gymId || !placeUrl) {
-    throw new Error('gym-enrichment job missing gymId or placeUrl');
+  if (!spaceId || !placeUrl) {
+    throw new Error('space-enrichment job missing spaceId or placeUrl');
   }
 
   await connectDB();
-  logger.info(`✨ [ENRICH] gym:${gymId} (${cityName || '?'}) — ${placeUrl.slice(-60)}`);
+  logger.info(`✨ [ENRICH] space:${spaceId} (${cityName || '?'}) — ${placeUrl.slice(-60)}`);
 
   const browser = new BrowserManager();
   try {
@@ -834,17 +834,17 @@ async function processEnrichmentJobHandler(job) {
     await job.updateProgress(75);
     if (!enriched) throw lastErr || new Error('scrapeEnrichmentDetail returned null');
 
-    const res = await processEnrichmentJob(enriched, gymId, job.id);
+    const res = await processEnrichmentJob(enriched, spaceId, job.id);
     await job.updateProgress(100);
     await browser.close();
 
     const durationMs = Date.now() - startTime;
     logger.info(`  [ENRICH] Done: action=${res.action} +${res.newReviews}rev +${res.newPhotos}photos (${(durationMs/1000).toFixed(1)}s)`);
-    return { gymId, ...res, durationMs };
+    return { spaceId, ...res, durationMs };
 
   } catch (err) {
     await browser.close();
-    logger.error(`  [ENRICH] FAILED gym:${gymId}: ${err.message}`);
+    logger.error(`  [ENRICH] FAILED space:${spaceId}: ${err.message}`);
     throw err;
   }
 }
@@ -854,13 +854,13 @@ async function processEnrichmentJobHandler(job) {
 async function start() {
   await connectDB();
 
-  // ── Crawl Worker (city-crawl, batch-scrape, gym-name-crawl) ───────────────
+  // ── Crawl Worker (city-crawl, batch-scrape, space-name-crawl) ───────────────
   const worker = new Worker('atlas-crawl', async (job) => {
     logger.info(`⚙️  Processing job: ${job.name} [${job.id}]`);
     if (job.name === 'city-crawl')     return processCityJob(job);
     if (job.name === 'grid-crawl')     return processGridJob(job);
     if (job.name === 'batch-scrape')   return processBatchJob(job);
-    if (job.name === 'gym-name-crawl') return processGymNameJob(job);
+    if (job.name === 'space-name-crawl') return processSpaceNameJob(job);
     throw new Error(`Unknown job name: ${job.name}`);
   }, {
     connection,
@@ -869,17 +869,17 @@ async function start() {
     lockRenewTime:     300_000,
   });
 
-  // ── Enrichment Worker (gym-enrichment) ────────────────────────────────
+  // ── Enrichment Worker (space-enrichment) ────────────────────────────────
   // Separate worker for the enrichment queue. Concurrency=1 per container
   // to avoid opening too many browser instances simultaneously.
   const enrichWorker = new Worker('atlas-enrichment', async (job) => {
     logger.info(`✨ Processing enrichment job: ${job.name} [${job.id}]`);
-    if (job.name === 'gym-enrichment') return processEnrichmentJobHandler(job);
+    if (job.name === 'space-enrichment') return processEnrichmentJobHandler(job);
     throw new Error(`Unknown enrichment job: ${job.name}`);
   }, {
     connection,
     concurrency: 1,            // 1 browser per enrichment worker
-    lockDuration:    1_800_000, // 30 min lock per gym (500 reviews takes time)
+    lockDuration:    1_800_000, // 30 min lock per space (500 reviews takes time)
     lockRenewTime:     300_000,
   });
 
@@ -897,7 +897,7 @@ async function start() {
   const shutdown = async (signal) => {
     if (isShuttingDown) return;
     isShuttingDown = true;
-    logger.info(`\n⏳ Received ${signal} — finishing current gym(s) and shutting down...`);
+    logger.info(`\n⏳ Received ${signal} — finishing current space(s) and shutting down...`);
 
     try { await worker.close(); } catch (_) {}
     try { await enrichWorker.close(); } catch (_) {}

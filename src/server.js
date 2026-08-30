@@ -60,6 +60,7 @@ app.use('/media', express.static(mediaPath, { maxAge: '7d' }));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/',           indexRoutes);
+app.use('/docs',       require('./api/docsRoutes'));
 
 // Base API authentication
 app.use('/api',        authMiddleware);
@@ -106,20 +107,20 @@ app.use((err, req, res, _next) => {
     startScheduler();
     startWebhookService();
 
-    // Seed gym chains if not already in DB
+    // Seed space chains if not already in DB
     try {
-      const GymChain = require('./db/gymChainModel');
+      const SpaceChain = require('./db/spaceChainModel');
       const chainsConfig = require('../config/chains.json');
       let seeded = 0;
       for (const chainData of chainsConfig) {
-        const result = await GymChain.findOneAndUpdate(
+        const result = await SpaceChain.findOneAndUpdate(
           { slug: chainData.slug },
           { $setOnInsert: chainData },
           { upsert: true, new: true, rawResult: true },
         );
         if (result.lastErrorObject?.updatedExisting === false) seeded++;
       }
-      if (seeded > 0) logger.info(`🌱 Seeded ${seeded} new gym chain(s)`);
+      if (seeded > 0) logger.info(`🌱 Seeded ${seeded} new space chain(s)`);
     } catch (seedErr) {
       logger.warn(`Chain seed skipped: ${seedErr.message}`);
     }

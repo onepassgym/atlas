@@ -295,7 +295,7 @@ export default function GlobePage() {
      focusRef.current = city.coords;
   };
 
-  const totalGyms = stats?.total || 0;
+  const totalSpaces = stats?.total || 0;
   const totalCities = stats?.topCities?.length || 0;
   const totalReviews = stats?.totalReviews || 0;
 
@@ -421,7 +421,7 @@ export default function GlobePage() {
           <div className="globe-glass-panel">
             {/* Quick Stats */}
             <div className="globe-stats-grid">
-              <StatBox icon={<Building2 size={16} />} label="Total Gyms" value={totalGyms} color="#3b82f6" />
+              <StatBox icon={<Building2 size={16} />} label="Total Spaces" value={totalSpaces} color="#3b82f6" />
               <StatBox icon={<MapPin size={16} />} label="Cities" value={totalCities} color="#8b5cf6" />
               <StatBox icon={<Dumbbell size={16} />} label="Reviews" value={totalReviews} color="#10b981" />
               <StatBox icon={<Search size={16} />} label="Nodes" value={dynamicMarkers.length} color="#06b6d4" />

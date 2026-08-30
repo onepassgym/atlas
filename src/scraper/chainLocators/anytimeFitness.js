@@ -2,7 +2,7 @@
 /**
  * Anytime Fitness Store Locator
  *
- * Fetches all gym locations from the Anytime Fitness website.
+ * Fetches all space locations from the Anytime Fitness website.
  * Uses their public API / sitemap endpoint to discover locations worldwide.
  */
 
@@ -14,7 +14,7 @@ const CHAIN_NAME = 'Anytime Fitness';
 
 // Anytime Fitness exposes a location search API
 const SEARCH_API = 'https://www.anytimefitness.com/wp-json/wp/v2/wp_gym_locations';
-const SEARCH_RADIUS_URL = 'https://www.anytimefitness.com/find-gym/';
+const SEARCH_RADIUS_URL = 'https://www.anytimefitness.com/find-space/';
 
 // Region centroids to sweep for global coverage
 const SEARCH_REGIONS = [
@@ -45,7 +45,7 @@ const SEARCH_REGIONS = [
 ];
 
 /**
- * Normalize a raw gym location into our standard format.
+ * Normalize a raw space location into our standard format.
  */
 function normalizeLocation(raw) {
   return {
@@ -119,7 +119,7 @@ async function fetchFromSearchApi() {
 
   for (const region of SEARCH_REGIONS) {
     try {
-      const { data } = await axios.get('https://www.anytimefitness.com/wp-json/anytime/v1/gyms', {
+      const { data } = await axios.get('https://www.anytimefitness.com/wp-json/anytime/v1/spaces', {
         params: {
           lat: region.lat,
           lng: region.lng,
@@ -133,16 +133,16 @@ async function fetchFromSearchApi() {
         },
       });
 
-      const gyms = Array.isArray(data) ? data : data?.gyms || data?.results || [];
-      for (const gym of gyms) {
-        const loc = normalizeLocation(gym);
+      const spaces = Array.isArray(data) ? data : data?.spaces || data?.results || [];
+      for (const space of spaces) {
+        const loc = normalizeLocation(space);
         const key = loc.storeId || `${loc.lat},${loc.lng}`;
         if (!allLocations.has(key)) {
           allLocations.set(key, loc);
         }
       }
 
-      logger.info(`  [AnytimeFitness] ${region.label}: ${gyms.length} gyms found (total unique: ${allLocations.size})`);
+      logger.info(`  [AnytimeFitness] ${region.label}: ${spaces.length} spaces found (total unique: ${allLocations.size})`);
     } catch (err) {
       logger.warn(`  [AnytimeFitness] Region ${region.label} failed: ${err.message}`);
     }

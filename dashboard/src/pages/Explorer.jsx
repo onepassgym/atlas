@@ -6,8 +6,8 @@ import {
   Building2, Tag, BarChart3, SlidersHorizontal, Sparkles,
   ArrowUpDown, TrendingUp, Hash
 } from 'lucide-react';
-import GymRow from '../components/GymRow';
-import GymDrawer from '../components/GymDrawer';
+import SpaceRow from '../components/SpaceRow';
+import SpaceDrawer from '../components/SpaceDrawer';
 import Pagination from '../components/Pagination';
 import Skeleton from '../components/Skeleton';
 import { api, getBaseUrl } from '../api/client';
@@ -56,12 +56,12 @@ export default function Explorer() {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   // ── Data State ──
-  const [gyms, setGyms] = useState([]);
+  const [spaces, setSpaces] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [selectedGym, setSelectedGym] = useState(null);
+  const [selectedSpace, setSelectedSpace] = useState(null);
   const [categories, setCategories] = useState([]);
   const [cities, setCities] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -100,8 +100,8 @@ export default function Explorer() {
     return chips;
   }, [city, category, chain, rating, minReviews, chainOnly, chainsCache]);
 
-  // ── Fetch gyms ──
-  const searchGyms = useCallback(async (p = 1) => {
+  // ── Fetch spaces ──
+  const searchSpaces = useCallback(async (p = 1) => {
     setLoading(true);
     const params = new URLSearchParams();
     params.set('limit', LIMIT);
@@ -118,7 +118,7 @@ export default function Explorer() {
     try {
       const res = await api.get(`/api/spaces?${params.toString()}`);
       if (res?.success) {
-        setGyms(res.gyms || []);
+        setSpaces(res.spaces || []);
         setTotal(res.total || 0);
         setPage(res.page || 1);
         setPages(res.pages || 1);
@@ -126,7 +126,7 @@ export default function Explorer() {
         setSearchMode(res.searchMode || null);
       }
     } catch (e) {
-      toast('Failed to fetch gyms', 'error');
+      toast('Failed to fetch spaces', 'error');
     } finally {
       setLoading(false);
     }
@@ -167,8 +167,8 @@ export default function Explorer() {
     api.get('/api/spaces/cities').then(res => {
       if (res?.success) setCities(res.cities || []);
     }).catch(() => {});
-    searchGyms(1);
-  }, [loaded, searchGyms]);
+    searchSpaces(1);
+  }, [loaded, searchSpaces]);
 
   // ── Debounced search + suggestions ──
   const searchRef = useRef(search);
@@ -181,11 +181,11 @@ export default function Explorer() {
     
     // Trigger main search with longer debounce
     if (search.length >= 2 || search.length === 0) {
-      const handler = setTimeout(() => searchGyms(1), 500);
+      const handler = setTimeout(() => searchSpaces(1), 500);
       return () => { clearTimeout(handler); clearTimeout(sugHandler); };
     }
     return () => clearTimeout(sugHandler);
-  }, [search, searchGyms, fetchSuggestions]);
+  }, [search, searchSpaces, fetchSuggestions]);
 
   // ── Close suggestions on outside click ──
   useEffect(() => {
@@ -206,48 +206,48 @@ export default function Explorer() {
     setRecentSearches(getRecentSearches());
     setShowSuggestions(false);
     if (term) setSearch(term);
-    setTimeout(() => searchGyms(1), 0);
+    setTimeout(() => searchSpaces(1), 0);
   };
 
   const handleSuggestionClick = (suggestion) => {
-    if (suggestion.type === 'gym') {
-      setSelectedGym(suggestion.id);
+    if (suggestion.type === 'space') {
+      setSelectedSpace(suggestion.id);
       setShowSuggestions(false);
     } else if (suggestion.type === 'area') {
       setCity(suggestion.name);
       setSearch('');
       setShowSuggestions(false);
-      setTimeout(() => searchGyms(1), 0);
+      setTimeout(() => searchSpaces(1), 0);
     } else if (suggestion.type === 'chain') {
       setChain(suggestion.slug || '');
       setSearch('');
       setShowSuggestions(false);
-      setTimeout(() => searchGyms(1), 0);
+      setTimeout(() => searchSpaces(1), 0);
     }
   };
 
   const clearFilters = () => {
     setSearch(''); setCity(''); setCategory(''); setChain(''); setRating('');
     setSort('qualityScore'); setMinReviews(''); setChainOnly(false);
-    setTimeout(() => searchGyms(1), 0);
+    setTimeout(() => searchSpaces(1), 0);
   };
 
   const removeFilter = (key) => {
     const chip = activeFilters.find(f => f.key === key);
-    if (chip) { chip.clear(); setTimeout(() => searchGyms(1), 50); }
+    if (chip) { chip.clear(); setTimeout(() => searchSpaces(1), 50); }
   };
 
   const handleExport = () => {
     const a = document.createElement('a');
     a.href = `${getBaseUrl()}/api/spaces/export`;
-    a.download = 'gyms-export.json';
+    a.download = 'spaces-export.json';
     a.click();
     toast('Export started…', 'info');
   };
 
   const handleFilterChange = (setter) => (value) => {
     setter(value);
-    setTimeout(() => searchGyms(1), 0);
+    setTimeout(() => searchSpaces(1), 0);
   };
 
   return (
@@ -260,7 +260,7 @@ export default function Explorer() {
         <div className="explorer-search-header">
           <div className="explorer-search-title">
             <Sparkles size={20} className="explorer-search-icon" />
-            <span>Gym Explorer</span>
+            <span>Space Explorer</span>
           </div>
           <div className="explorer-search-actions">
             <button className="btn sm" onClick={handleExport} id="export-btn">
@@ -275,7 +275,7 @@ export default function Explorer() {
             <input
               className="explorer-search-input"
               type="text"
-              placeholder="Search gyms by name, area, chain, or address…"
+              placeholder="Search spaces by name, area, chain, or address…"
               value={search}
               onChange={e => { setSearch(e.target.value); setShowSuggestions(true); }}
               onFocus={() => setShowSuggestions(true)}
@@ -283,7 +283,7 @@ export default function Explorer() {
                 if (e.key === 'Enter') handleSearchSubmit();
                 if (e.key === 'Escape') setShowSuggestions(false);
               }}
-              id="gym-search-input"
+              id="space-search-input"
               autoComplete="off"
             />
             {search && (
@@ -336,11 +336,11 @@ export default function Explorer() {
                     {!suggestionsLoading && suggestions.length === 0 && (
                       <div className="suggestion-empty">No suggestions found</div>
                     )}
-                    {!suggestionsLoading && suggestions.filter(s => s.type === 'gym').length > 0 && (
+                    {!suggestionsLoading && suggestions.filter(s => s.type === 'space').length > 0 && (
                       <div className="suggestion-section">
-                        <div className="suggestion-section-header"><span><Building2 size={12} /> Gyms</span></div>
-                        {suggestions.filter(s => s.type === 'gym').map((s, i) => (
-                          <div key={i} className="suggestion-item gym" onClick={() => handleSuggestionClick(s)}>
+                        <div className="suggestion-section-header"><span><Building2 size={12} /> Spaces</span></div>
+                        {suggestions.filter(s => s.type === 'space').map((s, i) => (
+                          <div key={i} className="suggestion-item space" onClick={() => handleSuggestionClick(s)}>
                             {s.thumbnail ? (
                               <img src={s.thumbnail} alt="" className="suggestion-thumb" />
                             ) : (
@@ -372,7 +372,7 @@ export default function Explorer() {
                             <div className="suggestion-item-content">
                               <div className="suggestion-item-name">{s.name}</div>
                               <div className="suggestion-item-meta">
-                                <span>{s.count} gyms</span>
+                                <span>{s.count} spaces</span>
                                 {s.avgRating && <span><Star size={10} /> {s.avgRating} avg</span>}
                               </div>
                             </div>
@@ -406,7 +406,7 @@ export default function Explorer() {
           <div className="explorer-search-stats-left">
             <span className="explorer-result-count">
               <Hash size={12} />
-              <strong>{total.toLocaleString()}</strong> gyms found
+              <strong>{total.toLocaleString()}</strong> spaces found
             </span>
             {searchTime != null && (
               <span className="explorer-search-time">
@@ -473,7 +473,7 @@ export default function Explorer() {
           <select
             className="explorer-sort-select"
             value={sort}
-            onChange={e => { setSort(e.target.value); setTimeout(() => searchGyms(1), 0); }}
+            onChange={e => { setSort(e.target.value); setTimeout(() => searchSpaces(1), 0); }}
           >
             <option value="qualityScore">Quality Score</option>
             <option value="rating">Rating</option>
@@ -499,7 +499,7 @@ export default function Explorer() {
                 <select
                   className="input explorer-filter-input"
                   value={city}
-                  onChange={e => { setCity(e.target.value); setTimeout(() => searchGyms(1), 0); }}
+                  onChange={e => { setCity(e.target.value); setTimeout(() => searchSpaces(1), 0); }}
                 >
                   <option value="">All Areas</option>
                   {cities.map(c => <option key={c.name} value={c.name}>{c.name} ({c.count})</option>)}
@@ -510,7 +510,7 @@ export default function Explorer() {
                 <select
                   className="input explorer-filter-input"
                   value={category}
-                  onChange={e => { setCategory(e.target.value); setTimeout(() => searchGyms(1), 0); }}
+                  onChange={e => { setCategory(e.target.value); setTimeout(() => searchSpaces(1), 0); }}
                 >
                   <option value="">All Categories</option>
                   {categories.map(c => <option key={c._id} value={c._id}>{formatCategory(c._id)} ({c.count})</option>)}
@@ -521,7 +521,7 @@ export default function Explorer() {
                 <select
                   className="input explorer-filter-input"
                   value={chain}
-                  onChange={e => { setChain(e.target.value); setTimeout(() => searchGyms(1), 0); }}
+                  onChange={e => { setChain(e.target.value); setTimeout(() => searchSpaces(1), 0); }}
                 >
                   <option value="">All Chains</option>
                   {chainsCache.map(c => <option key={c.slug} value={c.slug}>{c.name} ({c.totalLocations || 0})</option>)}
@@ -534,7 +534,7 @@ export default function Explorer() {
                     <button
                       key={r}
                       className={`explorer-rating-btn ${rating === r ? 'active' : ''}`}
-                      onClick={() => { setRating(r); setTimeout(() => searchGyms(1), 0); }}
+                      onClick={() => { setRating(r); setTimeout(() => searchSpaces(1), 0); }}
                     >
                       {r ? `${r}+` : 'Any'}
                     </button>
@@ -548,8 +548,8 @@ export default function Explorer() {
                   type="number" placeholder="0" min="0"
                   value={minReviews}
                   onChange={e => setMinReviews(e.target.value)}
-                  onBlur={() => searchGyms(1)}
-                  onKeyDown={e => e.key === 'Enter' && searchGyms(1)}
+                  onBlur={() => searchSpaces(1)}
+                  onKeyDown={e => e.key === 'Enter' && searchSpaces(1)}
                 />
               </FilterGroup>
 
@@ -557,7 +557,7 @@ export default function Explorer() {
                 <div className="explorer-toggle-wrap">
                   <div
                     className={`explorer-toggle ${chainOnly ? 'active' : ''}`}
-                    onClick={() => { setChainOnly(!chainOnly); setTimeout(() => searchGyms(1), 0); }}
+                    onClick={() => { setChainOnly(!chainOnly); setTimeout(() => searchSpaces(1), 0); }}
                   >
                     <div className="explorer-toggle-knob" />
                   </div>
@@ -576,15 +576,15 @@ export default function Explorer() {
         <div className="explorer-results-body">
           {loading ? (
             <Skeleton count={8} height={56} style={{ margin: '6px 14px' }} />
-          ) : gyms.length > 0 ? (
-            gyms.map((g, i) => (
+          ) : spaces.length > 0 ? (
+            spaces.map((g, i) => (
               <motion.div
                 key={g._id}
                 initial={{ opacity: 0, x: -12 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.2, delay: i * 0.02 }}
               >
-                <GymRow gym={g} onClick={setSelectedGym} searchTerm={search} />
+                <SpaceRow space={g} onClick={setSelectedSpace} searchTerm={search} />
               </motion.div>
             ))
           ) : (
@@ -592,7 +592,7 @@ export default function Explorer() {
               <div className="explorer-empty-icon">
                 <Search size={40} />
               </div>
-              <div className="explorer-empty-title">No gyms match your search</div>
+              <div className="explorer-empty-title">No spaces match your search</div>
               <div className="explorer-empty-desc">Try adjusting your filters or search terms</div>
               {(search || activeFilterCount > 0) && (
                 <button className="btn primary" onClick={clearFilters} style={{ marginTop: 16 }}>
@@ -602,10 +602,10 @@ export default function Explorer() {
             </div>
           )}
         </div>
-        <Pagination current={page} total={pages} onPage={p => searchGyms(p)} />
+        <Pagination current={page} total={pages} onPage={p => searchSpaces(p)} />
       </div>
 
-      {selectedGym && <GymDrawer gymId={selectedGym} onClose={() => setSelectedGym(null)} />}
+      {selectedSpace && <SpaceDrawer spaceId={selectedSpace} onClose={() => setSelectedSpace(null)} />}
     </motion.div>
   );
 }

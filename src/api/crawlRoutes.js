@@ -5,13 +5,13 @@ const { v4: uuidv4 } = require('uuid');
 const router   = express.Router();
 
 const { 
-  addCityJob, addGymNameJob, getQueueStats, getMediaQueueStats, getQueueJobStatus, 
+  addCityJob, addSpaceNameJob, getQueueStats, getQueueJobStatus, 
   clearCrawlQueue, requestCancelJob, removeBullJob, promoteJobToFront,
   removeJobAndBatches
 } = require('../queue/queues');
 const { FITNESS_CATEGORIES } = require('../scraper/googleMapsScraper');
 const CrawlJob = require('../db/crawlJobModel');
-const Gym      = require('../db/spaceModel');
+const Space      = require('../db/spaceModel');
 const logger   = require('../utils/logger');
 
 const { ok, err, validate } = require('../utils/apiUtils');
@@ -30,7 +30,7 @@ async function hasActiveJob(cityName) {
  * @swagger
  * tags:
  *   name: Crawl
- *   description: Gym and city crawling management
+ *   description: Space and city crawling management
  */
 
 /**
@@ -54,7 +54,7 @@ async function hasActiveJob(cityName) {
  *                 type: array
  *                 items:
  *                   type: string
- *                 example: ["gym", "fitness center"]
+ *                 example: ["space", "fitness center"]
  *               force:
  *                 type: boolean
  *                 description: Bypass active job guard
@@ -114,7 +114,7 @@ router.post('/city',
  *             properties:
  *               spaceName:
  *                 type: string
- *                 example: "Gold's Gym Andheri Mumbai"
+ *                 example: "Gold's Space Andheri Mumbai"
  *     responses:
  *       202:
  *         description: Space crawl queued successfully
@@ -127,9 +127,9 @@ router.post('/space',
     const { spaceName } = req.body;
     const jobId = uuidv4();
     try {
-      await CrawlJob.create({ jobId, type: 'gym_name', input: { spaceName }, status: 'queued' });
-      await addGymNameJob(jobId, spaceName);
-      bus.publish('job:queued', { jobId, type: 'gym_name', spaceName });
+      await CrawlJob.create({ jobId, type: 'space_name', input: { spaceName }, status: 'queued' });
+      await addSpaceNameJob(jobId, spaceName);
+      bus.publish('job:queued', { jobId, type: 'space_name', spaceName });
       ok(res, { message: `Space crawl queued for "${spaceName}"`, jobId, trackAt: `/api/crawl/status/${jobId}` }, 202);
     } catch (e) { logger.error(e.message); err(res, e.message); }
   }
@@ -280,7 +280,7 @@ router.get('/jobs',
  */
 // GET /api/crawl/queue/stats
 router.get('/queue/stats', async (req, res) => {
-  try { ok(res, { queue: await getQueueStats(), mediaQueue: await getMediaQueueStats() }); }
+  try { ok(res, { queue: await getQueueStats() }); }
   catch (e) { err(res, e.message); }
 });
 
@@ -496,7 +496,7 @@ router.post('/retry/incomplete',
     if (validate(req, res)) return;
     const threshold = req.body.threshold || 50;
     try {
-      const gyms = await Gym.aggregate([
+      const spaces = await Space.aggregate([
         {
           $addFields: {
             effectiveCompleteness: { $ifNull: ['$crawl.dataCompleteness', '$crawlMeta.dataCompleteness'] },
@@ -514,18 +514,18 @@ router.post('/retry/incomplete',
         { $project: { name: 1, areaName: 1 } },
         { $limit: 200 },
       ]);
-      if (!gyms.length) return ok(res, { message: `No gyms found with completeness < ${threshold}%` });
+      if (!spaces.length) return ok(res, { message: `No spaces found with completeness < ${threshold}%` });
 
       const jobs = [];
-      for (const g of gyms) {
+      for (const g of spaces) {
         const jobId = uuidv4();
         const spaceName = `${g.name} ${g.areaName || ''}`.trim();
-        await CrawlJob.create({ jobId, type: 'gym_name', input: { spaceName }, status: 'queued' });
-        await addGymNameJob(jobId, spaceName);
+        await CrawlJob.create({ jobId, type: 'space_name', input: { spaceName }, status: 'queued' });
+        await addSpaceNameJob(jobId, spaceName);
         jobs.push({ spaceName, jobId });
       }
-      logger.info(`Re-queued ${gyms.length} incomplete spaces via API`);
-      ok(res, { message: `Re-queued ${gyms.length} incomplete spaces`, jobs });
+      logger.info(`Re-queued ${spaces.length} incomplete spaces via API`);
+      ok(res, { message: `Re-queued ${spaces.length} incomplete spaces`, jobs });
     } catch (e) { err(res, e.message); }
 });
 

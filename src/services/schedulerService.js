@@ -7,8 +7,8 @@ const { v4: uuidv4 } = require('uuid');
 
 const logger = require('../utils/logger');
 const CrawlJob = require('../db/crawlJobModel');
-const Gym = require('../db/spaceModel');
-const { addCityJob, addGymNameJob } = require('../queue/queues');
+const Space = require('../db/spaceModel');
+const { addCityJob, addSpaceNameJob } = require('../queue/queues');
 const { FITNESS_CATEGORIES } = require('../scraper/googleMapsScraper');
 const bus = require('./eventBus');
 const { runPhotoSync } = require('./photoSyncService');
@@ -99,9 +99,9 @@ async function runScheduledCrawl(frequency, reason = 'cron') {
 }
 
 // ── Staleness-aware re-crawl ─────────────────────────────────────────────────
-// Finds gyms that haven't been crawled for >N days and queues them for refresh.
+// Finds spaces that haven't been crawled for >N days and queues them for refresh.
 
-async function queueStaleGyms(reason = 'staleness-check') {
+async function queueStaleSpaces(reason = 'staleness-check') {
   const config = getScheduleConfig();
   const settings = config.staleness || {};
   const thresholdDays = settings.enrichmentThresholdDays || 30;
@@ -111,7 +111,7 @@ async function queueStaleGyms(reason = 'staleness-check') {
   const cutoff = new Date(Date.now() - thresholdDays * 86_400_000);
 
   // Read from new crawl mirror first; fall back to legacy crawlMeta.
-  const staleGyms = await Gym.aggregate([
+  const staleSpaces = await Space.aggregate([
     { $match: { permanentlyClosed: { $ne: true } } },
     {
       $addFields: {
@@ -132,33 +132,33 @@ async function queueStaleGyms(reason = 'staleness-check') {
     { $project: { name: 1, areaName: 1, slug: 1, effectiveLastCrawledAt: 1 } },
   ]);
 
-  if (!staleGyms.length) {
-    logger.info(`📅 Staleness check: all gyms are fresh (< ${thresholdDays} days)`);
+  if (!staleSpaces.length) {
+    logger.info(`📅 Staleness check: all spaces are fresh (< ${thresholdDays} days)`);
     return [];
   }
 
-  logger.info(`\n📅 Staleness check [${reason}] — found ${staleGyms.length} stale gyms (> ${thresholdDays} days)`);
+  logger.info(`\n📅 Staleness check [${reason}] — found ${staleSpaces.length} stale spaces (> ${thresholdDays} days)`);
 
   const queued = [];
-  for (const g of staleGyms) {
+  for (const g of staleSpaces) {
     const spaceName = `${g.name} ${g.areaName || ''}`.trim();
     const jobId = uuidv4();
     try {
-      await CrawlJob.create({ jobId, type: 'gym_name', input: { spaceName }, status: 'queued' });
-      await addGymNameJob(jobId, spaceName);
+      await CrawlJob.create({ jobId, type: 'space_name', input: { spaceName }, status: 'queued' });
+      await addSpaceNameJob(jobId, spaceName);
       queued.push({ spaceName, jobId });
     } catch (err) {
       logger.error(`  ❌ Failed to queue stale space "${spaceName}": ${err.message}`);
     }
   }
 
-  logger.info(`📅 Staleness: ${queued.length} stale gyms queued for re-crawl\n`);
+  logger.info(`📅 Staleness: ${queued.length} stale spaces queued for re-crawl\n`);
   return queued;
 }
 
-// ── Enrichment: re-crawl incomplete gyms ─────────────────────────────────────
+// ── Enrichment: re-crawl incomplete spaces ─────────────────────────────────────
 
-async function queueIncompleteGyms(reason = 'enrichment') {
+async function queueIncompleteSpaces(reason = 'enrichment') {
   const config = getScheduleConfig();
   const settings = config.enrichment || {};
 
@@ -167,7 +167,7 @@ async function queueIncompleteGyms(reason = 'enrichment') {
   const threshold = settings.completenessThreshold || 60;
   const batchSize = settings.batchSize || 30;
 
-  const incomplete = await Gym.aggregate([
+  const incomplete = await Space.aggregate([
     { $match: { permanentlyClosed: { $ne: true } } },
     {
       $addFields: {
@@ -189,26 +189,26 @@ async function queueIncompleteGyms(reason = 'enrichment') {
   ]);
 
   if (!incomplete.length) {
-    logger.info(`📅 Enrichment: all gyms above ${threshold}% completeness`);
+    logger.info(`📅 Enrichment: all spaces above ${threshold}% completeness`);
     return [];
   }
 
-  logger.info(`\n📅 Enrichment [${reason}] — ${incomplete.length} gyms below ${threshold}% completeness`);
+  logger.info(`\n📅 Enrichment [${reason}] — ${incomplete.length} spaces below ${threshold}% completeness`);
 
   const queued = [];
   for (const g of incomplete) {
     const spaceName = `${g.name} ${g.areaName || ''}`.trim();
     const jobId = uuidv4();
     try {
-      await CrawlJob.create({ jobId, type: 'gym_name', input: { spaceName }, status: 'queued' });
-      await addGymNameJob(jobId, spaceName);
+      await CrawlJob.create({ jobId, type: 'space_name', input: { spaceName }, status: 'queued' });
+      await addSpaceNameJob(jobId, spaceName);
       queued.push({ spaceName, jobId, completeness: g.effectiveCompleteness || 0 });
     } catch (err) {
       logger.error(`  ❌ Failed to queue enrichment for "${spaceName}": ${err.message}`);
     }
   }
 
-  logger.info(`📅 Enrichment: ${queued.length} incomplete gyms queued\n`);
+  logger.info(`📅 Enrichment: ${queued.length} incomplete spaces queued\n`);
   return queued;
 }
 
@@ -261,12 +261,12 @@ function startScheduler() {
 
   // Staleness check: Every Wednesday at 03:00 AM IST = 21:30 UTC Tuesday
   cron.schedule('30 21 * * 2', async () => {
-    await queueStaleGyms('staleness-cron');
+    await queueStaleSpaces('staleness-cron');
   }, { timezone: tz });
 
   // Enrichment: Every Friday at 03:00 AM IST = 21:30 UTC Thursday
   cron.schedule('30 21 * * 4', async () => {
-    await queueIncompleteGyms('enrichment-cron');
+    await queueIncompleteSpaces('enrichment-cron');
   }, { timezone: tz });
 
   // Photo sync: Every day at 4:00 AM IST = 22:30 UTC previous day
@@ -292,8 +292,8 @@ module.exports = {
   startScheduler,
   scheduleNCRCrawl,
   runScheduledCrawl,
-  queueStaleGyms,
-  queueIncompleteGyms,
+  queueStaleSpaces,
+  queueIncompleteSpaces,
   getScheduleConfig,
   saveScheduleConfig,
   queueCity,
