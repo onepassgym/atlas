@@ -42,28 +42,77 @@ atlas-scraper/
 - Node.js 20+
 - MongoDB 7 & Redis 7
 
-### 2. Setup & Start
+### 2. Setup Once
 
-**For Development (Live Reload & Local Changes):**
-1. Create a `.env` file and set `NODE_ENV=development`.
-2. Start the services:
-   ```bash
+1. Create your env file and use development mode:
+
+   cp .env.example .env
+
+   Set NODE_ENV=development in .env.
+
+2. Install dependencies (root + dashboard) and Playwright Chromium:
+
    npm install
-   npm run setup        # Installs Chromium dependencies
-   docker-compose up -d --build
-   ```
+   npm run dashboard:install
+   npm run setup
 
-**For Production:**
-1. Ensure your `.env` contains `NODE_ENV=production`.
-2. Start the generalized built-in services:
-   ```bash
-   docker-compose up -d --build
-   ```
+### 3. Start Everything Locally
 
-### 3. Access Dashboard
-- **Development Hot-Reload**: [http://localhost:4060](http://localhost:4060) (Vite server auto-proxies to API)
-- **Production Built-In**: [http://localhost:5070/dashboard](http://localhost:5070/dashboard) (Served directly by Express)
-- **Health Check**: `http://localhost:5070/health`
+Choose one of these local modes.
+
+Option A: Full local stack with frontend hot reload (recommended while building UI)
+
+   docker compose --profile dashboard-dev up -d --build
+
+Starts all services:
+- API on 5070
+- Worker (crawl queue)
+- Enrichment worker
+- Media worker
+- MongoDB on host port 27050
+- Redis on host port 6847
+- Dashboard dev server on 4060
+
+If you also use chain crawl jobs, run chain worker in a separate terminal:
+
+   npm run dev:worker:chain
+
+Option B: Full local stack with single dashboard URL (production-like UI serving)
+
+   docker compose up -d --build
+
+Starts all backend and crawler services, and serves dashboard from API only.
+
+If you also use chain crawl jobs, run chain worker in a separate terminal:
+
+   npm run dev:worker:chain
+
+### 4. URLs
+
+If started with dashboard-dev profile:
+- Frontend dev (HMR): http://localhost:4060/dashboard/
+- API + built-in dashboard: http://localhost:5070/dashboard
+
+If started without dashboard-dev profile:
+- API + built-in dashboard only: http://localhost:5070/dashboard
+
+Health endpoint:
+- http://localhost:5070/health
+
+### 5. Crawler Behavior On Startup
+
+- Workers start automatically with docker compose.
+- If jobs are already queued, crawling begins automatically.
+- Scheduler starts automatically in API, but cron jobs run only at their schedule time.
+- To queue new crawl jobs manually, use dashboard actions or crawl APIs.
+
+### 6. Stop Local Stack
+
+   docker compose down
+
+Remove containers, network, and volumes:
+
+   docker compose down -v
 
 ---
 

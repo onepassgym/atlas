@@ -64,6 +64,17 @@ async function addCityJob(jobId, cityName, categories) {
   return job;
 }
 
+async function addGridJob(jobId, regionName, lat, lng, zoom, categories) {
+  const job = await crawlQueue.add(
+    'grid-crawl',
+    { type: 'grid', jobId, input: { regionName, lat, lng, zoom, categories } },
+    { jobId }
+  );
+  logger.info(`📥 Queued grid tile for ${regionName} [${lat.toFixed(3)}, ${lng.toFixed(3)}] (BullMQ #${job.id})`);
+  return job;
+}
+
+
 async function addGymNameJob(jobId, spaceName) {
   const job = await crawlQueue.add(
     'gym-name-crawl',
@@ -300,6 +311,7 @@ module.exports = {
   mediaQueue,
   enrichmentQueue,
   addCityJob,
+  addGridJob,
   addGymNameJob,
   addChainJob,
   addMediaJob,

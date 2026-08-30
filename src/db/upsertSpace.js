@@ -1,4 +1,4 @@
 'use strict';
 
 // Compatibility alias for space-first naming.
-module.exports = require('./upsertSpace');
+module.exports = require('./upsertGym');

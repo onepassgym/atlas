@@ -51,7 +51,7 @@ const GymSchema = new mongoose.Schema({
     index:     true,
     uppercase: true,
     trim:      true,
-    match:     /^OPG-[A-Z]+-[A-Z2-9]{4}$/,
+    match:     /^OPG-[A-Z]+-[0-9A-Z]{4}$/,
   },
 
   // Identity

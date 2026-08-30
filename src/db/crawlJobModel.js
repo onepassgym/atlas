@@ -4,10 +4,14 @@ const cfg = require('../../config');
 
 const CrawlJobSchema = new mongoose.Schema({
   jobId:  { type: String, required: true, unique: true },
-  type:   { type: String, enum: ['city', 'gym_name', 'retry', 'chain', 'enrichment'], default: 'city' },
+  type:   { type: String, enum: ['city', 'grid', 'gym_name', 'retry', 'chain', 'enrichment'], default: 'city' },
 
   input: {
     cityName:   String,
+    regionName: String,        // added for grid
+    lat:        Number,        // added for grid
+    lng:        Number,        // added for grid
+    zoom:       Number,        // added for grid
     spaceName:  String,
     categories: [String],
     chainSlug:  String,        // e.g. "anytime-fitness"

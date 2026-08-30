@@ -1,0 +1,13 @@
+[
+  {
+    "name": "Delhi NCR",
+    "bounds": {
+      "north": 28.88,
+      "south": 28.40,
+      "east": 77.40,
+      "west": 76.84
+    },
+    "stepKm": 5,
+    "zoom": 14
+  }
+]

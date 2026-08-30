@@ -104,7 +104,9 @@ async function reserveSequence(prefix) {
     }
   );
 
-  const counterValue = result?.value?.value;
+  // Handle both MongoDB Node driver v5 (returns {value: doc}) and v6+ (returns doc directly)
+  const doc = result?.value?.value !== undefined ? result.value : result;
+  const counterValue = doc?.value;
   if (!Number.isInteger(counterValue) || counterValue <= 0) {
     throw new Error(`Failed to allocate ID sequence for prefix ${normalizedPrefix}`);
   }

@@ -3,7 +3,7 @@ require('dotenv').config();
 
 const { Worker } = require('bullmq');
 const { connectDB }   = require('../db/connection');
-const { BrowserManager, searchGymsInCity, scrapeGymDetail, scrapeEnrichmentDetail, FITNESS_CATEGORIES, isBlocked } = require('../scraper/googleMapsScraper');
+const { BrowserManager, searchGymsInCity, searchGymsInGrid, scrapeGymDetail, scrapeEnrichmentDetail, FITNESS_CATEGORIES, isBlocked } = require('../scraper/googleMapsScraper');
 const { processGym }  = require('../scraper/gymProcessor');
 const { processEnrichmentJob } = require('../scraper/enrichmentProcessor');
 const CrawlJob        = require('../db/crawlJobModel');
@@ -459,6 +459,114 @@ async function processCityJob(job) {
   }
 }
 
+async function searchAllCategoriesForGrid(browser, lat, lng, zoom, regionName, categories, jobId, bullJob) {
+  const cats    = Array.isArray(categories) ? categories : FITNESS_CATEGORIES;
+  const allUrls = new Set();
+  let catIndex  = 0;
+  let stopReason = false;
+
+  const poolSize = Math.min(SEARCH_POOL, cats.length);
+  logger.info(`  🔍 Grid Searching ${cats.length} categories with ${poolSize} parallel pages at [${lat}, ${lng}]`);
+
+  const pages = await Promise.all(
+    Array.from({ length: poolSize }, () => browser.newPage())
+  );
+
+  async function searchLoop(page) {
+    while (catIndex < cats.length) {
+      const ci  = catIndex++;
+      const cat = cats[ci];
+
+      const stop = await shouldStop(jobId);
+      if (stop) { stopReason = stop; break; }
+
+      bus.publish('crawl:search-start', { jobId, regionName, category: cat, categoryIndex: ci, totalCategories: cats.length });
+      try {
+        const urls = await searchGymsInGrid(page, lat, lng, zoom, cat);
+        urls.forEach(u => allUrls.add(u));
+        bus.publish('crawl:search-done', { jobId, regionName, category: cat, urlsFound: urls.length, totalUnique: allUrls.size });
+        await bullJob.updateProgress(Math.floor(((ci + 1) / categories.length) * 25));
+      } catch (err) {
+        logger.warn(`Category "${cat}" failed at [${lat}, ${lng}]: ${err.message}`);
+        bus.publish('crawl:search-done', { jobId, regionName, category: cat, urlsFound: 0, error: err.message.slice(0, 80) });
+      }
+      await sleep(DELAY_MIN, DELAY_MAX);
+    }
+  }
+
+  await Promise.all(pages.map(p => searchLoop(p)));
+  await Promise.all(pages.map(p => p.close().catch(() => {})));
+
+  return { allUrls, stopReason };
+}
+
+async function processGridJob(job) {
+  const { jobId, input = {} } = job.data;
+  const { regionName, lat, lng, zoom, mode = 'standard' } = input;
+  const categories = Array.isArray(input.categories) ? input.categories : FITNESS_CATEGORIES;
+  const startTime = Date.now();
+
+  await connectDB();
+  await updateJob(jobId, { status: 'running', startedAt: new Date(), bullJobId: String(job.id) });
+  bus.publish('job:started', { jobId, type: 'grid', regionName, lat, lng, categories: categories.length, mode });
+
+  const browser = new BrowserManager();
+  let stopReason = false;
+
+  try {
+    await browser.launch();
+    logger.info(`\n🌐 [GRID DISCOVERY] ${regionName} [${lat}, ${lng}] — ${categories.length} categories`);
+
+    const { allUrls, stopReason: searchStop } = await searchAllCategoriesForGrid(
+      browser, lat, lng, zoom, regionName, categories, jobId, job
+    );
+    if (searchStop) stopReason = searchStop;
+
+    await browser.close();
+
+    const discoveredTotal = allUrls.size;
+    logger.info(`\n📋 Discovered ${discoveredTotal} unique URLs at grid [${lat}, ${lng}]`);
+
+    const urlsToScrape = stopReason ? [] : await preFilterUrls([...allUrls], regionName);
+    const total = urlsToScrape.length;
+    const skippedPreFilter = discoveredTotal - total;
+
+    await updateJob(jobId, { 
+      'progress.total': discoveredTotal, 
+      'progress.toScrape': total,
+      $inc: { 'progress.skipped': skippedPreFilter }
+    });
+
+    if (total === 0 || stopReason) {
+      const durationMs = Date.now() - startTime;
+      const finalStatus = stopReason === 'cancelled' ? 'cancelled' : 'completed';
+      if (stopReason === 'cancelled') await clearCancelFlag(jobId);
+      await updateJob(jobId, { status: finalStatus, completedAt: new Date(), durationMs });
+      return { jobId, discovered: discoveredTotal, toScrape: 0, batches: 0, status: finalStatus };
+    }
+
+    const batches = [];
+    for (let i = 0; i < urlsToScrape.length; i += BATCH_SIZE) {
+      batches.push(urlsToScrape.slice(i, i + BATCH_SIZE));
+    }
+
+    for (let bi = 0; bi < batches.length; bi++) {
+      await addBatchScrapeJob(jobId, regionName, batches[bi], bi, mode);
+    }
+
+    await updateJob(jobId, { 'progress.batches': batches.length, 'progress.batchesDone': 0 });
+    const durationMs = Date.now() - startTime;
+    return { jobId, discovered: discoveredTotal, toScrape: total, batches: batches.length, durationMs };
+
+  } catch (err) {
+    await browser.close();
+    const durationMs = Date.now() - startTime;
+    await updateJob(jobId, { status: 'failed', completedAt: new Date(), durationMs });
+    throw err;
+  }
+}
+
+
 // ── Phase 9: Batch scrape job handler ─────────────────────────────────────────
 //
 // Each batch job opens its OWN browser instance, spawns PAGE_POOL tabs,
@@ -582,6 +690,63 @@ async function processGymNameJob(job) {
     const page = await browser.newPage();
     await job.updateProgress(10);
     const urls = await searchGymsInCity(page, targetName, '');
+
+    // ── Fallback search when exact-name returns 0 URLs ─────────────────────
+    // If Google Maps found nothing for the verbatim name (e.g. no results
+    // page, or not indexed under that exact name), try progressively shorter
+    // name variants before falling back to a broader locality-category search.
+    // This handles small local gyms that aren't indexed by full name but ARE
+    // discoverable by partial name or by browsing the locality.
+    if (urls.length === 0) {
+      logger.warn(`  ⚠️  Gym-name search returned 0 URLs for "${targetName}" — trying fallback strategies`);
+      await updateJob(jobId, {
+        $push: { jobErrors: { message: `Initial name search returned 0 URLs, trying fallback strategies`, at: new Date() } },
+      });
+
+      const GENERIC_WORDS = new Set(['gym', 'fitness', 'center', 'centre', 'studio', 'club', 'health', 'the', 'and']);
+      const nameParts = targetName.trim().split(/\s+/);
+
+      // Strategy 1: Try progressively shorter name variants by dropping
+      // generic trailing words (e.g. "RK FITNESS GYM NAHAL" → "RK FITNESS NAHAL" → "RK NAHAL")
+      const meaningful = nameParts.filter(w => !GENERIC_WORDS.has(w.toLowerCase()));
+      if (meaningful.length >= 2 && meaningful.length < nameParts.length) {
+        const shortName = meaningful.join(' ');
+        logger.info(`  🔄 Fallback 1: shortened name "${shortName}"`);
+        const fallback1 = await searchGymsInCity(page, shortName, '');
+        if (fallback1.length > 0) {
+          logger.info(`  ✅ Fallback 1 found ${fallback1.length} URL(s)`);
+          urls.push(...fallback1);
+        }
+      }
+
+      // Strategy 2: Try the full name as a regular Google search
+      // (Google Maps sometimes responds to "RK FITNESS NAHAL" when exact fails)
+      if (urls.length === 0 && nameParts.length > 2) {
+        const dropLast = nameParts.slice(0, -1).join(' ');
+        logger.info(`  🔄 Fallback 2: name without last word "${dropLast}"`);
+        const fallback2 = await searchGymsInCity(page, dropLast, '');
+        if (fallback2.length > 0) {
+          logger.info(`  ✅ Fallback 2 found ${fallback2.length} URL(s)`);
+          urls.push(...fallback2);
+        }
+      }
+
+      // Strategy 3: Category + locality (last word of name as locality hint)
+      if (urls.length === 0) {
+        const locality = nameParts[nameParts.length - 1];
+        if (locality && locality.length > 2 && !GENERIC_WORDS.has(locality.toLowerCase())) {
+          logger.info(`  🔄 Fallback 3: "gym in ${locality}"`);
+          const fallback3 = await searchGymsInCity(page, locality, 'gym');
+          if (fallback3.length > 0) {
+            logger.info(`  ✅ Fallback 3 found ${fallback3.length} URL(s)`);
+            urls.push(...fallback3);
+          } else {
+            logger.warn(`  ⚠️  All fallback strategies exhausted — gym may not be indexed on Google Maps`);
+          }
+        }
+      }
+    }
+
     await job.updateProgress(40);
     await updateJob(jobId, { 'progress.total': urls.length });
 
@@ -693,6 +858,7 @@ async function start() {
   const worker = new Worker('atlas-crawl', async (job) => {
     logger.info(`⚙️  Processing job: ${job.name} [${job.id}]`);
     if (job.name === 'city-crawl')     return processCityJob(job);
+    if (job.name === 'grid-crawl')     return processGridJob(job);
     if (job.name === 'batch-scrape')   return processBatchJob(job);
     if (job.name === 'gym-name-crawl') return processGymNameJob(job);
     throw new Error(`Unknown job name: ${job.name}`);

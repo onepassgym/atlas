@@ -260,11 +260,125 @@ async function searchGymsInCity(page, cityName, category) {
       lastSize = gymUrls.size;
     }
 
+    // ── Direct place page detection ──────────────────────────────────────────
+    // Google sometimes redirects exact-name queries directly to the gym's
+    // own detail page instead of showing a list/feed. In that case the scroll
+    // loop above finds zero feed links and gymUrls stays empty.
+    // Detect this by checking if we are now on a /maps/place/ URL and, if so,
+    // wait for the page to fully resolve (Google Maps appends coordinates and
+    // CID to the URL after the JS loads), then capture the final settled URL
+    // so that scrapeGymDetail can navigate to a proper place detail page.
+    if (gymUrls.size === 0) {
+      try {
+        const currentUrl = page.url();
+        if (/\/maps\/place\//i.test(currentUrl)) {
+          // Wait for the URL to settle — Google Maps rewrites it after JS hydration
+          // (e.g. /maps/place/Name → /maps/place/Name/@lat,lng,17z/data=...)
+          await sleep(3000, 4000);
+          const settledUrl = page.url();
+          // Only use it if the URL is now a fully-resolved place page with coords or CID
+          if (/\/maps\/place\/.+\/@-?\d+\.\d+/i.test(settledUrl) ||
+              /\/maps\/place\/.+\/data=/i.test(settledUrl)) {
+            const canonicalUrl = settledUrl.split('?')[0].split('/@')[0];
+            // Re-add the coordinates segment so scrapeGymDetail lands on the right place
+            const atPart = settledUrl.match(/\/@([^/]+)/)?.[0] || '';
+            const dataPart = settledUrl.match(/\/data=[^?]*/)?.[0] || '';
+            const fullUrl = canonicalUrl + atPart + dataPart;
+            gymUrls.add(fullUrl);
+            logger.info(`  📍 Direct place redirect detected — captured: ${fullUrl.slice(-80)}`);
+          } else {
+            logger.info(`  📍 Direct place redirect detected but URL did not fully resolve: ${settledUrl.slice(-80)}`);
+          }
+        }
+      } catch (_) {}
+    }
+
     logger.info(`  ✅ Found ${gymUrls.size} URLs for "${query}"`);
     return [...gymUrls];
   }
 
   // Safety net — should not reach here
+  return [];
+}
+
+async function searchGymsInGrid(page, lat, lng, zoom, category) {
+  const url = `https://www.google.com/maps/search/${encodeURIComponent(category)}/@${lat},${lng},${zoom}z/data=!3m1!4b1`;
+
+  for (let attempt = 1; attempt <= MAX_SEARCH_RETRIES + 1; attempt++) {
+    logger.info(`  🔍 Grid Searching: "${category}" at [${lat}, ${lng}] (zoom: ${zoom})${attempt > 1 ? ` (retry ${attempt - 1})` : ''}`);
+
+    try {
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: cfg.scraper.timeout });
+      } catch (_) {
+        await page.goto(url, { waitUntil: 'commit', timeout: cfg.scraper.timeout });
+      }
+    } catch (navErr) {
+      logger.warn(`  ⚠️ Navigation failed for grid [${lat}, ${lng}] (attempt ${attempt}): ${navErr.message}`);
+      if (attempt > MAX_SEARCH_RETRIES) return [];
+      await sleep(10000, 20000);
+      continue;
+    }
+
+    await sleep(2000, 3000);
+
+    const blockReason = await isBlocked(page);
+    if (blockReason) {
+      if (attempt > MAX_SEARCH_RETRIES) {
+        logger.warn(`  🚫 Google blocked grid [${lat}, ${lng}] after ${attempt} attempt(s) — giving up`);
+        return [];
+      }
+      const backoffMin = 15000 * attempt;
+      const backoffMax = 30000 * attempt;
+      logger.warn(`  🚫 Google blocked grid [${lat}, ${lng}] (reason: ${blockReason}, attempt ${attempt}/${MAX_SEARCH_RETRIES + 1}) — backing off`);
+      await sleep(backoffMin, backoffMax);
+      continue;
+    }
+
+    for (const sel of ['button:has-text("Accept all")', 'button:has-text("Agree")', 'button[aria-label="Accept all"]']) {
+      try {
+        const btn = page.locator(sel).first();
+        if (await btn.isVisible({ timeout: 1500 })) {
+          await btn.click();
+          await sleep(600, 1000);
+          break;
+        }
+      } catch (_) {}
+    }
+
+    const gymUrls  = new Set();
+    let   noNewFor = 0;
+    let   lastSize = 0;
+
+    while (true) {
+      const links = await page.locator('a[href*="/maps/place/"]').all();
+      for (const a of links) {
+        try {
+          const href = await a.getAttribute('href');
+          if (href) gymUrls.add(href.split('?')[0].split('/@')[0]);
+        } catch (_) {}
+      }
+
+      const ended = await page.locator('text="You\'ve reached the end of the list."').isVisible({ timeout: 500 }).catch(() => false);
+      if (ended) break;
+
+      const panel = page.locator('div[role="feed"]').first();
+      try {
+        await panel.evaluate(el => el.scrollBy(0, 1200));
+      } catch (_) {
+        await page.mouse.wheel(0, 1200);
+      }
+      await sleep(1200, 2000);
+
+      if (gymUrls.size === lastSize) { if (++noNewFor >= 5) break; }
+      else noNewFor = 0;
+      lastSize = gymUrls.size;
+    }
+
+    logger.info(`  ✅ Found ${gymUrls.size} URLs for grid [${lat}, ${lng}]`);
+    return [...gymUrls];
+  }
+
   return [];
 }
 
@@ -591,7 +705,7 @@ async function scrapeAboutTab(page) {
   try {
     const tab = page.locator('button[aria-label*="About" i], button:has-text("About")').first();
     if (!await tab.isVisible({ timeout: 1500 }).catch(() => false)) return null;
-    await tab.click();
+    await tab.click({ force: true });
     await sleep(800, 1400);
 
     return await page.evaluate(() => {
@@ -609,7 +723,7 @@ async function scrapeAboutTabExhaustive(page) {
   try {
     const tab = page.locator('button[aria-label*="About" i], button:has-text("About")').first();
     if (!await tab.isVisible({ timeout: 1500 }).catch(() => false)) return result;
-    await tab.click();
+    await tab.click({ force: true });
     await sleep(800, 1400);
 
     return await page.evaluate(() => {
@@ -662,7 +776,7 @@ async function scrapeReviews(page, maxReviews = 30) {
   try {
     const tab = page.locator('button[aria-label*="reviews" i], button:has-text("Reviews")').first();
     if (!await tab.isVisible({ timeout: 2000 }).catch(() => false)) return { reviews, reviewSummary };
-    await tab.click();
+    await tab.click({ force: true });
     await sleep(1200, 2000);
 
     try {
@@ -676,9 +790,9 @@ async function scrapeReviews(page, maxReviews = 30) {
     try {
       const sortBtn = page.locator('button[aria-label*="Sort" i]').first();
       if (await sortBtn.isVisible({ timeout: 1500 })) {
-        await sortBtn.click();
+        await sortBtn.click({ force: true });
         await sleep(400, 700);
-        await page.locator('li[data-index="1"], li:has-text("Newest")').first().click({ timeout: 1500 });
+        await page.locator('li[data-index="1"], li:has-text("Newest")').first().click({ timeout: 1500, force: true });
         await sleep(800, 1400);
       }
     } catch (_) {}
@@ -688,7 +802,7 @@ async function scrapeReviews(page, maxReviews = 30) {
 
     while (reviews.length < maxReviews) {
       for (const btn of await page.locator('button.w8nwRe').all()) {
-        try { await btn.click(); } catch (_) {}
+        try { await btn.click({ force: true }); } catch (_) {}
       }
 
       for (const card of await page.locator('.jftiEf, .MyEned').all()) {
@@ -767,7 +881,7 @@ async function scrapePhotosTab(page, existing = [], maxPhotos = 20) {
   try {
     const tab = page.locator('button[aria-label*="Photos" i], button:has-text("Photos")').first();
     if (!await tab.isVisible({ timeout: 2000 }).catch(() => false)) return [...urls];
-    await tab.click();
+    await tab.click({ force: true });
     await sleep(1200, 2000);
 
     let last = 0; let noNew = 0;
@@ -890,7 +1004,8 @@ async function scrapeSelective(page, url, sections = ['all']) {
 }
 
 module.exports = {
-  BrowserManager, searchGymsInCity, scrapeGymDetail, scrapeEnrichmentDetail, scrapeSelective,
+  BrowserManager, searchGymsInCity, searchGymsInGrid, scrapeGymDetail, scrapeEnrichmentDetail, scrapeSelective,
   scrapeAboutTab, scrapeAboutTabExhaustive, scrapeReviews, scrapePhotosTab, scrapePhotosTabEnriched,
   FITNESS_CATEGORIES, isBlocked,
 };
+
