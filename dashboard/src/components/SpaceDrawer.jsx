@@ -38,7 +38,7 @@ export default function SpaceDrawer({ spaceId, onClose }) {
     if (!space?._id) return;
     setEnriching(true);
     try {
-      const res = await api.post('/api/enrichment/priority', { spaceId: space._id, sections: ['all'] });
+      const res = await api.post('/api/enrichment/priority', { spaceId: space.opgId, sections: ['all'] });
       if (res?.success) {
         toast(`⚡ ${space.name} → full enrichment queued`, 'info');
         loadEnrichLogs();
@@ -57,7 +57,7 @@ export default function SpaceDrawer({ spaceId, onClose }) {
     if (!space?._id) return;
     setEnriching(true);
     try {
-      const res = await api.post('/api/enrichment/priority', { spaceId: space._id, sections: ['deep'] });
+      const res = await api.post('/api/enrichment/priority', { spaceId: space.opgId, sections: ['deep'] });
       if (res?.success) {
         toast(`🔬 ${space.name} → deep enrichment queued (150 reviews + 80 photos)`, 'info');
         loadEnrichLogs();
@@ -76,7 +76,7 @@ export default function SpaceDrawer({ spaceId, onClose }) {
     if (!space?._id || selectedSections.length === 0) return;
     setEnriching(true);
     try {
-      const res = await api.post('/api/enrichment/priority', { spaceId: space._id, sections: selectedSections });
+      const res = await api.post('/api/enrichment/priority', { spaceId: space.opgId, sections: selectedSections });
       if (res?.success) {
         toast(`⚡ ${space.name} → enriching: ${selectedSections.join(', ')}`, 'info');
         setSelectedSections([]);
@@ -436,7 +436,7 @@ export default function SpaceDrawer({ spaceId, onClose }) {
                 </div>
               )}
 
-              <div style={{ marginTop: 16, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>ID: {space._id}</div>
+              <div style={{ marginTop: 16, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>ID: {space.opgId}</div>
             </>
           )}
         </div>

@@ -80,7 +80,7 @@ export default function DataHealth() {
   };
 
   const handleBatchEnrich = async () => {
-    const ids = worstSpaces.slice(0, 10).map(g => g._id);
+    const ids = worstSpaces.slice(0, 10).map(g => g.opgId);
     try {
       const res = await api.post('/api/enrichment/priority/batch', { spaceIds: ids, sections: ['all'] });
       if (res?.success) toast(`⚡ ${res.pushed?.length || 0} spaces queued for enrichment`, 'info');
@@ -329,11 +329,11 @@ export default function DataHealth() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {worstSpaces.length > 0 ? worstSpaces.map(g => (
                 <motion.div 
-                  key={g._id} 
+                  key={g.opgId} 
                   whileHover={{ backgroundColor: 'var(--row-hover)' }}
                   style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 8, borderBottom: '1px solid var(--border)', transition: 'background 0.2s' }}
                 >
-                  <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => setSelectedSpace(g._id)}>
+                  <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => setSelectedSpace(g.opgId)}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>{g.name}</span>
                       <span style={{ fontSize: 12, fontFamily: 'var(--mono)', fontWeight: 800, color: g.qualityScore < 30 ? 'var(--danger)' : 'var(--warning)' }}>
@@ -344,8 +344,8 @@ export default function DataHealth() {
                       {g.areaName} {g.missing?.length > 0 && <span style={{ color: 'var(--text-muted)' }}>• Missing: {g.missing.map(m => FIELD_META[m]?.icon || '•').join('')}</span>}
                     </div>
                   </div>
-                  <button className="btn secondary sm" onClick={() => handleEnrichSpace(g._id, g.name)} disabled={enrichingIds.has(g._id)}>
-                    {enrichingIds.has(g._id) ? <RefreshCw size={12} className="spin" /> : <Zap size={12} />}
+                  <button className="btn secondary sm" onClick={() => handleEnrichSpace(g.opgId, g.name)} disabled={enrichingIds.has(g.opgId)}>
+                    {enrichingIds.has(g.opgId) ? <RefreshCw size={12} className="spin" /> : <Zap size={12} />}
                   </button>
                 </motion.div>
               )) : <div className="empty-state">No targets found</div>}

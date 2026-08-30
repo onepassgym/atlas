@@ -464,7 +464,7 @@ export default function Overview() {
           </div>
           <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: 4 }}>
             {latestSpaces.length > 0 ? latestSpaces.map(g => (
-              <SpaceRow key={g._id} space={g} onClick={setSelectedSpace} />
+              <SpaceRow key={g.opgId} space={g} onClick={setSelectedSpace} />
             )) : <div className="empty-state">No spaces yet</div>}
           </div>
         </div>

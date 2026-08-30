@@ -555,7 +555,7 @@ async function resolveSpace(req, res, next) {
 // GET /api/spaces/:opgId
 router.get('/:opgId',
   param('opgId')
-    .matches(/^(OPG-[A-Z]+-[A-Z2-9]{4}|[a-fA-F0-9]{24})$/)
+    .matches(/^(OPG-[A-Z]+-[A-Z0-9]+|[a-fA-F0-9]{24})$/)
     .withMessage('Invalid ID — expected OPG-KEYWORD-XXXX or Mongo ObjectId'),
   resolveSpace,
   async (req, res) => {
@@ -578,7 +578,7 @@ router.get('/:opgId',
 // PATCH /api/spaces/:opgId  — update platform fields only
 router.patch('/:opgId',
   param('opgId')
-    .matches(/^(OPG-[A-Z]+-[A-Z2-9]{4}|[a-fA-F0-9]{24})$/)
+    .matches(/^(OPG-[A-Z]+-[A-Z0-9]+|[a-fA-F0-9]{24})$/)
     .withMessage('Invalid ID — expected OPG-KEYWORD-XXXX or Mongo ObjectId'),
   resolveSpace,
   async (req, res) => {

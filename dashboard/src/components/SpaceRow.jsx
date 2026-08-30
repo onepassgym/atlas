@@ -93,7 +93,7 @@ export default React.memo(function SpaceRow({ space, onClick, searchTerm = '' })
   const categoryLabel = formatCategory(space.category) || (space.categoryId?.label ? formatCategory(space.categoryId.label) : null);
 
   return (
-    <div className="space-row-card" onClick={() => onClick?.(space._id)} id={`space-${space._id}`}>
+    <div className="space-row-card" onClick={() => onClick?.(space.opgId)} id={`space-${space.opgId}`}>
       {/* Thumbnail */}
       <div className="space-row-thumb">
         {space.coverPhoto?.thumbnailUrl || space.coverPhoto?.publicUrl || typeof space.coverPhoto === 'string' ? (

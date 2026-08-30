@@ -579,7 +579,7 @@ export default function Explorer() {
           ) : spaces.length > 0 ? (
             spaces.map((g, i) => (
               <motion.div
-                key={g._id}
+                key={g.opgId}
                 initial={{ opacity: 0, x: -12 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.2, delay: i * 0.02 }}

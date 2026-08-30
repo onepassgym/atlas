@@ -147,7 +147,7 @@ export default function ChainsPanel({ onSelectSpace }) {
               </div>
               <div style={{ maxHeight: 300, overflowY: 'auto' }} className="custom-scrollbar">
                 {chainSpaces.length > 0 ? chainSpaces.map(g => (
-                  <SpaceRow key={g._id} space={g} onClick={onSelectSpace} />
+                  <SpaceRow key={g.opgId} space={g} onClick={onSelectSpace} />
                 )) : <div className="empty-state" style={{ padding: 20 }}>No locations discovered yet</div>}
               </div>
               <div style={{ marginTop: 12 }}>

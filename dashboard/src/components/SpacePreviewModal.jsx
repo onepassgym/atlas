@@ -70,7 +70,7 @@ export default function SpacePreviewModal({ spaceId, onClose }) {
 
           <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
             <button className="btn" onClick={onClose}>Close</button>
-            <Link to={`/spaces/${space._id}`} className="btn primary" onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Link to={`/spaces/${space.opgId}`} className="btn primary" onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               View Full Details <ExternalLink size={14} />
             </Link>
           </div>

@@ -110,18 +110,19 @@ router.post('/toggle', async (req, res) => {
  * POST /api/enrichment/priority — push a specific space to top of enrichment queue
  */
 router.post('/priority',
-  body('spaceId').notEmpty().isMongoId(),
+  body('spaceId').notEmpty().matches(/^(OPG-[A-Z]+-[A-Z0-9]+|[a-fA-F0-9]{24})$/),
   body('sections').optional().isArray(),
   body('sections.*').optional().isIn(['all', 'reviews', 'photos', 'contact', 'hours', 'amenities', 'deep']),
   async (req, res) => {
     if (validate(req, res)) return;
     try {
       const { spaceId, sections } = req.body;
-      const space = await Space.findById(spaceId).select('name areaName googleMapsUrl').lean();
+      const isMongoId = /^[a-fA-F0-9]{24}$/.test(spaceId);
+      const space = isMongoId ? await Space.findById(spaceId).select('_id name areaName googleMapsUrl').lean() : await Space.findOne({ opgId: spaceId }).select('_id name areaName googleMapsUrl').lean();
       if (!space) return err(res, 'Space not found', 404);
       if (!space.googleMapsUrl) return err(res, 'Space has no Google Maps URL — cannot enrich', 400);
 
-      await pushPrioritySpace(spaceId, space.name, sections);
+      await pushPrioritySpace(space._id.toString(), space.name, sections);
 
       const sectionLabel = (!sections || sections.includes('all')) ? 'full' : sections.join(', ');
       ok(res, {
@@ -139,14 +140,14 @@ router.post('/priority',
  */
 router.post('/priority/batch',
   body('spaceIds').isArray({ min: 1, max: 50 }),
-  body('spaceIds.*').isMongoId(),
+  body('spaceIds.*').matches(/^(OPG-[A-Z]+-[A-Z0-9]+|[a-fA-F0-9]{24})$/),
   body('sections').optional().isArray(),
   async (req, res) => {
     if (validate(req, res)) return;
     try {
       const { spaceIds, sections } = req.body;
       const spaces = await Space.find({
-        _id: { $in: spaceIds },
+        $or: [{ _id: { $in: spaceIds.filter(id => /^[a-fA-F0-9]{24}$/.test(id)) } }, { opgId: { $in: spaceIds.filter(id => /^OPG-/.test(id)) } }],
         googleMapsUrl: { $exists: true, $ne: null },
       }).select('_id name').lean();
 
@@ -227,14 +228,16 @@ router.get('/logs', async (req, res) => {
  * GET /api/enrichment/logs/:spaceId — enrichment history for a specific space
  */
 router.get('/logs/:spaceId',
-  param('spaceId').isMongoId(),
+  param('spaceId').matches(/^(OPG-[A-Z]+-[A-Z0-9]+|[a-fA-F0-9]{24})$/),
   async (req, res) => {
     if (validate(req, res)) return;
     try {
       const { spaceId } = req.params;
       const limit = Math.min(parseInt(req.query.limit || '10', 10), 50);
 
-      const logs = await EnrichmentLog.find({ spaceId })
+      const isMongoId = /^[a-fA-F0-9]{24}$/.test(spaceId);
+      const space = isMongoId ? { _id: spaceId } : await Space.findOne({ opgId: spaceId }).select('_id').lean();
+      const logs = await EnrichmentLog.find({ spaceId: space ? space._id : spaceId })
         .sort({ startedAt: -1 })
         .limit(limit)
         .lean();
