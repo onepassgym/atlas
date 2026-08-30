@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import { setEnv, setApiKey, getApiKey, getBaseUrl, api, getEnv } from '../api/client';
+import { setEnv, api } from '../api/client';
 import { useSSE } from '../hooks/useSSE';
-import ApiKeyModal from '../components/ApiKeyModal';
+import PinModal from '../components/PinModal';
 
 const AppContext = createContext(null);
 
@@ -16,8 +16,7 @@ export function AppProvider({ children }) {
   const storedEnv = isProdHost ? 'prod' : (localStorage.getItem('atlas_env') || 'local');
 
   const [env, setEnvState] = useState(storedEnv);
-  const [showKeyModalForEnv, setShowKeyModalForEnv] = useState(null);
-  const [apiKeySet, setApiKeySet] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('atlas_auth') === 'true');
   const [connected, setConnected] = useState(false);
   const [events, setEvents] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -54,17 +53,6 @@ export function AppProvider({ children }) {
   useEffect(() => {
     const prodUrl = isProdHost ? window.location.origin : 'https://atlas.onepassgym.com';
     setEnv(env, prodUrl);
-
-    const keyName = `atlas_api_key_${env}`;
-    let key = localStorage.getItem(keyName);
-    if (!key) {
-      setShowKeyModalForEnv(env);
-      setApiKeySet(false);
-    } else {
-      setApiKey(key);
-      setApiKeySet(true);
-      setShowKeyModalForEnv(null);
-    }
   }, [env, isProdHost]);
 
   // Toast system
@@ -143,23 +131,18 @@ export function AppProvider({ children }) {
   const handleConnection = useCallback((c) => setConnected(c), []);
 
   // SSE connection
-  const { reconnect } = useSSE(handleEvent, handleLog, handleConnection, [env, apiKeySet]);
+  const { reconnect } = useSSE(handleEvent, handleLog, handleConnection, [env, isAuthenticated]);
 
   // Env switching  
   const switchEnv = useCallback((newEnv) => {
-    const prodUrl = isProdHost ? window.location.origin : 'https://atlas.onepassgym.com';
-    setEnv(newEnv, prodUrl);
-    setEnvState(newEnv);
     localStorage.setItem('atlas_env', newEnv);
-    setEvents([]);
-    setLogs([]);
-
-    toast(`Switched to ${newEnv.toUpperCase()}`, 'info');
-  }, [toast, isProdHost]);
+    setEnvState(newEnv);
+    window.location.reload();
+  }, []);
 
   // Load event history on mount
   useEffect(() => {
-    if (!apiKeySet) return;
+    if (!isAuthenticated) return;
     api.get('/api/events/history?limit=150')
       .then(res => {
         if (res?.success && res.events?.length) {
@@ -169,7 +152,7 @@ export function AppProvider({ children }) {
         }
       })
       .catch(() => {});
-  }, [env, apiKeySet]);
+  }, [env, isAuthenticated]);
 
   const clearLogs = useCallback(() => setLogs([]), []);
   const clearEvents = useCallback(() => setEvents([]), []);
@@ -196,15 +179,11 @@ export function AppProvider({ children }) {
   return (
     <AppContext.Provider value={value}>
       {children}
-      {showKeyModalForEnv && (
-        <ApiKeyModal 
-          env={showKeyModalForEnv} 
-          onSave={(key) => {
-            const keyName = `atlas_api_key_${showKeyModalForEnv}`;
-            localStorage.setItem(keyName, key);
-            setApiKey(key);
-            setApiKeySet(true);
-            setShowKeyModalForEnv(null);
+      {!isAuthenticated && (
+        <PinModal 
+          onUnlock={() => {
+            localStorage.setItem('atlas_auth', 'true');
+            setIsAuthenticated(true);
           }} 
         />
       )}

@@ -538,9 +538,14 @@ router.get('/photos', async (req, res) => {
  */
 async function resolveGym(req, res, next) {
   const { opgId } = req.params;
-  if (!isValidOpgId(opgId)) return err(res, 'Invalid OPG ID format — expected OPG-KEYWORD-XXXX', 400);
+  const isMongoId = /^[a-fA-F0-9]{24}$/.test(opgId);
+  
+  if (!isMongoId && !isValidOpgId(opgId)) return err(res, 'Invalid ID format — expected OPG-KEYWORD-XXXX or Mongo ID', 400);
   try {
-    const gym = await Gym.findOne({ opgId }).lean({ virtuals: true });
+    const gym = isMongoId 
+      ? await Gym.findById(opgId).lean({ virtuals: true })
+      : await Gym.findOne({ opgId }).lean({ virtuals: true });
+      
     if (!gym) return err(res, 'Gym not found', 404);
     req.gym = gym;
     next();
@@ -550,8 +555,8 @@ async function resolveGym(req, res, next) {
 // GET /api/spaces/:opgId
 router.get('/:opgId',
   param('opgId')
-    .matches(/^OPG-[A-Z]+-[A-Z2-9]{4}$/)
-    .withMessage('Invalid OPG ID — expected OPG-KEYWORD-XXXX'),
+    .matches(/^(OPG-[A-Z]+-[A-Z2-9]{4}|[a-fA-F0-9]{24})$/)
+    .withMessage('Invalid ID — expected OPG-KEYWORD-XXXX or Mongo ObjectId'),
   resolveGym,
   async (req, res) => {
     if (validate(req, res)) return;
@@ -573,8 +578,8 @@ router.get('/:opgId',
 // PATCH /api/spaces/:opgId  — update platform fields only
 router.patch('/:opgId',
   param('opgId')
-    .matches(/^OPG-[A-Z]+-[A-Z2-9]{4}$/)
-    .withMessage('Invalid OPG ID — expected OPG-KEYWORD-XXXX'),
+    .matches(/^(OPG-[A-Z]+-[A-Z2-9]{4}|[a-fA-F0-9]{24})$/)
+    .withMessage('Invalid ID — expected OPG-KEYWORD-XXXX or Mongo ObjectId'),
   resolveGym,
   async (req, res) => {
     if (validate(req, res)) return;

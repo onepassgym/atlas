@@ -21,6 +21,7 @@ const path     = require('path');
 const fs       = require('fs');
 const fsp      = fs.promises;
 const mongoose = require('mongoose');
+const axios    = require('axios');
 const { param, query, body, validationResult } = require('express-validator');
 const router   = express.Router();
 const Photo    = require('../db/photoModel');
@@ -479,6 +480,46 @@ router.post('/relink-gyms', async (req, res) => {
     setProgress('relink', { status: 'error', phase: e.message, done: 0, total: 0 });
     setTimeout(() => clearProgress('relink'), 30_000);
     err(res, e.message);
+  }
+});
+
+// ── GET /api/media/proxy — Proxy by URL (restricted domains) ─────────────
+router.get('/proxy', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).send('URL is required');
+  try {
+    const targetUrl = new URL(url);
+    // Restrict to known CDNs to prevent open proxying
+    const allowedDomains = ['fitmania.in', 'googleusercontent.com', 'fitternity.com', 'cdninstagram.com', 'fbcdn.net'];
+    const isAllowed = allowedDomains.some(d => targetUrl.hostname.endsWith(d));
+    if (!isAllowed) return res.status(403).send('Domain not allowed for proxying');
+    
+    const response = await axios.get(url, { responseType: 'stream' });
+    res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    
+    response.data.pipe(res);
+  } catch (e) {
+    res.status(500).send('Failed to fetch image');
+  }
+});
+
+// ── GET /api/media/:id/view — Proxy photo stream ─────────────────────────────
+router.get('/:id/view', param('id').isMongoId(), async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).send('Invalid ID');
+  try {
+    const photo = await Photo.findById(req.params.id).lean();
+    if (!photo || !photo.originalUrl) return res.status(404).send('Photo not found');
+    
+    const response = await axios.get(photo.originalUrl, { responseType: 'stream' });
+    res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    
+    response.data.pipe(res);
+  } catch (e) {
+    logger.error(`[proxy] Error proxying photo ${req.params.id}: ${e.message}`);
+    res.status(500).send('Failed to fetch image');
   }
 });
 

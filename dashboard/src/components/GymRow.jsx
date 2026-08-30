@@ -1,5 +1,7 @@
 import React from 'react';
 import { Star, MessageCircle, Target, MapPin, Phone, Globe, ImageIcon, Award } from 'lucide-react';
+import { getProxyUrl } from '../api/client';
+import RatingStars from './RatingStars';
 
 function formatCategory(cat) {
   if (!cat || cat === 'undefined' || cat === 'unknown') return null;
@@ -85,25 +87,7 @@ function QualityBadge({ score }) {
   );
 }
 
-function RatingStars({ rating }) {
-  if (!rating) return <span className="gym-row-metric dim">—</span>;
-  const full = Math.floor(rating);
-  const hasHalf = rating % 1 >= 0.3;
-  return (
-    <span className="gym-row-stars">
-      {Array.from({ length: 5 }, (_, i) => (
-        <Star 
-          key={i} 
-          size={10} 
-          fill={i < full ? '#f59e0b' : (i === full && hasHalf ? '#f59e0b' : 'none')}
-          stroke={i < full || (i === full && hasHalf) ? '#f59e0b' : 'rgba(100,116,139,0.4)'}
-          style={i === full && hasHalf ? { clipPath: 'inset(0 50% 0 0)' } : {}}
-        />
-      ))}
-      <span className="gym-row-rating-num">{rating.toFixed(1)}</span>
-    </span>
-  );
-}
+// RatingStars imported from ./RatingStars
 
 export default React.memo(function GymRow({ gym, onClick, searchTerm = '' }) {
   const categoryLabel = formatCategory(gym.category) || (gym.categoryId?.label ? formatCategory(gym.categoryId.label) : null);
@@ -112,13 +96,20 @@ export default React.memo(function GymRow({ gym, onClick, searchTerm = '' }) {
     <div className="gym-row-card" onClick={() => onClick?.(gym._id)} id={`gym-${gym._id}`}>
       {/* Thumbnail */}
       <div className="gym-row-thumb">
-        {gym.coverPhoto?.thumbnailUrl ? (
-          <img src={gym.coverPhoto.thumbnailUrl} alt="" loading="lazy" />
-        ) : (
-          <div className="gym-row-thumb-fallback">
-            <MapPin size={18} />
-          </div>
-        )}
+        {gym.coverPhoto?.thumbnailUrl || gym.coverPhoto?.publicUrl || typeof gym.coverPhoto === 'string' ? (
+          <img 
+            src={getProxyUrl(gym.coverPhoto?.thumbnailUrl || gym.coverPhoto?.publicUrl || gym.coverPhoto)} 
+            alt="" 
+            loading="lazy"
+            onError={(e) => {
+              e.target.style.display = 'none';
+              e.target.nextElementSibling.style.display = 'flex';
+            }}
+          />
+        ) : null}
+        <div className="gym-row-thumb-fallback" style={{ display: (gym.coverPhoto?.thumbnailUrl || gym.coverPhoto?.publicUrl || typeof gym.coverPhoto === 'string') ? 'none' : 'flex' }}>
+          <MapPin size={18} />
+        </div>
       </div>
 
       {/* Main Content */}

@@ -3,7 +3,6 @@
  */
 
 let currentEnv = 'local';
-let apiKey = '';
 
 const ENV_CONFIG = {
   local: '',          // same-origin in dev (Vite proxy), same-origin in prod
@@ -17,11 +16,14 @@ export function setEnv(env, prodUrl = '') {
 
 export function getEnv() { return currentEnv; }
 
-export function setApiKey(key) { apiKey = key; }
-export function getApiKey() { return apiKey; }
-
 export function getBaseUrl() {
   return ENV_CONFIG[currentEnv] || '';
+}
+
+export function getProxyUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  if (url.startsWith('/api/')) return `${getBaseUrl()}${url}`;
+  return `${getBaseUrl()}/api/media/proxy?url=${encodeURIComponent(url)}`;
 }
 
 export async function apiFetch(path, options = {}) {
@@ -31,10 +33,6 @@ export async function apiFetch(path, options = {}) {
   const headers = {
     ...options.headers,
   };
-
-  if (apiKey) {
-    headers['X-API-Key'] = apiKey;
-  }
 
   if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';

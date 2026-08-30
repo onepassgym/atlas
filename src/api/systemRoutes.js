@@ -22,12 +22,50 @@ const Gym = require('../db/spaceModel');
 const { calculateQualityScore } = require('../services/intelligence/scoring');
 const { analyzeGymSentiment } = require('../services/intelligence/sentiment');
 const { Review } = require('../db/reviewModel');
-const { crawlQueue, chainCrawlQueue, mediaQueue } = require('../queue/queues');
+const { crawlQueue, chainCrawlQueue } = require('../queue/queues');
 const SystemState = require('../db/systemStateModel');
 const { runPhotoSync, getSyncStatus } = require('../services/photoSyncService');
 
 const LOG_DIR = cfg.log.dir;
 let lastCpuInfo = os.cpus();
+
+/**
+ * @swagger
+ * /api/system/verify-pin:
+ *   post:
+ *     summary: Verify dashboard 4-digit PIN
+ *     tags: [System]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               pin:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Success or failure
+ */
+router.post('/verify-pin', async (req, res) => {
+  try {
+    const { pin } = req.body;
+    if (!pin) return err(res, 'PIN is required', 400);
+
+    const state = await SystemState.getGlobalState();
+    const validPin = state.dashboardPin || '0000';
+
+    if (pin === validPin) {
+      return ok(res, { success: true });
+    } else {
+      return err(res, 'Invalid PIN', 401);
+    }
+  } catch (e) {
+    logger.error(`Error verifying PIN: ${e.message}`);
+    return err(res, 'Internal Server Error', 500);
+  }
+});
 
 /**
  * @swagger
@@ -211,19 +249,6 @@ router.get('/vps-stats', async (req, res) => {
   } catch (e) { err(res, e.message); }
 });
 
-// POST /api/system/media/queue/pause
-router.post('/media/queue/pause', async (req, res) => {
-  try {
-    await mediaQueue.pause();
-    const state = await SystemState.getGlobalState();
-    state.mediaQueuePaused = true;
-    await state.save();
-    ok(res, { message: 'Media downloading paused', state });
-  } catch (e) {
-    err(res, e.message);
-  }
-});
-
 // POST /api/system/global-pause
 router.post('/global-pause', express.json(), async (req, res) => {
   try {
@@ -234,14 +259,10 @@ router.post('/global-pause', express.json(), async (req, res) => {
     if (state.globalPause) {
       await crawlQueue.pause();
       await chainCrawlQueue.pause();
-      await mediaQueue.pause();
-      state.mediaQueuePaused = true;
       state.crawlQueuePaused = true;
     } else {
       await crawlQueue.resume();
       await chainCrawlQueue.resume();
-      await mediaQueue.resume();
-      state.mediaQueuePaused = false;
       state.crawlQueuePaused = false;
     }
     
@@ -260,19 +281,6 @@ router.post('/pace', express.json(), async (req, res) => {
     await state.save();
     ok(res, { message: `Crawl pace set to ${pace}`, state });
   } catch (e) { err(res, e.message); }
-});
-
-// POST /api/system/media/queue/resume
-router.post('/media/queue/resume', async (req, res) => {
-  try {
-    await mediaQueue.resume();
-    const state = await SystemState.getGlobalState();
-    state.mediaQueuePaused = false;
-    await state.save();
-    ok(res, { message: 'Media downloading resumed', state });
-  } catch (e) {
-    err(res, e.message);
-  }
 });
 
 // GET /api/system/logs/latest — shortcut to tail the latest app log

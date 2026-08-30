@@ -37,13 +37,6 @@ function makeQueue(name, jobOpts = {}) {
 
 const crawlQueue      = makeQueue('atlas-crawl');
 const chainCrawlQueue = makeQueue('atlas-chain-crawl');
-// Phase 5: dedicated media download queue — processed by mediaWorker.js
-const mediaQueue      = makeQueue('atlas-media', {
-  attempts:         3,
-  backoff:          { type: 'exponential', delay: 3000 },
-  removeOnComplete: 100,
-  removeOnFail:     50,
-});
 // Enrichment queue — targeted per-gym enrichment jobs (Tasks 1-5)
 const enrichmentQueue = makeQueue('atlas-enrichment', {
   attempts:         2,
@@ -117,16 +110,6 @@ async function getChainQueueStats() {
   return { waiting, active, completed, failed, delayed };
 }
 
-// Phase 5: enqueue media download for a single gym (non-blocking)
-async function addMediaJob(gymId, slug, photoUrls) {
-  if (!photoUrls?.length) return null;
-  const job = await mediaQueue.add(
-    'media-download',
-    { gymId: String(gymId), slug, photoUrls },
-    { jobId: `media:${gymId}`, removeOnComplete: true }
-  );
-  return job;
-}
 
 /**
  * Enqueue a gym-enrichment job.
@@ -154,15 +137,6 @@ async function getEnrichmentQueueStats() {
   return { waiting, active, completed, failed };
 }
 
-async function getMediaQueueStats() {
-  const [waiting, active, completed, failed] = await Promise.all([
-    mediaQueue.getWaitingCount(),
-    mediaQueue.getActiveCount(),
-    mediaQueue.getCompletedCount(),
-    mediaQueue.getFailedCount(),
-  ]);
-  return { waiting, active, completed, failed };
-}
 
 // Phase 9: Enqueue a batch of URLs as a standalone scrape job.
 // Multiple batches from the same city compete for any available worker replica.
@@ -308,18 +282,15 @@ async function promoteJobToFront(jobId) {
 module.exports = {
   crawlQueue,
   chainCrawlQueue,
-  mediaQueue,
   enrichmentQueue,
   addCityJob,
   addGridJob,
   addGymNameJob,
   addChainJob,
-  addMediaJob,
   addEnrichmentJob,
   addBatchScrapeJob,
   getQueueStats,
   getChainQueueStats,
-  getMediaQueueStats,
   getEnrichmentQueueStats,
   getQueueJobStatus,
   getBullJobStatus: getQueueJobStatus,

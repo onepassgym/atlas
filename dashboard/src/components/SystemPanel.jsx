@@ -11,7 +11,6 @@ import { useApp } from '../context/AppContext';
 export default function SystemPanel() {
   const { toast, logs, clearLogs, chainsCache } = useApp();
   const [schedule, setSchedule] = useState([]);
-  const [health, setHealth] = useState({});
   const [addCity, setAddCity] = useState({ name: '', frequency: 'weekly' });
   const [photoSync, setPhotoSync] = useState(null); // photo sync status
 
@@ -31,26 +30,7 @@ export default function SystemPanel() {
     } catch {}
   }, []);
 
-  const fetchHealth = useCallback(async () => {
-    try {
-      const [evtRes, qRes, cqRes, syncRes] = await Promise.all([
-        api.get('/api/events/stats').catch(() => ({})),
-        api.get('/api/crawl/queue/stats').catch(() => ({ queue: {} })),
-        api.get('/api/chains/crawl/queue-stats').catch(() => ({ queue: {} })),
-        api.get('/api/system/media/photo-sync/status').catch(() => null),
-      ]);
-      setHealth({
-        sseClients: evtRes?.sseClients || 0,
-        totalEvents: evtRes?.totalEvents || 0,
-        qActive: qRes?.queue?.active || 0,
-        qWaiting: qRes?.queue?.waiting || 0,
-        chainQ: `${cqRes?.queue?.active || 0}/${cqRes?.queue?.waiting || 0}`,
-      });
-      if (syncRes?.status) setPhotoSync(syncRes.status);
-    } catch {}
-  }, []);
-
-  useEffect(() => { fetchSchedule(); fetchHealth(); }, [fetchSchedule, fetchHealth]);
+  useEffect(() => { fetchSchedule(); }, [fetchSchedule]);
 
   // ── Actions
   const submitCrawlCity = async () => {
@@ -261,39 +241,9 @@ export default function SystemPanel() {
         </div>
       </div>
 
-      {/* ── Logs ────── */}
-      <div className="card">
-        <div className="card-header">
-          <span className="card-title">Live System Logs</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button className="btn sm" onClick={clearLogs}>Clear</button>
-            <span className="card-icon">🪵</span>
-          </div>
-        </div>
-        <div style={{ height: 280, overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: 11, background: 'rgba(0,0,0,0.2)', borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', gap: 4, scrollbarWidth: 'thin' }}>
-          {logs.length === 0 ? (
-            <div className="empty-state"><div className="empty-state-icon">🪵</div><div>Waiting for log stream…</div></div>
-          ) : logs.slice(0, 100).map((l, i) => (
-            <div key={i} style={{ display: 'flex', gap: 10, lineHeight: 1.4, borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: 2 }}>
-              <span style={{ color: 'var(--text-muted)', minWidth: 65 }}>{l.timestamp?.split(' ')[1] || ''}</span>
-              <span style={{ fontWeight: 700, width: 45, textTransform: 'uppercase', color: l.level === 'error' ? 'var(--danger)' : l.level === 'warn' ? 'var(--warning)' : 'var(--success)' }}>{l.level || 'info'}</span>
-              <span style={{ color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{l.message || ''}{l.stack ? '\n' + l.stack : ''}</span>
-            </div>
-          ))}
-        </div>
-      </div>
 
-      {/* ── Health ────── */}
-      <div className="card">
-        <div className="card-header"><span className="card-title">System Health</span><span className="card-icon">💚</span></div>
-        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 13, color: 'var(--text-secondary)' }}>
-          <span>SSE Clients: <strong>{health.sseClients ?? '—'}</strong></span>
-          <span>Events (buffer): <strong>{health.totalEvents ?? '—'}</strong></span>
-          <span>Queue Active: <strong>{health.qActive ?? '—'}</strong></span>
-          <span>Queue Waiting: <strong>{health.qWaiting ?? '—'}</strong></span>
-          <span>Chain Queue: <strong>{health.chainQ ?? '—'}</strong></span>
-        </div>
-      </div>
+
+
 
       {/* ── Modals ────── */}
       <Modal open={crawlCityModal} onClose={() => setCrawlCityModal(false)} title="🏙️ Queue City Crawl">

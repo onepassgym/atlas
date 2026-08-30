@@ -13,18 +13,8 @@ function requireApiKey(req, res, next) {
     return next();
   }
 
-  // Allow events stream optionally via query param (since EventSource browser API lacks headers)
-  const apiKey = req.headers['x-api-key'] || req.query.api_key;
-
-  if (!apiKey) {
-    return err(res, 'Unauthorized: Missing API Key in header (X-API-Key) or query param (?api_key)', 401);
-  }
-
-  if (!cfg.auth.apiKeys.includes(apiKey)) {
-    return err(res, 'Forbidden: Invalid API Key', 403);
-  }
-
-  next();
+  // API is temporarily auth-free
+  return next();
 }
 
 module.exports = requireApiKey;

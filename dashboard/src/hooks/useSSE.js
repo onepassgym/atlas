@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { getBaseUrl, getApiKey } from '../api/client';
+import { getBaseUrl } from '../api/client';
 
 /**
  * useSSE — Server-Sent Events connection hook
@@ -16,8 +16,6 @@ export function useSSE(onEvent, onLog, onConnectionChange, deps = []) {
 
     const base = getBaseUrl();
     const url = new URL(`${base}/api/events`, window.location.origin);
-    const key = getApiKey();
-    if (key) url.searchParams.append('api_key', key);
 
     const es = new EventSource(url.toString());
     esRef.current = es;

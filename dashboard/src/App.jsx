@@ -14,6 +14,7 @@ const Enrichment = lazy(() => import('./pages/Enrichment'));
 const DataHealth = lazy(() => import('./pages/DataHealth'));
 const Simulations = lazy(() => import('./pages/SimulationsPage'));
 const MediaStorage = lazy(() => import('./pages/MediaStorage'));
+const SpaceDetails = lazy(() => import('./pages/SpaceDetails'));
 
 function PageLoader() {
   return (
@@ -40,6 +41,7 @@ function AppShell() {
           <Route path="/data-health" element={<DataHealth />} />
           <Route path="/media"       element={<MediaStorage />} />
           <Route path="/simulations" element={<Simulations />} />
+          <Route path="/spaces/:id"  element={<SpaceDetails />} />
           <Route path="*"         element={<Navigate to="/overview" replace />} />
         </Routes>
       </Suspense>

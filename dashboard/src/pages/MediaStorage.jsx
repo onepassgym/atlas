@@ -6,7 +6,7 @@ import {
   Copy, Trash2, CheckSquare, Square, Tag, Eye, Download, Zap, LayoutGrid,
   Link2, Upload, RotateCcw, TrendingUp, Database, Unlink
 } from 'lucide-react';
-import { api, getBaseUrl } from '../api/client';
+import { api, getBaseUrl, getProxyUrl } from '../api/client';
 
 /* ── utils ──────────────────────────────────────────────────────────────────── */
 function fmtBytes(b, d = 1) {
@@ -120,8 +120,9 @@ function MasonryGrid({ photos, selected, onSelect, onClick, base }) {
   return (
     <div style={{ columns: 'auto 180px', columnGap: 10 }}>
       {photos.map(p => {
-        const src = p.thumbnailUrl || p.publicUrl || '';
-        const url = src.startsWith('http') ? src : `${base}${src.startsWith('/') ? '' : '/'}${src}`;
+        const src = p.thumbnailUrl || p.publicUrl || p.originalUrl || '';
+        const origUrl = src.startsWith('http') ? src : `${base}${src.startsWith('/') ? '' : '/'}${src}`;
+        const proxyUrl = getProxyUrl(p.proxyUrl || origUrl);
         const isSelected = selected.has(p._id);
         return (
           <div key={p._id} style={{ breakInside:'avoid', marginBottom:10, borderRadius:8, overflow:'hidden', border: isSelected ? '2px solid var(--accent)' : '1px solid var(--border)', cursor:'pointer', position:'relative' }}>
@@ -129,8 +130,8 @@ function MasonryGrid({ photos, selected, onSelect, onClick, base }) {
               style={{ position:'absolute', top:5, left:5, zIndex:2 }}>
               {isSelected ? <CheckSquare size={14} color="var(--accent)"/> : <Square size={14} color="rgba(255,255,255,.45)"/>}
             </div>
-            {url
-              ? <img src={url} alt={p.filename || ''} loading="lazy" onClick={() => onClick(p)} style={{ width:'100%', display:'block' }} onError={e => { e.target.style.display='none'; }}/>
+            {proxyUrl
+              ? <img src={proxyUrl} alt={p.filename || ''} loading="lazy" onClick={() => onClick(p)} style={{ width:'100%', display:'block' }} onError={e => { e.target.style.display='none'; }}/>
               : <div style={{ height:100, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,.2)' }}><FileImage size={24} style={{ opacity:.15 }}/></div>
             }
           </div>
@@ -142,8 +143,9 @@ function MasonryGrid({ photos, selected, onSelect, onClick, base }) {
 
 /* ── Lightbox ────────────────────────────────────────────────────────────────── */
 function Lightbox({ photo, onClose, base }) {
-  const src = photo.publicUrl || photo.originalUrl || '';
-  const url = src.startsWith('http') ? src : `${base}${src.startsWith('/') ? '' : '/'}${src}`;
+  const src = photo.originalUrl || photo.publicUrl || photo.url || '';
+  const origUrl = src.startsWith('http') ? src : `${base}${src.startsWith('/') ? '' : '/'}${src}`;
+  const proxyUrl = getProxyUrl(photo.proxyUrl || origUrl);
   useEffect(() => {
     const fn = e => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', fn);
@@ -156,18 +158,22 @@ function Lightbox({ photo, onClose, base }) {
       <motion.div initial={{ scale:.88 }} animate={{ scale:1 }} exit={{ scale:.88 }}
         onClick={e => e.stopPropagation()}
         style={{ background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:14, maxWidth:900, width:'100%', overflow:'hidden' }}>
-        <img src={url} alt={photo.caption || ''} style={{ width:'100%', maxHeight:'66vh', objectFit:'contain', background:'#000', display:'block' }}/>
+        <img src={proxyUrl} alt={photo.caption || ''} style={{ width:'100%', maxHeight:'66vh', objectFit:'contain', background:'#000', display:'block' }}/>
         <div style={{ padding:'14px 20px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8 }}>
           <div>
             <div style={{ fontWeight:700, fontSize:14 }}>{photo.gymId?.name || photo.filename || 'Unknown'}</div>
             <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2, fontFamily:'var(--mono)' }}>{photo.folder || ''}</div>
           </div>
           <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-            <button onClick={() => { copyText(url); toast('URL copied!', 'success'); }}
+            <button onClick={() => { copyText(proxyUrl); toast('Proxy URL copied!', 'success'); }}
               style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', background:'var(--accent)', border:'none', borderRadius:7, color:'#fff', cursor:'pointer', fontWeight:600, fontSize:12 }}>
-              <Copy size={13}/> Copy URL
+              <Copy size={13}/> Copy Proxy URL
             </button>
-            <a href={url} download target="_blank" rel="noreferrer"
+            <button onClick={() => { copyText(origUrl); toast('Original URL copied!', 'success'); }}
+              style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', background:'var(--bg-hover)', border:'1px solid var(--border)', borderRadius:7, color:'var(--text-primary)', cursor:'pointer', fontWeight:600, fontSize:12 }}>
+              <Link2 size={13}/> Copy Original URL
+            </button>
+            <a href={proxyUrl} download target="_blank" rel="noreferrer"
               style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', background:'var(--bg-hover)', border:'1px solid var(--border)', borderRadius:7, color:'var(--text-primary)', textDecoration:'none', fontWeight:600, fontSize:12 }}>
               <Download size={13}/> Download
             </a>
@@ -621,7 +627,8 @@ export default function MediaStorage() {
             <tbody>
               {photos?.map(p => {
                 const src = p.publicUrl || p.originalUrl || '';
-                const url = src.startsWith('http') ? src : `${base}${src.startsWith('/')? '' :'/'}${src}`;
+                const origUrl = src.startsWith('http') ? src : `${base}${src.startsWith('/')? '' :'/'}${src}`;
+                const proxyUrl = getProxyUrl(p.proxyUrl || origUrl);
                 return (
                   <tr key={p._id}
                     style={{ borderBottom:'1px solid rgba(255,255,255,.04)', transition:'background .1s' }}
@@ -635,8 +642,9 @@ export default function MediaStorage() {
                     <td style={{ padding:'7px 8px' }}>
                       <div style={{ display:'flex', gap:5 }}>
                         <button onClick={() => setLightbox(p)} title="Preview" style={{ padding:'4px 8px', background:'var(--bg-hover)', border:'1px solid var(--border)', borderRadius:5, cursor:'pointer', color:'var(--text-muted)' }}><Eye size={11}/></button>
-                        <button onClick={() => { copyText(url); toast('Copied!', 'success'); }} title="Copy URL" style={{ padding:'4px 8px', background:'var(--bg-hover)', border:'1px solid var(--border)', borderRadius:5, cursor:'pointer', color:'var(--text-muted)' }}><Copy size={11}/></button>
-                        <a href={url} download target="_blank" rel="noreferrer" style={{ padding:'4px 8px', background:'var(--bg-hover)', border:'1px solid var(--border)', borderRadius:5, cursor:'pointer', color:'var(--text-muted)', display:'flex', alignItems:'center' }}><Download size={11}/></a>
+                        <button onClick={() => { copyText(proxyUrl); toast('Proxy URL Copied!', 'success'); }} title="Copy Proxy URL" style={{ padding:'4px 8px', background:'var(--bg-hover)', border:'1px solid var(--border)', borderRadius:5, cursor:'pointer', color:'var(--text-muted)' }}><Copy size={11}/></button>
+                        <button onClick={() => { copyText(origUrl); toast('Original URL Copied!', 'success'); }} title="Copy Original URL" style={{ padding:'4px 8px', background:'var(--bg-hover)', border:'1px solid var(--border)', borderRadius:5, cursor:'pointer', color:'var(--text-muted)' }}><Link2 size={11}/></button>
+                        <a href={proxyUrl} download target="_blank" rel="noreferrer" style={{ padding:'4px 8px', background:'var(--bg-hover)', border:'1px solid var(--border)', borderRadius:5, cursor:'pointer', color:'var(--text-muted)', display:'flex', alignItems:'center' }}><Download size={11}/></a>
                       </div>
                     </td>
                   </tr>

@@ -44,6 +44,12 @@ const PhotoSchema = new mongoose.Schema({
   timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
   collection: cfg.collections.spacePhotos,
   autoIndex: false,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+PhotoSchema.virtual('proxyUrl').get(function() {
+  return `/api/media/${this._id}/view`;
 });
 
 // ── Compound indexes for scalable queries ──────────────────────────────────────

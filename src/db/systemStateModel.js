@@ -11,6 +11,7 @@ const SystemStateSchema = new mongoose.Schema({
   mediaQueuePaused: { type: Boolean, default: false },
   crawlQueuePaused: { type: Boolean, default: false },
   maintenanceMode: { type: Boolean, default: false },
+  dashboardPin: { type: String, default: '0000' },
   
   // Additional metrics or states can be added here
   lastUpdatedBy: { type: String, default: 'system' }

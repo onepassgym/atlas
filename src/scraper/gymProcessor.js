@@ -1,8 +1,6 @@
 'use strict';
 const slugify     = require('slugify');
-const { downloadAllMedia } = require('../media/downloader');
 const { upsertGym } = require('../db/upsertSpace');
-const { addMediaJob } = require('../queue/queues');
 const logger      = require('../utils/logger');
 
 const CATEGORY_MAP = {
@@ -111,15 +109,12 @@ async function processGym(raw, areaName, jobId, downloadMedia = true) {
     };
 
     // ── Media handling (Phase 5: deferred download) ───────────────────────
-    // Instead of blocking the scrape loop with photo downloads, we:
-    //   1. Store the raw photoUrls on the document for immediate availability
-    //   2. Enqueue a background media-download job (processed by mediaWorker.js)
-    //   3. Mark mediaStatus as 'pending' so dashboards can track progress
+    // Instead of blocking the scrape loop, we store the raw photoUrls on the document
     if (raw.photoUrls?.length) {
       // Store the photo URL list directly so the gym is immediately queryable
       doc.photoUrls   = raw.photoUrls;
       doc.totalPhotos = raw.photoUrls.length;
-      doc.crawlMeta.mediaStatus = 'pending';
+      doc.crawlMeta.mediaStatus = 'captured';
     }
     doc.crawlMeta.mediaStatus = doc.crawlMeta.mediaStatus || 'none';
 
@@ -134,15 +129,6 @@ async function processGym(raw, areaName, jobId, downloadMedia = true) {
     result.gymId  = upsertResult.gymId;
     if (upsertResult.error) result.error = upsertResult.error;
 
-    // Enqueue media download after upsert — non-blocking, background worker handles it
-    if (upsertResult.gymId && raw.photoUrls?.length) {
-      try {
-        await addMediaJob(upsertResult.gymId, slug, raw.photoUrls);
-      } catch (mediaErr) {
-        // Non-fatal — media can be re-queued by enrichment job
-        logger.warn(`  ⚠  Media job enqueue failed for "${raw.name}": ${mediaErr.message}`);
-      }
-    }
 
   } catch (err) {
     logger.error(`processGym error "${raw?.name}": ${err.message}`);

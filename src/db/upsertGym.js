@@ -206,29 +206,26 @@ async function resolveAmenities(rawLabels = []) {
 
 // ── Normalized Data Ingestion Helpers ────────────────────────────────────────
 
-async function upsertPhotos(gymId, rawPhotos = [], now, opgId) {
-  if (!rawPhotos.length) return 0;
+async function upsertPhotos(gymId, photoUrls = [], now, opgId) {
+  if (!photoUrls.length) return 0;
 
   // Phase 3b: Single bulkWrite instead of N sequential updateOne calls
-  const ops = rawPhotos
-    .filter(p => p.publicUrl)
-    .map(p => ({
+  // Store the original URL directly as we no longer download images
+  const ops = photoUrls
+    .filter(url => url && typeof url === 'string')
+    .map(url => ({
       updateOne: {
-        filter: { publicUrl: p.publicUrl },
+        filter: { originalUrl: url, gymId },
         update: {
           $setOnInsert: {
             gymId,
             ...(opgId ? { opgId } : {}),
-            originalUrl:  p.originalUrl,
-            localPath:    p.localPath,
-            publicUrl:    p.publicUrl,
-            thumbnailUrl: p.thumbnailUrl,
-            type:         p.type,
-            width:        p.width,
-            height:       p.height,
-            sizeBytes:    p.sizeBytes,
-            isCover:      p.isCover || false,
-            downloadedAt: p.downloadedAt || now,
+            originalUrl:  url,
+            type:         'photo',
+            sourceType:   'user',
+            downloaded:   false,
+            isCover:      false,
+            capturedAt:   now,
             createdAt:    now,
           }
         },
@@ -294,9 +291,21 @@ function buildNormalizedData(crawledData, categoryId, amenityIds, now) {
   normalizedData.rawAmenities = crawledData.amenities;
   normalizedData.rawCrawlMeta = crawledData.crawlMeta;
 
+  if (crawledData.photoUrls?.length) {
+    normalizedData.rawPhotoUrls = crawledData.photoUrls;
+    normalizedData.totalPhotos = crawledData.photoUrls.length;
+    normalizedData.coverPhoto = {
+      publicUrl: crawledData.photoUrls[0],
+      thumbnailUrl: null,
+      width: null,
+      height: null
+    };
+  }
+
   delete normalizedData.photos;
   delete normalizedData.amenities;
   delete normalizedData.crawlMeta;
+  delete normalizedData.photoUrls;
 
   return normalizedData;
 }
@@ -572,7 +581,7 @@ async function upsertGym(crawledData) {
       // 2. Parallel ingestion of secondary scaled data — all receive the same opgId
       const [revCount, photoCount] = await Promise.all([
         insertReviews(gymId, crawledData.reviews, opgId),
-        upsertPhotos(gymId, crawledData.photos, now, opgId),
+        upsertPhotos(gymId, crawledData.photoUrls, now, opgId),
         upsertCrawlMeta(gymId, crawledData.crawlMeta, now, opgId),
         upsertSpaceSource({ gymId, opgId, crawledData: normalizedData, now, status: 'completed' }),
       ]);
@@ -621,7 +630,7 @@ async function upsertGym(crawledData) {
     // 2. Parallel ingestion of external records (Merging into secondary collections)
     const [reviewResult, photoResult] = await Promise.all([
       mergeReviews(gymId, crawledData.reviews, opgId),
-      upsertPhotos(gymId, crawledData.photos, now, opgId),
+      upsertPhotos(gymId, crawledData.photoUrls, now, opgId),
       upsertCrawlMeta(gymId, crawledData.crawlMeta, now, opgId),
       upsertSpaceSource({ gymId, opgId, crawledData: normalizedData, now, status: 'completed' }),
     ]);

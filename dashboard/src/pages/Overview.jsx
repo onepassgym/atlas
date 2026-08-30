@@ -7,11 +7,12 @@ import CrawlActivity from '../components/CrawlActivity';
 import EnrichmentPanel from '../components/EnrichmentPanel';
 import Skeleton from '../components/Skeleton';
 import GymRow from '../components/GymRow';
-import GymDrawer from '../components/GymDrawer';
+import GymPreviewModal from '../components/GymPreviewModal';
 import SystemPanel from '../components/SystemPanel';
+import SystemHealth from '../components/SystemHealth';
 import JobsPanel from '../components/JobsPanel';
 import ChainsPanel from '../components/ChainsPanel';
-import NetworkTelemetry from '../components/NetworkTelemetry';
+
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
 
@@ -284,10 +285,8 @@ export default function Overview() {
 
       {/* ── System Activity (Live Crawler & Enrichment) ────── */}
       <div className="fluid-grid-large">
-        {(crawlActivity.status !== 'idle' || crawlActivity.recentActions.length > 0) ? (
+        {(crawlActivity.status !== 'idle' || crawlActivity.recentActions.length > 0) && (
           <CrawlActivity />
-        ) : (
-          <NetworkTelemetry stats={stats} queueStats={queueStats} />
         )}
         <EnrichmentPanel />
       </div>
@@ -456,69 +455,7 @@ export default function Overview() {
           </div>
         </div>
 
-        <div className="card">
-          <div className="card-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 12 }}>
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-              <div style={{ padding: 6, background: 'rgba(245, 158, 11, 0.1)', borderRadius: 8, border: '1px solid rgba(245, 158, 11, 0.2)' }}>
-                <Zap size={16} color="#f59e0b" />
-              </div>
-              Active & Recent Jobs
-            </span>
-          </div>
-          <div style={{ maxHeight: 300, overflowY: 'auto', paddingRight: 4 }}>
-            {jobs.length > 0 ? jobs.map((j, i) => {
-              const p = j.progress || {};
-              const total = p.total || 0;
-              const scraped = (p.scraped || 0) + (p.failed || 0) + (p.skipped || 0);
-              const pct = total > 0 ? Math.min(100, Math.round((scraped / total) * 100)) : 0;
-              const name = j.input?.cityName || j.input?.spaceName || j.input?.chainName || 'Unknown';
-              const typeIcon = j.type === 'chain' ? '🔗' : j.type === 'gym_name' ? '🏋' : '🏙️';
-              const errorCount = j.errorCount || (j.jobErrors?.length) || 0;
-              return (
-                <motion.div 
-                  key={j.jobId} 
-                  whileHover={{ backgroundColor: 'var(--row-hover)' }}
-                  style={{ 
-                    padding: '12px 10px', 
-                    borderBottom: i === jobs.length - 1 ? 'none' : '1px solid var(--border)', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: 12,
-                    borderRadius: 8,
-                    transition: 'background-color 0.2s'
-                  }}
-                >
-                  <div style={{ 
-                    width: 32, height: 32, borderRadius: 8, background: 'var(--bg-surface)', 
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 
-                  }}>
-                    {typeIcon}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                      <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>{name}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        {errorCount > 0 && <span className="error-badge">{errorCount}</span>}
-                        <span className={`badge-status ${j.status}`} style={{ fontSize: 10, padding: '2px 6px' }}>{j.status}</span>
-                      </div>
-                    </div>
-                    {j.status === 'running' && (
-                      <div className="progress-bar" style={{ marginTop: 8, marginBottom: 4, height: 4, background: 'var(--bg-surface)', border: 'none' }}>
-                        <div className="progress-fill" style={{ width: `${pct}%`, background: 'var(--warning)', boxShadow: '0 0 8px var(--warning)' }} />
-                      </div>
-                    )}
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'var(--mono)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--text-secondary)' }}>TOT</span> {total}</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--success)' }}>NEW</span> {p.newGyms || 0}</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--danger)' }}>FAIL</span> {p.failed || 0}</span>
-                      {p.batches > 0 && <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: 'var(--accent)' }}>BAT</span> {p.batchesDone || 0}/{p.batches}</span>}
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            }) : <div className="empty-state"><div className="empty-state-icon">📭</div><div>No jobs</div></div>}
-          </div>
-        </div>
+
       </div>
 
       {/* ── System Actions ────── */}
@@ -529,12 +466,13 @@ export default function Overview() {
         <JobsPanel />
       </div>
 
+      {/* ── System Health ────── */}
+      <div style={{ marginTop: 24 }}>
+        <SystemHealth />
+      </div>
 
-
-
-
-      {/* ── Gym Drawer ────── */}
-      {selectedGym && <GymDrawer gymId={selectedGym} onClose={() => setSelectedGym(null)} />}
+      {/* ── Gym Preview Popup ────── */}
+      {selectedGym && <GymPreviewModal gymId={selectedGym} onClose={() => setSelectedGym(null)} />}
     </motion.div>
   );
 }
