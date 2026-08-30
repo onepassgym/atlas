@@ -14,15 +14,28 @@ function getEnv(key, defaultValue) {
 
 module.exports = {
   server: {
-    port: parseInt(process.env.PORT || '8747', 10),
+    port: parseInt(process.env.PORT || '5070', 10),
     env:  env,
   },
   auth: {
     apiKeys: (process.env.API_KEYS || 'atlas_dev_secret').split(',').map(k => k.trim()).filter(Boolean),
   },
   mongo: {
-    uri:    getEnv('MONGODB_URI', isProd ? 'mongodb://mongo:27017/atlas06' : 'mongodb://127.0.0.1:27328/atlas06'),
-    dbName: process.env.MONGODB_DB_NAME || 'atlas06',
+    uri:    getEnv('MONGODB_URI', isProd ? 'mongodb://mongo:27051/atlas' : 'mongodb://127.0.0.1:27050/atlas'),
+    dbName: process.env.MONGODB_DB_NAME || 'atlas',
+  },
+  collections: {
+    spaces:          process.env.MONGODB_COLLECTION_SPACES || 'spaces',
+    spaceReviews:    process.env.MONGODB_COLLECTION_SPACE_REVIEWS || 'space_reviews',
+    spacePhotos:     process.env.MONGODB_COLLECTION_SPACE_PHOTOS || 'space_photos',
+    spaceChains:     process.env.MONGODB_COLLECTION_SPACE_CHAINS || 'space_chains',
+    spaceCategories: process.env.MONGODB_COLLECTION_SPACE_CATEGORIES || 'space_categories',
+    spaceAmenities:  process.env.MONGODB_COLLECTION_SPACE_AMENITIES || 'space_amenities',
+    spacePlaceTypes: process.env.MONGODB_COLLECTION_SPACE_PLACE_TYPES || 'space_place_types',
+    spaceCrawlMeta:  process.env.MONGODB_COLLECTION_SPACE_CRAWL_META || 'space_crawl_meta',
+    spaceCrawlJobs:  process.env.MONGODB_COLLECTION_SPACE_CRAWL_JOBS || 'space_crawl_jobs',
+    spaceChangeLogs: process.env.MONGODB_COLLECTION_SPACE_CHANGE_LOGS || 'space_change_logs',
+    spaceSources:    process.env.MONGODB_COLLECTION_SPACE_SOURCES || 'space_sources',
   },
   redis: {
     host:     getEnv('REDIS_HOST', isProd ? 'redis' : '127.0.0.1'),
@@ -58,7 +71,7 @@ module.exports = {
   // Set to true in .env to re-enable Sharp/Axios downloads via downloader.js.
   media: {
     basePath:        process.env.MEDIA_BASE_PATH || './media',
-    baseUrl:         getEnv('MEDIA_BASE_URL', isProd ? 'https://atlas.onepassgym.com/media' : `http://localhost:${process.env.PORT || '8747'}/media`),
+    baseUrl:         getEnv('MEDIA_BASE_URL', isProd ? 'https://atlas.onepassgym.com/media' : `http://localhost:${process.env.PORT || '5070'}/media`),
     downloadEnabled: process.env.MEDIA_DOWNLOAD_ENABLED === 'true', // default false
   },
   dedup: {

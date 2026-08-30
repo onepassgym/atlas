@@ -11,7 +11,7 @@ const {
 } = require('../queue/queues');
 const { FITNESS_CATEGORIES } = require('../scraper/googleMapsScraper');
 const CrawlJob = require('../db/crawlJobModel');
-const Gym      = require('../db/gymModel');
+const Gym      = require('../db/spaceModel');
 const logger   = require('../utils/logger');
 
 const { ok, err, validate } = require('../utils/apiUtils');
@@ -100,9 +100,9 @@ router.post('/city',
 
 /**
  * @swagger
- * /api/crawl/gym:
+ * /api/crawl/space:
  *   post:
- *     summary: Queue a crawl for a specific gym name
+ *     summary: Queue a crawl for a specific space name
  *     tags: [Crawl]
  *     requestBody:
  *       required: true
@@ -110,27 +110,27 @@ router.post('/city',
  *         application/json:
  *           schema:
  *             type: object
- *             required: [gymName]
+ *             required: [spaceName]
  *             properties:
- *               gymName:
+ *               spaceName:
  *                 type: string
  *                 example: "Gold's Gym Andheri Mumbai"
  *     responses:
  *       202:
- *         description: Gym crawl queued successfully
+ *         description: Space crawl queued successfully
  */
-// POST /api/crawl/gym
-router.post('/gym',
-  body('gymName').notEmpty().trim(),
+// POST /api/crawl/space
+router.post('/space',
+  body('spaceName').notEmpty().trim(),
   async (req, res) => {
     if (validate(req, res)) return;
-    const { gymName } = req.body;
+    const { spaceName } = req.body;
     const jobId = uuidv4();
     try {
-      await CrawlJob.create({ jobId, type: 'gym_name', input: { gymName }, status: 'queued' });
-      await addGymNameJob(jobId, gymName);
-      bus.publish('job:queued', { jobId, type: 'gym_name', gymName });
-      ok(res, { message: `Gym crawl queued for "${gymName}"`, jobId, trackAt: `/api/crawl/status/${jobId}` }, 202);
+      await CrawlJob.create({ jobId, type: 'gym_name', input: { spaceName }, status: 'queued' });
+      await addGymNameJob(jobId, spaceName);
+      bus.publish('job:queued', { jobId, type: 'gym_name', spaceName });
+      ok(res, { message: `Space crawl queued for "${spaceName}"`, jobId, trackAt: `/api/crawl/status/${jobId}` }, 202);
     } catch (e) { logger.error(e.message); err(res, e.message); }
   }
 );
@@ -372,8 +372,7 @@ router.post('/force-complete/:jobId', async (req, res) => {
  *       404:
  *         description: Job not found
  */
-// POST /api/crawl/start-now/:jobId — promote a queued job to run immediately
-router.post('/start-now/:jobId', async (req, res) => {
+async function startNowHandler(req, res) {
   try {
     const { jobId } = req.params;
     const dbJob = await CrawlJob.findOne({ jobId }).lean();
@@ -399,18 +398,45 @@ router.post('/start-now/:jobId', async (req, res) => {
     }
 
     if (result === 'already_active') {
+      // Keep DB state in sync with BullMQ when we detect active execution.
+      await CrawlJob.updateOne(
+        { jobId, status: 'queued' },
+        { status: 'running', startedAt: new Date() }
+      ).catch(() => {});
       return ok(res, { message: 'Job is already being processed by a worker.', jobId, status: 'running' });
     }
 
-    bus.publish('job:promoted', { jobId, type: dbJob.type, cityName: dbJob.input?.cityName, gymName: dbJob.input?.gymName });
+    const [queueJob, queueStats] = await Promise.all([
+      getQueueJobStatus(jobId),
+      getQueueStats().catch(() => null),
+    ]);
+    if (queueJob?.state === 'active') {
+      await CrawlJob.updateOne(
+        { jobId, status: 'queued' },
+        { status: 'running', startedAt: new Date() }
+      ).catch(() => {});
+    }
+
+    const workersBusyNote = queueJob?.state === 'waiting' && (queueStats?.active || 0) > 0
+      ? ` Promoted successfully, but ${queueStats.active} worker slot(s) are currently busy.`
+      : '';
+
+    bus.publish('job:promoted', { jobId, type: dbJob.type, cityName: dbJob.input?.cityName, spaceName: dbJob.input?.spaceName });
     logger.info(`⚡ Job ${jobId} promoted to front via API`);
     return ok(res, {
-      message: `Job promoted to front of queue — it will start on the next available worker.`,
+      message: `Job promoted to front of queue — it will start on the next available worker.${workersBusyNote}`,
       jobId,
       promoted: true,
+      queueState: queueJob?.state || 'unknown',
+      queue: queueStats || undefined,
     });
   } catch (e) { err(res, e.message); }
-});
+}
+
+// POST /api/crawl/start-now/:jobId — promote a queued job to run immediately
+router.post('/start-now/:jobId', startNowHandler);
+// Backward-compatible GET support (manual/browser hits) to avoid method mismatch failures.
+router.get('/start-now/:jobId', startNowHandler);
 
 /**
  * @swagger
@@ -470,19 +496,36 @@ router.post('/retry/incomplete',
     if (validate(req, res)) return;
     const threshold = req.body.threshold || 50;
     try {
-      const gyms = await Gym.find({ 'crawlMeta.dataCompleteness': { $lt: threshold } }).select('name areaName').limit(200).lean();
+      const gyms = await Gym.aggregate([
+        {
+          $addFields: {
+            effectiveCompleteness: { $ifNull: ['$crawl.dataCompleteness', '$crawlMeta.dataCompleteness'] },
+          },
+        },
+        {
+          $match: {
+            $or: [
+              { effectiveCompleteness: { $lt: threshold } },
+              { effectiveCompleteness: { $exists: false } },
+              { effectiveCompleteness: null },
+            ],
+          },
+        },
+        { $project: { name: 1, areaName: 1 } },
+        { $limit: 200 },
+      ]);
       if (!gyms.length) return ok(res, { message: `No gyms found with completeness < ${threshold}%` });
 
       const jobs = [];
       for (const g of gyms) {
         const jobId = uuidv4();
-        const gymName = `${g.name} ${g.areaName || ''}`.trim();
-        await CrawlJob.create({ jobId, type: 'gym_name', input: { gymName }, status: 'queued' });
-        await addGymNameJob(jobId, gymName);
-        jobs.push({ gymName, jobId });
+        const spaceName = `${g.name} ${g.areaName || ''}`.trim();
+        await CrawlJob.create({ jobId, type: 'gym_name', input: { spaceName }, status: 'queued' });
+        await addGymNameJob(jobId, spaceName);
+        jobs.push({ spaceName, jobId });
       }
-      logger.info(`Re-queued ${gyms.length} incomplete gyms via API`);
-      ok(res, { message: `Re-queued ${gyms.length} incomplete gyms`, jobs });
+      logger.info(`Re-queued ${gyms.length} incomplete spaces via API`);
+      ok(res, { message: `Re-queued ${gyms.length} incomplete spaces`, jobs });
     } catch (e) { err(res, e.message); }
 });
 

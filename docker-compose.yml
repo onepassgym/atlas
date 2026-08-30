@@ -4,13 +4,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: atlas06-api
+    container_name: atlas-api
     restart: unless-stopped
     ports:
-      - "8747:8747"
+      - "5070:5070"
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas06
+      - MONGODB_URI=mongodb://mongo:27051/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=${NODE_ENV:-production}
@@ -36,7 +36,7 @@ services:
         limits:
           memory: 768M
     healthcheck:
-      test: [ "CMD", "node", "-e", "require('http').get('http://localhost:8747/health', r => process.exit(r.statusCode === 200 ? 0 : 1))" ]
+      test: [ "CMD", "node", "-e", "require('http').get('http://localhost:5070/health', r => process.exit(r.statusCode === 200 ? 0 : 1))" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -48,7 +48,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas06
+      - MONGODB_URI=mongodb://mongo:27051/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=${NODE_ENV:-production}
@@ -80,7 +80,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas06
+      - MONGODB_URI=mongodb://mongo:27051/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=${NODE_ENV:-production}
@@ -113,7 +113,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/atlas06
+      - MONGODB_URI=mongodb://mongo:27051/atlas
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - NODE_ENV=${NODE_ENV:-production}
@@ -135,19 +135,19 @@ services:
 
   mongo:
     image: mongo:7.0
-    container_name: atlas06-mongo
+    container_name: atlas-mongo
     restart: unless-stopped
     ports:
-      - "27328:27017"
+      - "27050:27051"
     volumes:
       - mongo_data:/data/db
-    command: mongod --wiredTigerCacheSizeGB 1
+    command: mongod --port 27051 --wiredTigerCacheSizeGB 1
     deploy:
       resources:
         limits:
           memory: 2G
     healthcheck:
-      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      test: [ "CMD", "mongosh", "--port", "27051", "--eval", "db.adminCommand('ping')" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -155,7 +155,7 @@ services:
 
   redis:
     image: redis:7.2-alpine
-    container_name: atlas06-redis
+    container_name: atlas-redis
     restart: unless-stopped
     ports:
       - "6847:6379"
@@ -175,17 +175,17 @@ services:
 
   dashboard:
     image: node:20-slim
-    container_name: atlas06-dashboard
+    container_name: atlas-dashboard
     working_dir: /app
     ports:
-      - "5173:5173"
+      - "4060:4060"
     volumes:
       - ./dashboard:/app
       - /app/node_modules
     environment:
       - NODE_ENV=${NODE_ENV:-development}
-      - VITE_API_URL=http://api:8747
-    command: sh -c "if [ \"$$NODE_ENV\" = \"production\" ]; then echo 'Dashboard built-in API'; else npm install && npm run dev -- --host; fi"
+      - VITE_API_URL=http://api:5070
+    command: sh -c "if [ \"$$NODE_ENV\" = \"production\" ]; then echo 'Dashboard built-in API'; else npm install && npm run dev -- --host --port 4060; fi"
     networks: [ opg ]
 
 volumes:

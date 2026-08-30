@@ -1,49 +1,147 @@
 'use strict';
 
-const WORDS = [
-  'TIGER','EAGLE','WOLF','BULL','BEAR','LION','HAWK','LYNX',
-  'COBRA','VIPER','CRANE','RAVEN','BISON','MOOSE','PUMA',
-  'BOLT','IRON','APEX','FLUX','PEAK','FORGE','STORM','NOVA',
-  'BLAZE','SURGE','PULSE','FORCE','DRIVE','SPARK','FLARE',
-  'STONE','STEEL','FROST','EMBER','RIDGE','CLIFF','DUNE',
-  'CEDAR','MAPLE','FLINT','SLATE','ONYX','SWIFT','DASH',
-  'VAULT','LEAP','RUSH','CLIMB','THRUST','PIVOT','GRIND',
-  'GRIT','CORE','TITAN','VALOR','CREST','CROWN','SHIELD',
-  'LANCE','ARROW','SPEAR','BLADE','RIVER','THUNDER','SOLAR',
-  'LUNAR','ORBIT','ZENITH','DELTA','SIGMA','ATLAS','ORION',
-  'PHOENIX','FALCON','CONDOR','JAGUAR','PANTHER','CHEETAH',
-  'BRONCO','MUSTANG','RAPIDS','SUMMIT','CANYON','TUNDRA',
-  'SIERRA','DRAKE','OSPREY','KESTREL','MERLIN','SABLE',
-  'DINGO','RHINO','MAMBA','PYTHON','NOMAD','RANGER','SCOUT',
-  'ROVER','REBEL','MAVERICK','CIPHER','AXIOM','NEXUS','VERTEX',
-  'HUSTLE','PUSH','SPRINT','GLIDE','LAUNCH','QUARTZ','SAVANNA',
-  'SMOKE','COMET','VORTEX','TORQUE','DYNAMO','RECON',
-  'RAMPART','ZENON','STRIDER','BRAWL','KODIAK','RAPTOR',
-  'LANCER','SPECTER','OBSIDIAN','GRANITE'
-];
+const mongoose = require('mongoose');
+const WORDS = require('../../config/opgWords.json');
 
-const POOL = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const HEX_BLOCK_SIZE = 0x10000;
+const COUNTER_COLLECTION = 'opg_id_counters';
+const BUSINESS_ID_RE = /^([A-Z]{3})-([A-Z]+)-([A-F0-9]{4})$/;
 
-function generateOpgId() {
-  const word = WORDS[Math.floor(Math.random() * WORDS.length)];
-  const key = Array.from({ length: 4 }, () =>
-    POOL[Math.floor(Math.random() * POOL.length)]).join('');
-  return `OPG-${word}-${key}`;
+function assertWordCatalog() {
+  if (!Array.isArray(WORDS) || WORDS.length < 20 || WORDS.length > 50) {
+    throw new Error('OPG word catalog must contain between 20 and 50 entries');
+  }
+
+  const seen = new Set();
+  for (const word of WORDS) {
+    if (!/^[A-Z]+$/.test(word)) {
+      throw new Error(`Invalid OPG word catalog entry: ${word}`);
+    }
+    if (seen.has(word)) {
+      throw new Error(`Duplicate OPG word catalog entry: ${word}`);
+    }
+    seen.add(word);
+  }
 }
 
-async function generateUniqueOpgId(GymModel) {
-  let id, exists, attempts = 0;
-  do {
-    if (attempts > 100) throw new Error('opgId generation exceeded 100 attempts');
-    id = generateOpgId();
-    exists = await GymModel.exists({ opgId: id });
-    attempts++;
-  } while (exists);
-  return id;
+assertWordCatalog();
+
+function normalizePrefix(prefix) {
+  if (typeof prefix !== 'string' || !/^[A-Za-z]{3}$/.test(prefix)) {
+    throw new Error('ID prefix must be exactly 3 letters');
+  }
+  return prefix.toUpperCase();
 }
 
-function isValidOpgId(str) {
-  return /^OPG-[A-Z]+-[A-Z2-9]{4}$/.test(str);
+function getPrefixCapacity() {
+  return WORDS.length * HEX_BLOCK_SIZE;
 }
 
-module.exports = { generateOpgId, generateUniqueOpgId, isValidOpgId };
+function formatHex4(value) {
+  return value.toString(16).toUpperCase().padStart(4, '0');
+}
+
+function buildBusinessId(prefix, sequence) {
+  const normalizedPrefix = normalizePrefix(prefix);
+
+  if (!Number.isInteger(sequence) || sequence < 0) {
+    throw new Error('Sequence must be a non-negative integer');
+  }
+
+  const capacity = getPrefixCapacity();
+  if (sequence >= capacity) {
+    throw new Error(`ID space exhausted for prefix ${normalizedPrefix}`);
+  }
+
+  const wordIndex = Math.floor(sequence / HEX_BLOCK_SIZE);
+  const hexValue = sequence % HEX_BLOCK_SIZE;
+
+  return `${normalizedPrefix}-${WORDS[wordIndex]}-${formatHex4(hexValue)}`;
+}
+
+function parseBusinessId(value) {
+  if (typeof value !== 'string') return null;
+
+  const match = value.trim().toUpperCase().match(BUSINESS_ID_RE);
+  if (!match) return null;
+
+  const [, prefix, word, hex] = match;
+  const wordIndex = WORDS.indexOf(word);
+  if (wordIndex === -1) return null;
+
+  const sequence = (wordIndex * HEX_BLOCK_SIZE) + parseInt(hex, 16);
+  if (sequence >= getPrefixCapacity()) return null;
+
+  return { prefix, word, hex, sequence };
+}
+
+function isValidBusinessId(value, prefix) {
+  const parsed = parseBusinessId(value);
+  if (!parsed) return false;
+  return prefix ? parsed.prefix === normalizePrefix(prefix) : true;
+}
+
+async function reserveSequence(prefix) {
+  const normalizedPrefix = normalizePrefix(prefix);
+  const db = mongoose.connection.db;
+
+  if (!db) {
+    throw new Error('MongoDB connection is required before generating IDs');
+  }
+
+  const counters = db.collection(COUNTER_COLLECTION);
+  const now = new Date();
+  const result = await counters.findOneAndUpdate(
+    { prefix: normalizedPrefix },
+    {
+      $inc: { value: 1 },
+      $set: { updatedAt: now },
+      $setOnInsert: { prefix: normalizedPrefix, createdAt: now },
+    },
+    {
+      upsert: true,
+      returnDocument: 'after',
+    }
+  );
+
+  const counterValue = result?.value?.value;
+  if (!Number.isInteger(counterValue) || counterValue <= 0) {
+    throw new Error(`Failed to allocate ID sequence for prefix ${normalizedPrefix}`);
+  }
+
+  return counterValue - 1;
+}
+
+async function generateBusinessId(prefix) {
+  const sequence = await reserveSequence(prefix);
+  return buildBusinessId(prefix, sequence);
+}
+
+async function generateOpgId() {
+  return generateBusinessId('OPG');
+}
+
+async function generateUniqueOpgId() {
+  return generateBusinessId('OPG');
+}
+
+function isValidOpgId(value) {
+  return isValidBusinessId(value, 'OPG');
+}
+
+module.exports = {
+  WORDS,
+  BUSINESS_ID_RE,
+  COUNTER_COLLECTION,
+  buildBusinessId,
+  formatHex4,
+  generateBusinessId,
+  generateOpgId,
+  generateUniqueOpgId,
+  getPrefixCapacity,
+  isValidBusinessId,
+  isValidOpgId,
+  normalizePrefix,
+  parseBusinessId,
+  reserveSequence,
+};

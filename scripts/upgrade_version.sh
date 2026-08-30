@@ -4,7 +4,7 @@
 
 if [ -z "$1" ] || [ -z "$2" ]; then
   echo "Usage: ./scripts/upgrade_version.sh <OldName> <NewName>"
-  echo "Example: ./scripts/upgrade_version.sh Atlas06 Atlas07"
+  echo "Example: ./scripts/upgrade_version.sh Atlas Atlas07"
   exit 1
 fi
 

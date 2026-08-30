@@ -79,10 +79,10 @@ export default function Overview() {
   const fetchAll = useCallback(async () => {
     try {
       const [gymRes, queueRes, chainRes, latestRes, jobsRes, stateRes] = await Promise.all([
-        api.get('/api/gyms/stats').catch(() => null),
+        api.get('/api/spaces/stats').catch(() => null),
         api.get('/api/crawl/queue/stats').catch(() => null),
         api.get('/api/chains').catch(() => ({ chains: [] })),
-        api.get('/api/gyms?limit=6&sortBy=createdAt').catch(() => null),
+        api.get('/api/spaces?limit=6&sortBy=createdAt').catch(() => null),
         api.get('/api/crawl/jobs?limit=6').catch(() => null),
         api.get('/api/system/state').catch(() => ({ state: {} }))
       ]);
@@ -132,8 +132,8 @@ export default function Overview() {
         api.get('/api/crawl/jobs?limit=6').then(r => r?.success && setJobs(r.jobs || [])).catch(() => {});
       }
       if (refetchGyms) {
-        api.get('/api/gyms/stats').then(r => r?.success && setStats(r.stats)).catch(() => {});
-        api.get('/api/gyms?limit=6&sortBy=createdAt').then(r => r?.success && setLatestGyms(r.gyms || [])).catch(() => {});
+        api.get('/api/spaces/stats').then(r => r?.success && setStats(r.stats)).catch(() => {});
+        api.get('/api/spaces?limit=6&sortBy=createdAt').then(r => r?.success && setLatestGyms(r.gyms || [])).catch(() => {});
       }
     }, 2000);
     
@@ -471,7 +471,7 @@ export default function Overview() {
               const total = p.total || 0;
               const scraped = (p.scraped || 0) + (p.failed || 0) + (p.skipped || 0);
               const pct = total > 0 ? Math.min(100, Math.round((scraped / total) * 100)) : 0;
-              const name = j.input?.cityName || j.input?.gymName || j.input?.chainName || 'Unknown';
+              const name = j.input?.cityName || j.input?.spaceName || j.input?.chainName || 'Unknown';
               const typeIcon = j.type === 'chain' ? '🔗' : j.type === 'gym_name' ? '🏋' : '🏙️';
               const errorCount = j.errorCount || (j.jobErrors?.length) || 0;
               return (

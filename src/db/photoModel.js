@@ -1,5 +1,6 @@
 'use strict';
 const mongoose = require('mongoose');
+const cfg = require('../../config');
 
 const PhotoSchema = new mongoose.Schema({
   gymId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Gym', index: true },
@@ -41,7 +42,7 @@ const PhotoSchema = new mongoose.Schema({
   fsExists:     { type: Boolean, default: true },
 }, {
   timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
-  collection: 'gym_photos',
+  collection: cfg.collections.spacePhotos,
   autoIndex: false,
 });
 

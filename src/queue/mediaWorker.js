@@ -2,7 +2,7 @@
 /**
  * mediaWorker.js — Dedicated BullMQ worker for photo download + resize.
  *
- * Consumes jobs from the 'atlas06-media' queue (enqueued by gymProcessor.js).
+ * Consumes jobs from the 'atlas-media' queue (enqueued by gymProcessor.js).
  * Does NOT use Playwright — purely HTTP downloads + Sharp image processing.
  * Can safely run at high concurrency (8-10) since it is I/O bound, not CPU bound.
  *
@@ -15,7 +15,7 @@ require('dotenv').config();
 const { Worker }             = require('bullmq');
 const { connectDB }          = require('../db/connection');
 const { downloadAllMedia }   = require('../media/downloader');
-const Gym                    = require('../db/gymModel');
+const Gym                    = require('../db/spaceModel');
 const Photo                  = require('../db/photoModel');
 const SystemState            = require('../db/systemStateModel');
 const cfg                    = require('../../config');
@@ -65,7 +65,11 @@ async function processMediaJob(job) {
     if (!media.length) {
       logger.warn(`[media] All downloads failed for ${slug}`);
       await Gym.findByIdAndUpdate(gymId, {
-        $set: { 'crawlMeta.mediaStatus': 'failed', updatedAt: new Date() }
+        $set: {
+          'crawlMeta.mediaStatus': 'failed',
+          'crawl.mediaStatus': 'failed',
+          updatedAt: new Date(),
+        }
       });
       return { downloaded: 0, failed: photoUrls.length };
     }
@@ -121,6 +125,7 @@ async function processMediaJob(job) {
         visualAppealScore,
         totalPhotos: media.length,
         'crawlMeta.mediaStatus': failed > 0 ? 'partial' : 'completed',
+        'crawl.mediaStatus': failed > 0 ? 'partial' : 'completed',
         updatedAt:   now,
       }
     });
@@ -133,7 +138,11 @@ async function processMediaJob(job) {
     // Mark as failed so enrichment job can retry
     try {
       await Gym.findByIdAndUpdate(gymId, {
-        $set: { 'crawlMeta.mediaStatus': 'failed', updatedAt: new Date() }
+        $set: {
+          'crawlMeta.mediaStatus': 'failed',
+          'crawl.mediaStatus': 'failed',
+          updatedAt: new Date(),
+        }
       });
     } catch (_) {}
     throw err;
@@ -145,7 +154,7 @@ async function processMediaJob(job) {
 async function start() {
   await connectDB();
 
-  const worker = new Worker('atlas06-media', processMediaJob, {
+  const worker = new Worker('atlas-media', processMediaJob, {
     connection,
     concurrency: MEDIA_CONCURRENCY,
     lockDuration: 120_000, // 2 min — media jobs are fast
@@ -161,7 +170,7 @@ async function start() {
     logger.error(`[media] Worker error: ${err.message}`);
   });
 
-  logger.info(`\n📷 Atlas06 Media Worker started [concurrency: ${MEDIA_CONCURRENCY}]`);
+  logger.info(`\n📷 Atlas Media Worker started [concurrency: ${MEDIA_CONCURRENCY}]`);
 
   // ── Graceful shutdown ────────────────────────────────────────────────────
   const shutdown = async (signal) => {

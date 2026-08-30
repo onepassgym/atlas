@@ -1,5 +1,6 @@
 'use strict';
 const mongoose = require('mongoose');
+const cfg = require('../../config');
 
 const GymChainSchema = new mongoose.Schema({
   slug:           { type: String, required: true, unique: true },   // "anytime-fitness"
@@ -31,7 +32,7 @@ const GymChainSchema = new mongoose.Schema({
   crawlFrequency:   { type: String, enum: ['weekly', 'biweekly', 'monthly', 'quarterly'], default: 'monthly' },
   isActive:         { type: Boolean, default: true },
 
-}, { timestamps: true, collection: 'gym_chains' });
+}, { timestamps: true, collection: cfg.collections.spaceChains });
 
 GymChainSchema.index({ name: 1 });
 GymChainSchema.index({ isActive: 1 });

@@ -3,7 +3,7 @@ const express   = require('express');
 const mongoose  = require('mongoose');
 const { query, param, validationResult } = require('express-validator');
 const router    = express.Router();
-const Gym       = require('../db/gymModel');
+const Gym       = require('../db/spaceModel');
 const Photo     = require('../db/photoModel');
 
 const { ok, err, validate } = require('../utils/apiUtils');
@@ -28,7 +28,7 @@ const STATS_CACHE_TTL = 30_000; // 30 seconds
 
 /**
  * @swagger
- * /api/gyms/suggestions:
+ * /api/spaces/suggestions:
  *   get:
  *     summary: Get autocomplete suggestions for search input
  *     tags: [Gyms]
@@ -122,7 +122,7 @@ router.get('/suggestions', async (req, res) => {
 
 /**
  * @swagger
- * /api/gyms/cities:
+ * /api/spaces/cities:
  *   get:
  *     summary: Get all unique cities/areas for filter dropdown
  *     tags: [Gyms]
@@ -145,7 +145,7 @@ router.get('/cities', async (_, res) => {
 
 /**
  * @swagger
- * /api/gyms:
+ * /api/spaces:
  *   get:
  *     summary: List gyms with advanced filtering
  *     tags: [Gyms]
@@ -188,7 +188,7 @@ router.get('/cities', async (_, res) => {
  *       200:
  *         description: Paginated list of gyms
  */
-// GET /api/gyms  — list with filters
+// GET /api/spaces  — list with filters
 router.get('/',
   query('city').optional().trim(),
   query('category').optional().trim(),
@@ -311,7 +311,7 @@ router.get('/',
 
 /**
  * @swagger
- * /api/gyms/nearby:
+ * /api/spaces/nearby:
  *   get:
  *     summary: Find gyms near coordinates (Geospatial)
  *     tags: [Gyms]
@@ -343,7 +343,7 @@ router.get('/',
  *       200:
  *         description: List of nearby gyms
  */
-// GET /api/gyms/nearby  — geospatial
+// GET /api/spaces/nearby  — geospatial
 router.get('/nearby',
   query('lat').isFloat(),
   query('lng').isFloat(),
@@ -369,7 +369,7 @@ router.get('/nearby',
 
 /**
  * @swagger
- * /api/gyms/stats:
+ * /api/spaces/stats:
  *   get:
  *     summary: Get overall venue statistics
  *     tags: [Gyms]
@@ -377,7 +377,7 @@ router.get('/nearby',
  *       200:
  *         description: Statistics object
  */
-// GET /api/gyms/stats
+// GET /api/spaces/stats
 router.get('/stats', async (_, res) => {
   try {
     // Return cached stats if fresh enough
@@ -447,7 +447,7 @@ router.get('/stats', async (_, res) => {
   } catch (e) { err(res, e.message); }
 });
 
-// GET /api/gyms/export — download all gym data as JSON
+// GET /api/spaces/export — download all gym data as JSON
 router.get('/export', async (req, res) => {
   res.setHeader('Content-disposition', 'attachment; filename=gyms-export.json');
   res.setHeader('Content-type', 'application/json');
@@ -484,7 +484,7 @@ router.get('/export', async (req, res) => {
 
 /**
  * @swagger
- * /api/gyms/{id}:
+ * /api/spaces/{id}:
  *   get:
  *     summary: Get full details for a specific gym
  *     tags: [Gyms]
@@ -500,7 +500,7 @@ router.get('/export', async (req, res) => {
  *       404:
  *         description: Gym not found
  */
-// GET /api/gyms/photos — paginated photo library (MUST be before /:id)
+// GET /api/spaces/photos — paginated photo library (MUST be before /:id)
 // Queries the gym_photos collection (Photo model) — NOT rawPhotos embedded arrays.
 // This surfaces all 26k+ downloaded media records.
 router.get('/photos', async (req, res) => {
@@ -547,7 +547,7 @@ async function resolveGym(req, res, next) {
   } catch (e) { err(res, e.message); }
 }
 
-// GET /api/gyms/:opgId
+// GET /api/spaces/:opgId
 router.get('/:opgId',
   param('opgId')
     .matches(/^OPG-[A-Z]+-[A-Z2-9]{4}$/)
@@ -570,7 +570,7 @@ router.get('/:opgId',
   }
 );
 
-// PATCH /api/gyms/:opgId  — update platform fields only
+// PATCH /api/spaces/:opgId  — update platform fields only
 router.patch('/:opgId',
   param('opgId')
     .matches(/^OPG-[A-Z]+-[A-Z2-9]{4}$/)
@@ -578,7 +578,7 @@ router.patch('/:opgId',
   resolveGym,
   async (req, res) => {
     if (validate(req, res)) return;
-    const allowed = ['atlas06'];
+    const allowed = ['atlas'];
     const set = {};
     for (const k of allowed) if (req.body[k]) set[k] = req.body[k];
     try {

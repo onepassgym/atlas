@@ -3,7 +3,7 @@ const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const router = express.Router();
 
-const Gym = require('../db/gymModel');
+const Gym = require('../db/spaceModel');
 const EnrichmentLog = require('../db/enrichmentLogModel');
 const logger = require('../utils/logger');
 const { ok, err, validate } = require('../utils/apiUtils');

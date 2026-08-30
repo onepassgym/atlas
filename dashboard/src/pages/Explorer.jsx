@@ -116,7 +116,7 @@ export default function Explorer() {
     if (chainOnly) params.set('isChainMember', 'true');
 
     try {
-      const res = await api.get(`/api/gyms?${params.toString()}`);
+      const res = await api.get(`/api/spaces?${params.toString()}`);
       if (res?.success) {
         setGyms(res.gyms || []);
         setTotal(res.total || 0);
@@ -142,7 +142,7 @@ export default function Explorer() {
     
     setSuggestionsLoading(true);
     try {
-      const res = await api.get(`/api/gyms/suggestions?q=${encodeURIComponent(query)}`);
+      const res = await api.get(`/api/spaces/suggestions?q=${encodeURIComponent(query)}`);
       if (!controller.signal.aborted && res?.success) {
         setSuggestions(res.suggestions || []);
       }
@@ -157,14 +157,14 @@ export default function Explorer() {
   useEffect(() => {
     if (loaded) return;
     setLoaded(true);
-    api.get('/api/gyms/stats').then(res => {
+    api.get('/api/spaces/stats').then(res => {
       if (res?.success) {
         setCategories(res.stats?.byCategory || []);
         setCities((res.stats?.topCities || []).map(c => ({ name: c._id, count: c.count })));
       }
     }).catch(() => {});
     // Also load all cities
-    api.get('/api/gyms/cities').then(res => {
+    api.get('/api/spaces/cities').then(res => {
       if (res?.success) setCities(res.cities || []);
     }).catch(() => {});
     searchGyms(1);
@@ -239,7 +239,7 @@ export default function Explorer() {
 
   const handleExport = () => {
     const a = document.createElement('a');
-    a.href = `${getBaseUrl()}/api/gyms/export`;
+    a.href = `${getBaseUrl()}/api/spaces/export`;
     a.download = 'gyms-export.json';
     a.click();
     toast('Export started…', 'info');

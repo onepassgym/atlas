@@ -17,10 +17,11 @@
  * On SKIP    — nothing changed, nothing written.
  */
 
-const Gym          = require('./gymModel');
+const Gym          = require('./spaceModel');
 const { Review, buildReviewDocs } = require('./reviewModel');
 const Photo          = require('./photoModel');
 const CrawlMeta      = require('./crawlMetaModel');
+const SpaceSource    = require('./spaceSourceModel');
 const Category       = require('./categoryModel');
 const Amenity        = require('./amenityModel');
 const PlaceType      = require('./placeTypeModel');
@@ -29,6 +30,7 @@ const { calculateQualityScore } = require('../services/intelligence/scoring');
 const { analyzeGymSentiment } = require('../services/intelligence/sentiment');
 const logger       = require('../utils/logger');
 const slugify      = require('slugify');
+const crypto       = require('crypto');
 const { generateUniqueOpgId } = require('../utils/opgId');
 
 
@@ -71,6 +73,92 @@ function jaccardSim(a, b) {
 function slugifyValue(str) {
   if (!str) return null;
   return str.toString().toLowerCase().trim().replace(/[\s\W-]+/g, '-');
+}
+
+function canonicalizeProviderUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  try {
+    const u = new URL(rawUrl);
+    u.hash = '';
+    u.search = '';
+    // Normalize trailing slash to reduce identity noise.
+    const normalized = u.toString().replace(/\/$/, '');
+    return normalized || null;
+  } catch (_) {
+    return rawUrl.trim().replace(/\/$/, '') || null;
+  }
+}
+
+function hashString(value) {
+  if (!value) return null;
+  return crypto.createHash('sha1').update(String(value)).digest('hex');
+}
+
+function computeSourcePayloadHash(data = {}) {
+  const stablePayload = {
+    name: data.name || null,
+    address: data.address || null,
+    lat: data.lat ?? null,
+    lng: data.lng ?? null,
+    phone: data.contact?.phone || null,
+    website: data.contact?.website || null,
+    rating: data.rating ?? null,
+    totalReviews: data.totalReviews ?? 0,
+    totalPhotos: data.totalPhotos ?? 0,
+    openNow: data.isOpenNow ?? null,
+  };
+  return hashString(JSON.stringify(stablePayload));
+}
+
+async function upsertSpaceSource({ gymId, opgId, crawledData, now, status = 'completed', error = null }) {
+  try {
+    const provider = 'google_maps';
+    const providerPlaceId = crawledData.placeId || null;
+    const providerUrlCanonical = canonicalizeProviderUrl(crawledData.googleMapsUrl);
+    const providerUrlHash = hashString(providerUrlCanonical);
+    const sourcePayloadHash = computeSourcePayloadHash(crawledData);
+    const filter = providerPlaceId
+      ? { provider, providerPlaceId }
+      : (providerUrlHash ? { provider, providerUrlHash } : { spaceId: gymId, provider });
+
+    const setPayload = {
+      spaceId: gymId,
+      ...(opgId ? { opgId } : {}),
+      provider,
+      ...(crawledData.googleMapsUrl ? { providerUrl: crawledData.googleMapsUrl } : {}),
+      ...(providerPlaceId ? { providerPlaceId } : {}),
+      ...(providerUrlCanonical ? { providerUrlCanonical } : {}),
+      ...(providerUrlHash ? { providerUrlHash } : {}),
+      ...(sourcePayloadHash ? { sourcePayloadHash } : {}),
+      lastSeenAt: now,
+      lastCrawledAt: now,
+      status,
+      lastJobId: crawledData.crawlMeta?.jobId || crawledData.crawlJobId || null,
+      lastError: error ? String(error).slice(0, 200) : null,
+      meta: {
+        sourceUrl: crawledData.crawlMeta?.sourceUrl || crawledData.googleMapsUrl || null,
+        dataCompleteness: crawledData.crawlMeta?.dataCompleteness ?? null,
+      },
+    };
+
+    await SpaceSource.updateOne(
+      filter,
+      {
+        $set: setPayload,
+        $setOnInsert: {
+          firstSeenAt: now,
+          crawlVersion: 0,
+        },
+        $inc: {
+          crawlVersion: 1,
+        },
+      },
+      { upsert: true }
+    );
+  } catch (err) {
+    // Non-fatal: source bindings should never stop crawl persistence.
+    logger.warn(`SpaceSource upsert warning: ${err.message}`);
+  }
 }
 
 // ── Resolve Normalized References ─────────────────────────────────────────────
@@ -156,30 +244,71 @@ async function upsertPhotos(gymId, rawPhotos = [], now, opgId) {
 }
 
 async function upsertCrawlMeta(gymId, rawMeta, now, opgId) {
-  if (!rawMeta) return;
+  const crawlMeta = rawMeta || {};
   await CrawlMeta.updateOne(
     { gymId },
     {
       $set: {
         lastCrawledAt: now,
-        crawlStatus: rawMeta.crawlStatus || 'completed',
-        crawlVersion: rawMeta.crawlVersion || 1,
-        crawlError: rawMeta.crawlError,
-        missingFields: rawMeta.missingFields,
-        dataCompleteness: rawMeta.dataCompleteness || 0,
-        sourceUrl: rawMeta.sourceUrl,
-        jobId: rawMeta.jobId,
+        crawlStatus: crawlMeta.crawlStatus || 'completed',
+        crawlVersion: crawlMeta.crawlVersion || 1,
+        crawlError: crawlMeta.crawlError,
+        missingFields: crawlMeta.missingFields,
+        dataCompleteness: crawlMeta.dataCompleteness || 0,
+        sourceUrl: crawlMeta.sourceUrl,
+        jobId: crawlMeta.jobId,
         updatedAt: now,
         ...(opgId ? { opgId } : {}),
       },
       $setOnInsert: {
         gymId,
-        firstCrawledAt: rawMeta.firstCrawledAt || now,
+        firstCrawledAt: crawlMeta.firstCrawledAt || now,
         createdAt: now
       }
     },
     { upsert: true }
   );
+}
+
+function buildNormalizedData(crawledData, categoryId, amenityIds, now) {
+  const normalizedData = { ...crawledData };
+  normalizedData.categoryId = categoryId;
+  normalizedData.amenityIds = amenityIds;
+  normalizedData.parsed = true;
+  normalizedData.primaryCategorySlug = slugifyValue(crawledData.category || 'fitness_venue') || 'fitness-venue';
+  normalizedData.categorySlugs = [...new Set((crawledData.categories || [crawledData.category]).filter(Boolean).map(slugifyValue).filter(Boolean))];
+  normalizedData.amenitySlugs = [...new Set((crawledData.amenities?.raw || []).map(slugifyValue).filter(Boolean))];
+  normalizedData.crawl = {
+    jobId: crawledData.crawlMeta?.jobId || crawledData.crawlJobId || null,
+    status: crawledData.crawlMeta?.crawlStatus || 'completed',
+    version: crawledData.crawlMeta?.crawlVersion || 1,
+    firstCrawledAt: crawledData.crawlMeta?.firstCrawledAt || now,
+    lastCrawledAt: now,
+    sourceUrl: crawledData.crawlMeta?.sourceUrl || crawledData.googleMapsUrl || null,
+    dataCompleteness: crawledData.crawlMeta?.dataCompleteness ?? 0,
+    mediaStatus: crawledData.crawlMeta?.mediaStatus || 'pending',
+  };
+
+  // Shift raw attributes so they don't collide with API virtual names.
+  normalizedData.rawPhotos    = crawledData.photos;
+  normalizedData.rawAmenities = crawledData.amenities;
+  normalizedData.rawCrawlMeta = crawledData.crawlMeta;
+
+  delete normalizedData.photos;
+  delete normalizedData.amenities;
+  delete normalizedData.crawlMeta;
+
+  return normalizedData;
+}
+
+function applyDerivedSignals(normalizedData, crawledData) {
+  const qScore = calculateQualityScore(normalizedData);
+  normalizedData.qualityScore = qScore.score;
+  normalizedData.scoreBreakdown = qScore.breakdown;
+
+  const sentiment = analyzeGymSentiment(crawledData.reviews);
+  normalizedData.sentimentScore = sentiment.score;
+  normalizedData.sentimentTags = sentiment.tags;
 }
 
 // ── Build GeoJSON location from lat/lng ───────────────────────────────────────
@@ -194,6 +323,26 @@ function buildLocation(lat, lng) {
 async function findExistingGym(crawledData) {
   const { slug, googleMapsUrl, placeId, lat, lng, name, address } = crawledData;
   const phone = crawledData.contact?.phone;
+
+  // Tier 0: provider-level source binding (strongest identity signal)
+  const provider = 'google_maps';
+  if (placeId) {
+    const sourceDoc = await SpaceSource.findOne({ provider, providerPlaceId: placeId }, { spaceId: 1 }).lean();
+    if (sourceDoc?.spaceId) {
+      const boundGym = await Gym.findById(sourceDoc.spaceId).lean();
+      if (boundGym) return boundGym;
+    }
+  }
+
+  const canonicalUrl = canonicalizeProviderUrl(googleMapsUrl);
+  const providerUrlHash = hashString(canonicalUrl);
+  if (providerUrlHash) {
+    const sourceDoc = await SpaceSource.findOne({ provider, providerUrlHash }, { spaceId: 1 }).lean();
+    if (sourceDoc?.spaceId) {
+      const boundGym = await Gym.findById(sourceDoc.spaceId).lean();
+      if (boundGym) return boundGym;
+    }
+  }
 
   // Tier 1-3 combined: single $or query using indexed fields (slug, googleMapsUrl, placeId)
   const orConditions = [];
@@ -351,6 +500,30 @@ function diffTrackedFields(existing, incoming) {
   return diffs;
 }
 
+function hasCoreChanges(existing, incoming) {
+  const compareFields = [
+    ...SAFE_OVERWRITE_FIELDS,
+    'categoryId',
+    'amenityIds',
+    'parsed',
+    'rawPhotos',
+    'rawAmenities',
+    'rawCrawlMeta',
+    'qualityScore',
+    'scoreBreakdown',
+    'sentimentScore',
+    'sentimentTags',
+    'location',
+  ];
+
+  for (const field of compareFields) {
+    if (incoming[field] === undefined) continue;
+    if (!equal(existing[field], incoming[field])) return true;
+  }
+
+  return false;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  PRIMARY EXPORT: upsertGym
 // ─────────────────────────────────────────────────────────────────────────────
@@ -377,30 +550,10 @@ async function upsertGym(crawledData) {
     const amenityIds = await resolveAmenities(crawledData.amenities?.raw);
     await resolvePlaceType(crawledData.primaryType);
 
-    // Provide the generated IDs onto the raw document payload
-    const normalizedData = { ...crawledData };
-    normalizedData.categoryId = categoryId;
-    normalizedData.amenityIds = amenityIds;
-    normalizedData.parsed = true;
-
-    // Shift the raw attributes so they don't collide with our API virtuals
-    normalizedData.rawPhotos    = crawledData.photos;
-    normalizedData.rawAmenities = crawledData.amenities;
-    normalizedData.rawCrawlMeta = crawledData.crawlMeta;
-    
-    // Delete the conflicting keys before triggering Mongoose strict mode
-    delete normalizedData.photos;
-    delete normalizedData.amenities;
-    delete normalizedData.crawlMeta;
-
-    // ── Apply Data Intelligence (Phase 2) ────────────────────────────────────
-    const qScore = calculateQualityScore(normalizedData);
-    normalizedData.qualityScore = qScore.score;
-    normalizedData.scoreBreakdown = qScore.breakdown;
-
-    const sentiment = analyzeGymSentiment(crawledData.reviews);
-    normalizedData.sentimentScore = sentiment.score;
-    normalizedData.sentimentTags = sentiment.tags;
+    // Stage 1: build normalized representation.
+    const normalizedData = buildNormalizedData(crawledData, categoryId, amenityIds, now);
+    // Stage 2: compute derived quality/sentiment signals.
+    applyDerivedSignals(normalizedData, crawledData);
 
     // ── INSERT path ──────────────────────────────────────────────────────────
     if (!existing) {
@@ -420,7 +573,8 @@ async function upsertGym(crawledData) {
       const [revCount, photoCount] = await Promise.all([
         insertReviews(gymId, crawledData.reviews, opgId),
         upsertPhotos(gymId, crawledData.photos, now, opgId),
-        upsertCrawlMeta(gymId, crawledData.crawlMeta, now, opgId)
+        upsertCrawlMeta(gymId, crawledData.crawlMeta, now, opgId),
+        upsertSpaceSource({ gymId, opgId, crawledData: normalizedData, now, status: 'completed' }),
       ]);
 
       result.newReviews = revCount || 0;
@@ -468,7 +622,8 @@ async function upsertGym(crawledData) {
     const [reviewResult, photoResult] = await Promise.all([
       mergeReviews(gymId, crawledData.reviews, opgId),
       upsertPhotos(gymId, crawledData.photos, now, opgId),
-      upsertCrawlMeta(gymId, crawledData.crawlMeta, now, opgId)
+      upsertCrawlMeta(gymId, crawledData.crawlMeta, now, opgId),
+      upsertSpaceSource({ gymId, opgId, crawledData: normalizedData, now, status: 'completed' }),
     ]);
     result.newReviews = reviewResult;
     result.newPhotos = photoResult;
@@ -495,6 +650,9 @@ async function upsertGym(crawledData) {
     $set.categoryId = categoryId;
     $set.amenityIds = amenityIds;
     $set.parsed = true;
+    $set.primaryCategorySlug = normalizedData.primaryCategorySlug;
+    $set.categorySlugs = normalizedData.categorySlugs;
+    $set.amenitySlugs = normalizedData.amenitySlugs;
 
     // Intelligence Data
     $set.qualityScore = normalizedData.qualityScore;
@@ -513,18 +671,33 @@ async function upsertGym(crawledData) {
     $set['crawlMeta.dataCompleteness']= crawledData.crawlMeta?.dataCompleteness
       ?? existing.crawlMeta?.dataCompleteness
       ?? 0;
+    $set.crawl = {
+      jobId: crawledData.crawlMeta?.jobId || crawledData.crawlJobId || existing.crawl?.jobId || null,
+      status: crawledData.crawlMeta?.crawlStatus || 'completed',
+      version: (existing.crawl?.version || 1) + 1,
+      firstCrawledAt: existing.crawl?.firstCrawledAt || crawledData.crawlMeta?.firstCrawledAt || now,
+      lastCrawledAt: now,
+      sourceUrl: crawledData.crawlMeta?.sourceUrl || crawledData.googleMapsUrl || existing.crawl?.sourceUrl || null,
+      dataCompleteness: crawledData.crawlMeta?.dataCompleteness
+        ?? existing.crawl?.dataCompleteness
+        ?? 0,
+      mediaStatus: existing.crawl?.mediaStatus || crawledData.crawlMeta?.mediaStatus || 'pending',
+    };
 
     // 6. Always set updatedAt
     $set.updatedAt = now;
 
+    // 7. Detect meaningful core changes even when tracked fields/reviews/photos are unchanged.
+    const coreChanged = hasCoreChanges(existing, $set);
+
     // Determine if anything changed
-    const somethingChanged = diffs.length > 0 || reviewResult > 0 || photoResult > 0;
+    const somethingChanged = diffs.length > 0 || reviewResult > 0 || photoResult > 0 || coreChanged;
 
     // Only write to DB if something actually changed — eliminates ~60% of writes
     if (somethingChanged) {
       await Gym.findByIdAndUpdate(gymId, { $set }, { new: false });
       logger.info(
-        `[UPDATE] "${crawledData.name}" → ${diffs.length} field(s) changed, ${reviewResult} new review(s) synced`
+        `[UPDATE] "${crawledData.name}" → ${diffs.length} tracked field(s), coreChanged=${coreChanged}, ${reviewResult} new review(s) synced`
       );
       result.action = 'updated';
     } else {
@@ -533,6 +706,18 @@ async function upsertGym(crawledData) {
         'crawlMeta.lastCrawledAt': now,
         'crawlMeta.crawlStatus': 'completed',
         'crawlMeta.crawlVersion': (existing.crawlMeta?.crawlVersion || 1) + 1,
+        crawl: {
+          jobId: crawledData.crawlMeta?.jobId || crawledData.crawlJobId || existing.crawl?.jobId || null,
+          status: 'completed',
+          version: (existing.crawl?.version || 1) + 1,
+          firstCrawledAt: existing.crawl?.firstCrawledAt || crawledData.crawlMeta?.firstCrawledAt || now,
+          lastCrawledAt: now,
+          sourceUrl: crawledData.crawlMeta?.sourceUrl || crawledData.googleMapsUrl || existing.crawl?.sourceUrl || null,
+          dataCompleteness: crawledData.crawlMeta?.dataCompleteness
+            ?? existing.crawl?.dataCompleteness
+            ?? existing.crawlMeta?.dataCompleteness
+            ?? 0,
+        },
         updatedAt: now,
       }}, { new: false });
       logger.info(`[SKIP]   "${crawledData.name}" → already up to date & sync finished.`);

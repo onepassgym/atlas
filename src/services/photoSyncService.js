@@ -18,7 +18,7 @@
 
 const mongoose = require('mongoose');
 const Photo = require('../db/photoModel');
-const Gym   = require('../db/gymModel');
+const Gym   = require('../db/spaceModel');
 const PhotoSyncState = require('../db/photoSyncStateModel');
 const cfg    = require('../../config');
 const logger = require('../utils/logger');

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * webhookService.js — HTTP webhook delivery for Atlas06 events
+ * webhookService.js — HTTP webhook delivery for Atlas events
  *
  * Subscribes to the event bus and POSTs payloads to registered webhook URLs.
  * Retries up to 3 times with exponential backoff.
@@ -84,11 +84,11 @@ async function deliverEvent(webhook, event) {
     event: event.type,
     data: event.data,
     timestamp: event.timestamp,
-    source: 'atlas06',
+    source: 'atlas',
   };
 
   // Sign payload if secret is set
-  const headers = { 'Content-Type': 'application/json', 'User-Agent': 'Atlas06-Webhook/1.0' };
+  const headers = { 'Content-Type': 'application/json', 'User-Agent': 'Atlas-Webhook/1.0' };
   if (webhook.secret) {
     const sig = crypto.createHmac('sha256', webhook.secret).update(JSON.stringify(payload)).digest('hex');
     headers['X-Atlas-Signature'] = `sha256=${sig}`;

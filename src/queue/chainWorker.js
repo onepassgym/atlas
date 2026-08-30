@@ -6,7 +6,7 @@
  * Usage:  npm run worker:chain
  *
  * Architecture:
- *   - Listens on queue: 'atlas06-chain-crawl'
+ *   - Listens on queue: 'atlas-chain-crawl'
  *   - Each chain job: fetches all locations from store locator, then
  *     enriches via Google Maps in parallel using p-limit.
  *   - Reuses existing processGym() + upsertGym() pipeline for DB writes.
@@ -23,7 +23,7 @@ const { fetchByBrand }  = require('../scraper/chainLocators/osmFallback');
 const { BrowserManager, scrapeGymDetail } = require('../scraper/googleMapsScraper');
 const { processGym }    = require('../scraper/gymProcessor');
 const CrawlJob          = require('../db/crawlJobModel');
-const Gym               = require('../db/gymModel');
+const Gym               = require('../db/spaceModel');
 const GymChain          = require('../db/gymChainModel');
 const SystemState       = require('../db/systemStateModel');
 const { isJobCancelled, clearCancelFlag } = require('./queues');
@@ -102,7 +102,7 @@ async function checkFreshness(location) {
         if (normLoc.includes(normGym) || normGym.includes(normLoc) ||
             (location.chainSlug && gym.chainSlug === location.chainSlug)) {
           // Found existing gym
-          const lastCrawled = gym.rawCrawlMeta?.lastCrawledAt || gym.updatedAt;
+          const lastCrawled = gym.crawl?.lastCrawledAt || gym.rawCrawlMeta?.lastCrawledAt || gym.crawlMeta?.lastCrawledAt || gym.updatedAt;
           const isFresh = lastCrawled && lastCrawled > cutoff;
 
           return {
@@ -482,7 +482,7 @@ async function start() {
     logger.warn(`Chain seed skipped: ${err.message}`);
   }
 
-  const worker = new Worker('atlas06-chain-crawl', async (job) => {
+  const worker = new Worker('atlas-chain-crawl', async (job) => {
     logger.info(`⚙️  Processing chain job: ${job.name} [${job.id}]`);
     if (job.name === 'chain-crawl') return processChainJob(job);
     throw new Error(`Unknown chain job name: ${job.name}`);
@@ -496,7 +496,7 @@ async function start() {
   worker.on('failed',    (job, err) => logger.error(`❌ Chain job failed: ${job?.id} — ${err.message}`));
   worker.on('error',     (err) => logger.error(`Chain worker error: ${err.message}`));
 
-  logger.info(`\n🏋️  Atlas06 Chain Worker started  [concurrency: ${CHAIN_CONCURRENCY}, enrich: ${ENRICH_CONCURRENCY}, freshness: ${FRESHNESS_DAYS}d]`);
+  logger.info(`\n🏋️  Atlas Chain Worker started  [concurrency: ${CHAIN_CONCURRENCY}, enrich: ${ENRICH_CONCURRENCY}, freshness: ${FRESHNESS_DAYS}d]`);
 
   // ── Graceful shutdown ────────────────────────────────────────────────────
   const shutdown = async (signal) => {

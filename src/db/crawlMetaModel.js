@@ -1,5 +1,6 @@
 'use strict';
 const mongoose = require('mongoose');
+const cfg = require('../../config');
 
 const CrawlMetaSchema = new mongoose.Schema({
   gymId:            { type: mongoose.Schema.Types.ObjectId, ref: 'Gym', required: true },
@@ -15,7 +16,7 @@ const CrawlMetaSchema = new mongoose.Schema({
   dataCompleteness: { type: Number, default: 0 },
   sourceUrl:        String,
   jobId:            String,
-}, { timestamps: true, collection: 'gym_crawl_meta', autoIndex: false });
+}, { timestamps: true, collection: cfg.collections.spaceCrawlMeta, autoIndex: false });
 
 CrawlMetaSchema.index({ gymId: 1 }, { unique: true });
 CrawlMetaSchema.index({ jobId: 1 });

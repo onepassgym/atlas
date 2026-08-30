@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const logger = require('../utils/logger');
 const CrawlJob = require('../db/crawlJobModel');
-const Gym = require('../db/gymModel');
+const Gym = require('../db/spaceModel');
 const { addCityJob, addGymNameJob } = require('../queue/queues');
 const { FITNESS_CATEGORIES } = require('../scraper/googleMapsScraper');
 const bus = require('./eventBus');
@@ -110,18 +110,27 @@ async function queueStaleGyms(reason = 'staleness-check') {
 
   const cutoff = new Date(Date.now() - thresholdDays * 86_400_000);
 
-  // Find gyms crawled more than N days ago, sorted oldest first
-  const staleGyms = await Gym.find({
-    permanentlyClosed: { $ne: true },
-    $or: [
-      { 'crawlMeta.lastCrawledAt': { $lt: cutoff } },
-      { 'crawlMeta.lastCrawledAt': { $exists: false } },
-    ],
-  })
-    .select('name areaName slug crawlMeta.lastCrawledAt')
-    .sort({ 'crawlMeta.lastCrawledAt': 1 })
-    .limit(batchSize)
-    .lean();
+  // Read from new crawl mirror first; fall back to legacy crawlMeta.
+  const staleGyms = await Gym.aggregate([
+    { $match: { permanentlyClosed: { $ne: true } } },
+    {
+      $addFields: {
+        effectiveLastCrawledAt: { $ifNull: ['$crawl.lastCrawledAt', '$crawlMeta.lastCrawledAt'] },
+      },
+    },
+    {
+      $match: {
+        $or: [
+          { effectiveLastCrawledAt: { $lt: cutoff } },
+          { effectiveLastCrawledAt: { $exists: false } },
+          { effectiveLastCrawledAt: null },
+        ],
+      },
+    },
+    { $sort: { effectiveLastCrawledAt: 1 } },
+    { $limit: batchSize },
+    { $project: { name: 1, areaName: 1, slug: 1, effectiveLastCrawledAt: 1 } },
+  ]);
 
   if (!staleGyms.length) {
     logger.info(`📅 Staleness check: all gyms are fresh (< ${thresholdDays} days)`);
@@ -132,14 +141,14 @@ async function queueStaleGyms(reason = 'staleness-check') {
 
   const queued = [];
   for (const g of staleGyms) {
-    const gymName = `${g.name} ${g.areaName || ''}`.trim();
+    const spaceName = `${g.name} ${g.areaName || ''}`.trim();
     const jobId = uuidv4();
     try {
-      await CrawlJob.create({ jobId, type: 'gym_name', input: { gymName }, status: 'queued' });
-      await addGymNameJob(jobId, gymName);
-      queued.push({ gymName, jobId });
+      await CrawlJob.create({ jobId, type: 'gym_name', input: { spaceName }, status: 'queued' });
+      await addGymNameJob(jobId, spaceName);
+      queued.push({ spaceName, jobId });
     } catch (err) {
-      logger.error(`  ❌ Failed to queue stale gym "${gymName}": ${err.message}`);
+      logger.error(`  ❌ Failed to queue stale space "${spaceName}": ${err.message}`);
     }
   }
 
@@ -158,14 +167,26 @@ async function queueIncompleteGyms(reason = 'enrichment') {
   const threshold = settings.completenessThreshold || 60;
   const batchSize = settings.batchSize || 30;
 
-  const incomplete = await Gym.find({
-    permanentlyClosed: { $ne: true },
-    'crawlMeta.dataCompleteness': { $lt: threshold },
-  })
-    .select('name areaName crawlMeta.dataCompleteness')
-    .sort({ 'crawlMeta.dataCompleteness': 1 })
-    .limit(batchSize)
-    .lean();
+  const incomplete = await Gym.aggregate([
+    { $match: { permanentlyClosed: { $ne: true } } },
+    {
+      $addFields: {
+        effectiveCompleteness: { $ifNull: ['$crawl.dataCompleteness', '$crawlMeta.dataCompleteness'] },
+      },
+    },
+    {
+      $match: {
+        $or: [
+          { effectiveCompleteness: { $lt: threshold } },
+          { effectiveCompleteness: { $exists: false } },
+          { effectiveCompleteness: null },
+        ],
+      },
+    },
+    { $sort: { effectiveCompleteness: 1 } },
+    { $limit: batchSize },
+    { $project: { name: 1, areaName: 1, effectiveCompleteness: 1 } },
+  ]);
 
   if (!incomplete.length) {
     logger.info(`📅 Enrichment: all gyms above ${threshold}% completeness`);
@@ -176,14 +197,14 @@ async function queueIncompleteGyms(reason = 'enrichment') {
 
   const queued = [];
   for (const g of incomplete) {
-    const gymName = `${g.name} ${g.areaName || ''}`.trim();
+    const spaceName = `${g.name} ${g.areaName || ''}`.trim();
     const jobId = uuidv4();
     try {
-      await CrawlJob.create({ jobId, type: 'gym_name', input: { gymName }, status: 'queued' });
-      await addGymNameJob(jobId, gymName);
-      queued.push({ gymName, jobId, completeness: g.crawlMeta?.dataCompleteness || 0 });
+      await CrawlJob.create({ jobId, type: 'gym_name', input: { spaceName }, status: 'queued' });
+      await addGymNameJob(jobId, spaceName);
+      queued.push({ spaceName, jobId, completeness: g.effectiveCompleteness || 0 });
     } catch (err) {
-      logger.error(`  ❌ Failed to queue enrichment for "${gymName}": ${err.message}`);
+      logger.error(`  ❌ Failed to queue enrichment for "${spaceName}": ${err.message}`);
     }
   }
 

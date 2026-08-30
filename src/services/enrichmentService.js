@@ -21,9 +21,9 @@ const cfg = require('../../config');
 const logger = require('../utils/logger');
 const bus = require('./eventBus');
 
-const REDIS_PAUSE_KEY   = 'atlas06:enrichment:paused';
-const REDIS_PRIORITY_KEY = 'atlas06:enrichment:priority-queue';
-const REDIS_STATUS_KEY  = 'atlas06:enrichment:status';
+const REDIS_PAUSE_KEY   = 'atlas:enrichment:paused';
+const REDIS_PRIORITY_KEY = 'atlas:enrichment:priority-queue';
+const REDIS_STATUS_KEY  = 'atlas:enrichment:status';
 
 let redis = null;
 

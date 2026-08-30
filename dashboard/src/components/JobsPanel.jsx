@@ -172,7 +172,7 @@ export default function JobsPanel() {
               const p = j.progress || {};
               const total = p.total || 0;
               const pct = total > 0 ? Math.min(100, Math.round(((p.scraped || 0) + (p.failed || 0) + (p.skipped || 0)) / total * 100)) : 0;
-              const name = j.input?.cityName || j.input?.gymName || j.input?.chainName || 'Unknown';
+              const name = j.input?.cityName || j.input?.spaceName || j.input?.chainName || 'Unknown';
               const errorCount = j.errorCount || (j.jobErrors?.length) || 0;
               const hasBatches = p.batches > 0;
               return (

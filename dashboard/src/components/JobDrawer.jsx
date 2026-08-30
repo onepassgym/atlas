@@ -58,7 +58,7 @@ export default function JobDrawer({ jobId, onClose }) {
   const scraped = (p.scraped || 0) + (p.failed || 0) + (p.skipped || 0);
   const pct = total > 0 ? Math.min(100, Math.round((scraped / total) * 100)) : 0;
   const errors = job?.jobErrors || [];
-  const name = job?.input?.cityName || job?.input?.gymName || job?.input?.chainName || 'Unknown';
+  const name = job?.input?.cityName || job?.input?.spaceName || job?.input?.chainName || 'Unknown';
 
   // Filter job-related events from SSE history
   const jobEvents = events.filter(e => e.data?.jobId === jobId).slice(0, 30);

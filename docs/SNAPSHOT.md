@@ -1,4 +1,4 @@
-# 📸 Atlas06 — Architecture Snapshot
+# 📸 Atlas — Architecture Snapshot
 
 > **Auto-generated** by `node scripts/genArchSnapshot.js`
 > Last generated: **2026-04-18 05:39:47 UTC**

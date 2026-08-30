@@ -99,7 +99,7 @@ export default function SystemPanel() {
     if (!crawlGymInput.trim()) return;
     setCrawlGymModal(false);
     try {
-      const res = await api.post('/api/crawl/gym', { gymName: crawlGymInput });
+      const res = await api.post('/api/crawl/space', { spaceName: crawlGymInput });
       toast(res?.message || `Queued: ${crawlGymInput}`, 'success');
       setCrawlGymInput('');
     } catch { toast('Network error', 'error'); }
@@ -168,7 +168,7 @@ export default function SystemPanel() {
 
           <CmdGroup label="Crawl Operations">
             <button className="btn" onClick={() => setCrawlCityModal(true)}><Building2 size={13} /> Crawl City</button>
-            <button className="btn" onClick={() => setCrawlGymModal(true)}><Dumbbell size={13} /> Crawl Gym</button>
+            <button className="btn" onClick={() => setCrawlGymModal(true)}><Dumbbell size={13} /> Crawl Space</button>
             <button className="btn" onClick={() => triggerSchedule('weekly')}><Calendar size={13} /> Weekly Run</button>
             <button className="btn" onClick={() => triggerSchedule('all')}><Globe2 size={13} /> All Cities</button>
           </CmdGroup>

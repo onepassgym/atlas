@@ -3,7 +3,7 @@ import { api } from '../api/client';
 
 /**
  * useApi — data fetching hook with loading/error states
- * @param {string} path - API path (e.g. /api/gyms/stats)  
+ * @param {string} path - API path (e.g. /api/spaces/stats)  
  * @param {object} opts - { auto: true, deps: [] }
  */
 export function useApi(path, opts = {}) {

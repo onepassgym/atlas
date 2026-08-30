@@ -1,6 +1,6 @@
 'use strict';
 const { getDistance } = require('geolib');
-const Gym    = require('../db/gymModel');
+const Gym    = require('../db/spaceModel');
 const cfg    = require('../../config');
 const logger = require('./logger');
 

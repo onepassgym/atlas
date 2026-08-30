@@ -6,7 +6,7 @@
  * Matches gyms by name patterns using chain name + aliases from the GymChain collection.
  */
 
-const Gym      = require('../db/gymModel');
+const Gym      = require('../db/spaceModel');
 const GymChain = require('../db/gymChainModel');
 const logger   = require('../utils/logger');
 

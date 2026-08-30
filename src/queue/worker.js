@@ -7,7 +7,7 @@ const { BrowserManager, searchGymsInCity, scrapeGymDetail, scrapeEnrichmentDetai
 const { processGym }  = require('../scraper/gymProcessor');
 const { processEnrichmentJob } = require('../scraper/enrichmentProcessor');
 const CrawlJob        = require('../db/crawlJobModel');
-const Gym             = require('../db/gymModel');
+const Gym             = require('../db/spaceModel');
 const SystemState     = require('../db/systemStateModel');
 const { isJobCancelled, clearCancelFlag, addBatchScrapeJob, enrichmentQueue } = require('./queues');
 const cfg             = require('../../config');
@@ -329,14 +329,25 @@ async function preFilterUrls(urls, cityName) {
   try {
     const cutoff = new Date(Date.now() - SKIP_RECENT_DAYS * 86_400_000);
 
-    const recentGyms = await Gym.find(
+    const recentGyms = await Gym.aggregate([
       {
-        areaName: { $regex: new RegExp(cityName.split(',')[0].trim(), 'i') },
-        'crawlMeta.lastCrawledAt': { $gte: cutoff },
-        googleMapsUrl: { $exists: true, $ne: null },
+        $match: {
+          areaName: { $regex: new RegExp(cityName.split(',')[0].trim(), 'i') },
+          googleMapsUrl: { $exists: true, $ne: null },
+        },
       },
-      { googleMapsUrl: 1, _id: 0 }
-    ).lean();
+      {
+        $addFields: {
+          effectiveLastCrawledAt: { $ifNull: ['$crawl.lastCrawledAt', '$crawlMeta.lastCrawledAt'] },
+        },
+      },
+      {
+        $match: {
+          effectiveLastCrawledAt: { $gte: cutoff },
+        },
+      },
+      { $project: { googleMapsUrl: 1 } },
+    ]);
 
     const knownUrls = new Set(
       recentGyms
@@ -554,12 +565,13 @@ async function processBatchJob(job) {
 
 async function processGymNameJob(job) {
   const { jobId, input } = job.data;
-  const { gymName, mode = 'standard' } = input;
+  const { spaceName, gymName, mode = 'standard' } = input;
+  const targetName = spaceName || gymName;
   const startTime = Date.now();
 
   await connectDB();
   await updateJob(jobId, { status: 'running', startedAt: new Date(), bullJobId: String(job.id) });
-  bus.publish('job:started', { jobId, type: 'gym_name', gymName, mode });
+  bus.publish('job:started', { jobId, type: 'gym_name', spaceName: targetName, mode });
 
   const browser = new BrowserManager();
   const stats   = { created: 0, updated: 0, failed: 0 };
@@ -569,7 +581,7 @@ async function processGymNameJob(job) {
     await browser.launch();
     const page = await browser.newPage();
     await job.updateProgress(10);
-    const urls = await searchGymsInCity(page, gymName, '');
+    const urls = await searchGymsInCity(page, targetName, '');
     await job.updateProgress(40);
     await updateJob(jobId, { 'progress.total': urls.length });
 
@@ -583,7 +595,7 @@ async function processGymNameJob(job) {
       try {
         const scraped = await scrapeGymDetail(page, url, mode);
         if (!scraped?.name) continue;
-        const res = await processGym(scraped, gymName, jobId, true);
+        const res = await processGym(scraped, targetName, jobId, true);
         if (res.action === 'created') { stats.created++; await updateJob(jobId, { $inc: { 'progress.newGyms': 1, 'progress.scraped': 1 }, $push: { gymIds: res.gymId } }); }
         if (res.action === 'updated') { stats.updated++; await updateJob(jobId, { $inc: { 'progress.updatedGyms': 1, 'progress.scraped': 1 }, $push: { gymIds: res.gymId } }); }
       } catch (err) {
@@ -678,7 +690,7 @@ async function start() {
   await connectDB();
 
   // ── Crawl Worker (city-crawl, batch-scrape, gym-name-crawl) ───────────────
-  const worker = new Worker('atlas06-crawl', async (job) => {
+  const worker = new Worker('atlas-crawl', async (job) => {
     logger.info(`⚙️  Processing job: ${job.name} [${job.id}]`);
     if (job.name === 'city-crawl')     return processCityJob(job);
     if (job.name === 'batch-scrape')   return processBatchJob(job);
@@ -694,7 +706,7 @@ async function start() {
   // ── Enrichment Worker (gym-enrichment) ────────────────────────────────
   // Separate worker for the enrichment queue. Concurrency=1 per container
   // to avoid opening too many browser instances simultaneously.
-  const enrichWorker = new Worker('atlas06-enrichment', async (job) => {
+  const enrichWorker = new Worker('atlas-enrichment', async (job) => {
     logger.info(`✨ Processing enrichment job: ${job.name} [${job.id}]`);
     if (job.name === 'gym-enrichment') return processEnrichmentJobHandler(job);
     throw new Error(`Unknown enrichment job: ${job.name}`);
@@ -712,7 +724,7 @@ async function start() {
   enrichWorker.on('failed',   (job, err) => logger.error(`❌ Enrichment failed: ${job?.id} — ${err.message}`));
   enrichWorker.on('error',    (err) => logger.error(`Enrichment worker error: ${err.message}`));
 
-  logger.info(`\n🚀 Atlas06 Worker started  [concurrency: ${CONCURRENCY}, pagePool: ${PAGE_POOL}, lockDuration: 1800s, lockRenewTime: 300s]`);
+  logger.info(`\n🚀 Atlas Worker started  [concurrency: ${CONCURRENCY}, pagePool: ${PAGE_POOL}, lockDuration: 1800s, lockRenewTime: 300s]`);
   logger.info(`✨ Enrichment Worker started [concurrency: 1, lockDuration: 1800s]`);
 
   // ── Graceful shutdown ────────────────────────────────────────────────────

@@ -11,7 +11,7 @@
  * CLI script (scripts/enrichNCR.js) — NOT by the standard city-crawl path.
  */
 
-const Gym                 = require('../db/gymModel');
+const Gym                 = require('../db/spaceModel');
 const Photo               = require('../db/photoModel');
 const GymChangeLog        = require('../db/gymChangeLogModel');
 const { Review, buildReviewDocs, mergeReviewEnrichment } = require('../db/reviewModel');
@@ -225,6 +225,13 @@ async function processEnrichmentJob(enriched, gymId, jobId) {
     $set['enrichmentMeta.lastSuccess'] = now;
     $set['enrichmentMeta.status']      = 'success';
     $set['enrichmentMeta.consecutiveErrors'] = 0;
+    $set['crawl.lastCrawledAt'] = now;
+    $set['crawl.status'] = 'completed';
+    $set['crawl.dataCompleteness'] = Math.max(
+      existing.crawl?.dataCompleteness || 0,
+      existing.rawCrawlMeta?.dataCompleteness || 0,
+      existing.crawlMeta?.dataCompleteness || 0
+    );
     $set.updatedAt = now;
 
     // ── Write changelog ──────────────────────────────────────────────────────
@@ -279,8 +286,10 @@ async function processEnrichmentJob(enriched, gymId, jobId) {
           'enrichmentMeta.lastAttempt':       now,
           'enrichmentMeta.status':             'failed',
           'enrichmentMeta.error':              err.message.slice(0, 200),
-          $inc: { 'enrichmentMeta.consecutiveErrors': 1 },
+          'crawl.lastCrawledAt': now,
+          'crawl.status': 'failed',
         },
+        $inc: { 'enrichmentMeta.consecutiveErrors': 1 },
       });
     } catch (_) {}
     result.action = 'error';

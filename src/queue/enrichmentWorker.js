@@ -16,7 +16,7 @@
 require('dotenv').config();
 
 const { connectDB } = require('../db/connection');
-const Gym = require('../db/gymModel');
+const Gym = require('../db/spaceModel');
 const SystemState = require('../db/systemStateModel');
 const EnrichmentLog = require('../db/enrichmentLogModel');
 const { BrowserManager, scrapeGymDetail, scrapeSelective } = require('../scraper/googleMapsScraper');

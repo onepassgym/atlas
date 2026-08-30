@@ -18,7 +18,7 @@ export default function ApiKeyModal({ env, onSave }) {
     <div className="api-key-modal-overlay">
       <div className="api-key-modal">
         <h2>Authentication Required</h2>
-        <p>Please enter your Atlas06 API Key for the <strong>{env.toUpperCase()}</strong> environment to continue.</p>
+        <p>Please enter your Atlas API Key for the <strong>{env.toUpperCase()}</strong> environment to continue.</p>
         <form onSubmit={handleSubmit}>
           <input
             type="password"

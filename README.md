@@ -1,6 +1,6 @@
-# 🏋️ Atlas06 Scraper
+# 🏋️ Atlas Scraper
 
-Google Maps fitness venue scraper for the **Atlas06** platform.  
+Google Maps fitness venue scraper for the **Atlas** platform.  
 No API key required · Node 20 · MongoDB 7 · Redis · Playwright · React SPA Dashboard
 
 ---
@@ -19,7 +19,7 @@ No API key required · Node 20 · MongoDB 7 · Redis · Playwright · React SPA 
 ## 🛠️ Project Structure
 
 ```
-atlas06-scraper/
+atlas-scraper/
 ├── config/                      ← environment & app configuration
 ├── src/
 │   ├── server.js                ← API entry point (Express)
@@ -61,9 +61,9 @@ atlas06-scraper/
    ```
 
 ### 3. Access Dashboard
-- **Development Hot-Reload**: [http://localhost:5173](http://localhost:5173) (Vite server auto-proxies to API)
-- **Production Built-In**: [http://localhost:8747/dashboard](http://localhost:8747/dashboard) (Served directly by Express)
-- **Health Check**: `http://localhost:8747/health`
+- **Development Hot-Reload**: [http://localhost:4060](http://localhost:4060) (Vite server auto-proxies to API)
+- **Production Built-In**: [http://localhost:5070/dashboard](http://localhost:5070/dashboard) (Served directly by Express)
+- **Health Check**: `http://localhost:5070/health`
 
 ---
 
@@ -131,7 +131,7 @@ See **[DEPLOY.md](DEPLOY.md)** for full step-by-step guide.
 | **[ROADMAP.md](ROADMAP.md)** | Feature upgrade roadmap in 5 phases with status tracking | Manual |
 | **[docs/SNAPSHOT.md](docs/SNAPSHOT.md)** | Auto-generated: file tree, route inventory, model summary, dependency list | Auto (`npm run docs:snapshot`) |
 | **[DEPLOY.md](DEPLOY.md)** | Step-by-step VPS deployment guide | Manual |
-| **[/dashboard](http://localhost:8747/dashboard)** | Real-time React SPA monitoring dashboard & Mission Control | New (v2) |
+| **[/dashboard](http://localhost:5070/dashboard)** | Real-time React SPA monitoring dashboard & Mission Control | New (v2) |
 
 ### Keeping Docs Updated
 

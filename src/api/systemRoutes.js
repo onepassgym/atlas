@@ -18,7 +18,7 @@ const {
   scheduleNCRCrawl,
   queueCity,
 } = require('../services/schedulerService');
-const Gym = require('../db/gymModel');
+const Gym = require('../db/spaceModel');
 const { calculateQualityScore } = require('../services/intelligence/scoring');
 const { analyzeGymSentiment } = require('../services/intelligence/sentiment');
 const { Review } = require('../db/reviewModel');

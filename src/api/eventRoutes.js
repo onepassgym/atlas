@@ -46,7 +46,7 @@ router.get('/', (req, res) => {
   });
 
   // Send initial connection event
-  res.write(`event: connected\ndata: ${JSON.stringify({ message: 'Connected to Atlas06 event stream', clients: bus.sseClientCount + 1 })}\n\n`);
+  res.write(`event: connected\ndata: ${JSON.stringify({ message: 'Connected to Atlas event stream', clients: bus.sseClientCount + 1 })}\n\n`);
 
   // keepalive ping every 30s
   const keepalive = setInterval(() => {

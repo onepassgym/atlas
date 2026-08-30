@@ -2,7 +2,7 @@
 const express = require('express');
 const { query, validationResult } = require('express-validator');
 const router  = express.Router();
-const Gym     = require('../db/gymModel');
+const Gym     = require('../db/spaceModel');
 const GymChangeLog = require('../db/gymChangeLogModel');
 const { Review }   = require('../db/reviewModel');
 const { ok, err, validate } = require('../utils/apiUtils');
@@ -42,7 +42,13 @@ router.get('/overview', async (req, res) => {
       Gym.countDocuments(),
 
       // Missing fields aggregation
-      Gym.aggregate([{
+      Gym.aggregate([
+        {
+          $addFields: {
+            effectiveCompleteness: { $ifNull: ['$crawl.dataCompleteness', '$crawlMeta.dataCompleteness'] },
+          },
+        },
+        {
         $group: {
           _id: null,
           total: { $sum: 1 },
@@ -55,26 +61,7 @@ router.get('/overview', async (req, res) => {
           missingAddress:     { $sum: { $cond: [{ $or: [{ $eq: ['$address', null] }, { $eq: ['$address', ''] }, { $not: '$address' }] }, 1, 0] } },
           missingReviews:     { $sum: { $cond: [{ $lte: [{ $ifNull: ['$totalReviews', 0] }, 0] }, 1, 0] } },
           missingLocation:    { $sum: { $cond: [{ $or: [{ $not: '$lat' }, { $not: '$lng' }] }, 1, 0] } },
-          avgCompleteness:    { $avg: {
-            $multiply: [{
-              $divide: [{
-                $add: [
-                  { $cond: [{ $and: [{ $ne: ['$name', null] }, { $ne: ['$name', ''] }] }, 1, 0] },
-                  { $cond: [{ $and: [{ $ne: ['$lat', null] }] }, 1, 0] },
-                  { $cond: [{ $and: [{ $ne: ['$lng', null] }] }, 1, 0] },
-                  { $cond: [{ $and: [{ $ne: ['$address', null] }, { $ne: ['$address', ''] }] }, 1, 0] },
-                  { $cond: [{ $and: [{ $ne: ['$contact.phone', null] }, { $ne: ['$contact.phone', ''] }] }, 1, 0] },
-                  { $cond: [{ $and: [{ $ne: ['$contact.website', null] }, { $ne: ['$contact.website', ''] }] }, 1, 0] },
-                  { $cond: [{ $gt: ['$rating', 0] }, 1, 0] },
-                  { $cond: [{ $gt: ['$totalReviews', 0] }, 1, 0] },
-                  { $cond: [{ $gt: [{ $size: { $ifNull: ['$openingHours', []] } }, 0] }, 1, 0] },
-                  { $cond: [{ $gt: [{ $ifNull: ['$totalPhotos', 0] }, 0] }, 1, 0] },
-                  { $cond: [{ $and: [{ $ne: ['$description', null] }, { $ne: ['$description', ''] }] }, 1, 0] },
-                  { $cond: [{ $and: [{ $ne: ['$category', null] }, { $ne: ['$category', ''] }] }, 1, 0] },
-                ]
-              }, 12]
-            }, 100]
-          }},
+          avgCompleteness:    { $avg: { $ifNull: ['$effectiveCompleteness', 0] } },
         },
       }]),
 

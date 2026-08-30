@@ -1,5 +1,6 @@
 'use strict';
 const mongoose = require('mongoose');
+const cfg = require('../../config');
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -18,7 +19,7 @@ const GymChangeLogSchema = new mongoose.Schema(
   {
     // No auto-timestamps — changedAt is explicit above
     timestamps: false,
-    collection: 'gymChangeLogs',
+    collection: cfg.collections.spaceChangeLogs,
     autoIndex: false,
   }
 );

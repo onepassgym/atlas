@@ -24,7 +24,7 @@ async function main() {
     ]);
 
   console.log('\n══════════════════════════════════════════');
-  console.log('   Atlas06  ·  Database Statistics');
+  console.log('   Atlas  ·  Database Statistics');
   console.log('══════════════════════════════════════════');
   console.log(`  Total Gyms         ${total.toLocaleString()}`);
   console.log(`  Avg Rating         ${avgRating[0]?.avg?.toFixed(2) || 'N/A'}`);

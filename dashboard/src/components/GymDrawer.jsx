@@ -105,7 +105,7 @@ export default function GymDrawer({ gymId, onClose }) {
   useEffect(() => {
     if (!gymId) return;
     setLoading(true);
-    api.get(`/api/gyms/${gymId}`)
+    api.get(`/api/spaces/${gymId}`)
       .then(res => { if (res?.success) setGym(res.gym); })
       .catch(() => {})
       .finally(() => setLoading(false));

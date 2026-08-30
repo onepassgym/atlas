@@ -1,5 +1,6 @@
 'use strict';
 const mongoose = require('mongoose');
+const cfg = require('../../config');
 
 const CrawlJobSchema = new mongoose.Schema({
   jobId:  { type: String, required: true, unique: true },
@@ -7,7 +8,7 @@ const CrawlJobSchema = new mongoose.Schema({
 
   input: {
     cityName:   String,
-    gymName:    String,
+    spaceName:  String,
     categories: [String],
     chainSlug:  String,        // e.g. "anytime-fitness"
     chainName:  String,        // e.g. "Anytime Fitness"
@@ -43,7 +44,7 @@ const CrawlJobSchema = new mongoose.Schema({
 
   queueJobId: String,
 
-}, { timestamps: true, collection: 'gym_crawl_jobs' });
+}, { timestamps: true, collection: cfg.collections.spaceCrawlJobs });
 
 CrawlJobSchema.index({ status: 1 });
 CrawlJobSchema.index({ createdAt: -1 });

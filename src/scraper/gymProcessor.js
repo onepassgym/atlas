@@ -1,7 +1,7 @@
 'use strict';
 const slugify     = require('slugify');
 const { downloadAllMedia } = require('../media/downloader');
-const { upsertGym } = require('../db/upsertGym');
+const { upsertGym } = require('../db/upsertSpace');
 const { addMediaJob } = require('../queue/queues');
 const logger      = require('../utils/logger');
 
@@ -121,6 +121,7 @@ async function processGym(raw, areaName, jobId, downloadMedia = true) {
       doc.totalPhotos = raw.photoUrls.length;
       doc.crawlMeta.mediaStatus = 'pending';
     }
+    doc.crawlMeta.mediaStatus = doc.crawlMeta.mediaStatus || 'none';
 
     doc.crawlMeta.dataCompleteness = calcCompleteness(doc);
 

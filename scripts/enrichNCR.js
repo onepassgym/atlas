@@ -5,7 +5,7 @@
  *
  * Queries all gyms in the NCR cities (Delhi, Noida, Gurugram, Ghaziabad,
  * Meerut, Hapur, Bulandshahr) and enqueues gym-enrichment BullMQ jobs
- * in the atlas06-enrichment queue at priority 2.
+ * in the atlas-enrichment queue at priority 2.
  *
  * Usage:
  *   node scripts/enrichNCR.js                    # enqueue all NCR gyms

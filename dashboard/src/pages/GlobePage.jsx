@@ -56,7 +56,7 @@ export default function GlobePage() {
 
   // Fetch overview stats and populate markers from accurate DB coordinates
   useEffect(() => {
-    api.get('/api/gyms/stats').then(res => {
+    api.get('/api/spaces/stats').then(res => {
       if (res?.success && res.stats?.topCities) {
         setStats(res.stats);
         

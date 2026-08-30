@@ -4,7 +4,7 @@ const { crawlQueue } = require('../src/queue/queues');
 const logger = require('../src/utils/logger');
 
 async function main() {
-  logger.info('🧹 Clearing all jobs from the "atlas06-crawl" queue...');
+  logger.info('🧹 Clearing all jobs from the "atlas-crawl" queue...');
 
   try {
     // Obscure BullMQ version differences: 

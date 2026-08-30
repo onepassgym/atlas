@@ -24,11 +24,12 @@ const mongoose = require('mongoose');
 const { param, query, body, validationResult } = require('express-validator');
 const router   = express.Router();
 const Photo    = require('../db/photoModel');
-const Gym      = require('../db/gymModel');
+const Gym      = require('../db/spaceModel');
 const cfg      = require('../../config');
 const logger   = require('../utils/logger');
 const { ok, err } = require('../utils/apiUtils');
 const { buildOp, collectPhotos } = require('../services/photoMigrationHelpers');
+const SPACES_COLLECTION = cfg.collections.spaces;
 
 // ── In-memory stats cache (TTL-based) ─────────────────────────────────────────
 let _mediaStatsCache = null;
@@ -171,7 +172,7 @@ router.get('/stats', async (req, res) => {
             { $group: { _id: '$gymId', count: { $sum: 1 }, size: { $sum: '$sizeBytes' } } },
             { $sort: { count: -1 } },
             { $limit: 10 },
-            { $lookup: { from: 'gyms', localField: '_id', foreignField: '_id', as: 'gym' } },
+            { $lookup: { from: SPACES_COLLECTION, localField: '_id', foreignField: '_id', as: 'gym' } },
             { $unwind: { path: '$gym', preserveNullAndEmptyArrays: true } },
             { $project: { gymName: { $ifNull: ['$gym.name', 'Unknown'] }, count: 1, size: 1 } }
           ],
@@ -190,7 +191,7 @@ router.get('/stats', async (req, res) => {
           largestFiles: [
             { $sort: { sizeBytes: -1 } },
             { $limit: 5 },
-            { $lookup: { from: 'gyms', localField: 'gymId', foreignField: '_id', as: 'gymDoc' } },
+            { $lookup: { from: SPACES_COLLECTION, localField: 'gymId', foreignField: '_id', as: 'gymDoc' } },
             { $unwind: { path: '$gymDoc', preserveNullAndEmptyArrays: true } },
             { $addFields: { gymId: { $cond: [{ $gt: ['$gymDoc', null] }, { _id: '$gymDoc._id', name: '$gymDoc.name' }, null] } } },
             { $project: { gymDoc: 0 } }
@@ -342,7 +343,7 @@ router.post('/sync', async (req, res) => {
     try {
       const basePath = path.resolve(cfg.media.basePath);
       // Guard: baseUrl may be undefined if env var is missing
-      const rawBaseUrl = cfg.media.baseUrl || `http://localhost:${process.env.PORT || '8747'}/media`;
+      const rawBaseUrl = cfg.media.baseUrl || `http://localhost:${process.env.PORT || '5070'}/media`;
       const baseUrl  = rawBaseUrl.replace(/\/$/, '');
 
       let accessible = true;

@@ -35,17 +35,17 @@ function makeQueue(name, jobOpts = {}) {
   return q;
 }
 
-const crawlQueue      = makeQueue('atlas06-crawl');
-const chainCrawlQueue = makeQueue('atlas06-chain-crawl');
+const crawlQueue      = makeQueue('atlas-crawl');
+const chainCrawlQueue = makeQueue('atlas-chain-crawl');
 // Phase 5: dedicated media download queue — processed by mediaWorker.js
-const mediaQueue      = makeQueue('atlas06-media', {
+const mediaQueue      = makeQueue('atlas-media', {
   attempts:         3,
   backoff:          { type: 'exponential', delay: 3000 },
   removeOnComplete: 100,
   removeOnFail:     50,
 });
 // Enrichment queue — targeted per-gym enrichment jobs (Tasks 1-5)
-const enrichmentQueue = makeQueue('atlas06-enrichment', {
+const enrichmentQueue = makeQueue('atlas-enrichment', {
   attempts:         2,
   backoff:          { type: 'exponential', delay: 8000 },
   removeOnComplete: 200,
@@ -64,13 +64,13 @@ async function addCityJob(jobId, cityName, categories) {
   return job;
 }
 
-async function addGymNameJob(jobId, gymName) {
+async function addGymNameJob(jobId, spaceName) {
   const job = await crawlQueue.add(
     'gym-name-crawl',
-    { type: 'gym_name', jobId, input: { gymName } },
+    { type: 'gym_name', jobId, input: { spaceName } },
     { jobId, priority: 1 }
   );
-  logger.info(`📥 Queued gym name: ${gymName} (BullMQ #${job.id})`);
+  logger.info(`📥 Queued space name: ${spaceName} (BullMQ #${job.id})`);
   return job;
 }
 
@@ -197,7 +197,7 @@ async function clearCrawlQueue() {
  * TTL of 1 hour prevents stale flags from accumulating.
  */
 async function requestCancelJob(jobId) {
-  await redis.set(`atlas06:cancel:${jobId}`, '1', 'EX', 3600);
+  await redis.set(`atlas:cancel:${jobId}`, '1', 'EX', 3600);
   logger.info(`🛑 Cancel requested for job: ${jobId}`);
 }
 
@@ -207,7 +207,7 @@ async function requestCancelJob(jobId) {
  */
 async function isJobCancelled(jobId) {
   try {
-    const flag = await redis.get(`atlas06:cancel:${jobId}`);
+    const flag = await redis.get(`atlas:cancel:${jobId}`);
     return flag === '1';
   } catch (_) {
     return false;
@@ -218,7 +218,7 @@ async function isJobCancelled(jobId) {
  * Clear the cancellation flag after the worker has handled it.
  */
 async function clearCancelFlag(jobId) {
-  await redis.del(`atlas06:cancel:${jobId}`);
+  await redis.del(`atlas:cancel:${jobId}`);
 }
 
 /**
@@ -272,10 +272,18 @@ async function promoteJobToFront(jobId) {
     let job = await crawlQueue.getJob(jobId);
     if (!job) job = await chainCrawlQueue.getJob(jobId);
     if (!job) return 'not_found';
+
+    const isPaused = await job.queue.isPaused();
+    if (isPaused) {
+      await job.queue.resume();
+      logger.info(`▶️ Resumed paused queue before promoting job ${jobId}`);
+    }
+
     const state = await job.getState();
     if (state === 'active') return 'already_active';
     if (state === 'waiting' || state === 'waiting-children' || state === 'delayed' || state === 'prioritized') {
-      await job.changePriority({ priority: 0, lifo: false });
+      // Use highest priority and LIFO so the promoted job jumps ahead of same-priority waiting jobs.
+      await job.changePriority({ priority: 0, lifo: true });
       logger.info(`⚡ Promoted job ${jobId} to front of queue`);
       return 'promoted';
     }

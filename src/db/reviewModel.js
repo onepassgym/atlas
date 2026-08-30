@@ -1,5 +1,6 @@
 'use strict';
 const mongoose = require('mongoose');
+const cfg = require('../../config');
 
 // ── Relative-date parser ──────────────────────────────────────────────────────
 // Converts Google's "X weeks ago" style strings to an ISODate.
@@ -69,7 +70,7 @@ const ReviewSchema = new mongoose.Schema(
   },
   {
     timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },  // add updatedAt for ownerReply tracking
-    collection: 'gym_reviews',
+    collection: cfg.collections.spaceReviews,
     autoIndex: false,
   }
 );

@@ -1,5 +1,6 @@
 'use strict';
 const mongoose = require('mongoose');
+const cfg = require('../../config');
 
 // Register related models for population
 require('./categoryModel');
@@ -62,6 +63,10 @@ const GymSchema = new mongoose.Schema({
 
   // Category Normalized Links
   categoryId:  { type: mongoose.Schema.Types.ObjectId, ref: 'Category' },
+  // Space-domain mirror fields for forward-compatible output
+  primaryCategorySlug: String,
+  categorySlugs: [String],
+  amenitySlugs: [String],
   
   // Legacy / Unnormalized references
   category:    { type: String, default: 'fitness_venue' },
@@ -185,8 +190,8 @@ const GymSchema = new mongoose.Schema({
     negative: [String]
   },
 
-  // Atlas06 platform fields
-  atlas06: {
+  // Atlas platform fields
+  atlas: {
     isListed:   { type: Boolean, default: false },
     isVerified: { type: Boolean, default: false },
     isPartner:  { type: Boolean, default: false },
@@ -210,12 +215,23 @@ const GymSchema = new mongoose.Schema({
   rawAmenities:  mongoose.Schema.Types.Mixed,
   rawCrawlMeta:  mongoose.Schema.Types.Mixed,
 
+  // Consolidated crawl mirror for application-side output and future migration.
+  crawl: {
+    jobId: String,
+    status: String,
+    version: Number,
+    firstCrawledAt: Date,
+    lastCrawledAt: Date,
+    sourceUrl: String,
+    dataCompleteness: Number,
+  },
+
   // Data Pipeline
   parsed:    { type: Boolean, default: false },
 
 }, { 
   timestamps: true, 
-  collection: 'gyms',
+  collection: cfg.collections.spaces,
   autoIndex: false,
   toJSON: {
     virtuals: true,
@@ -258,13 +274,15 @@ GymSchema.index({ slug:        1 },         { unique: true, sparse: true });
 GymSchema.index({ googleMapsUrl: 1 });
 GymSchema.index({ placeId:     1 },         { sparse: true });             // non-unique (ensureIndexes handles uniqueness via native driver)
 GymSchema.index({ lat: 1, lng: 1 });
+GymSchema.index({ primaryCategorySlug: 1 });
+GymSchema.index({ areaName: 1, primaryCategorySlug: 1 });
 GymSchema.index({ name: 'text', description: 'text', areaName: 'text' });
 GymSchema.index({ areaName: 1, category: 1 });
 GymSchema.index({ rating: -1 });
 GymSchema.index({ qualityScore: -1 });
 GymSchema.index({ sentimentScore: -1 });
 GymSchema.index({ 'crawlMeta.crawlStatus': 1 });
-GymSchema.index({ 'atlas06.isListed': 1 });
+GymSchema.index({ 'atlas.isListed': 1 });
 GymSchema.index({ chainSlug: 1 });
 GymSchema.index({ isChainMember: 1 });
 

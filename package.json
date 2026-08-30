@@ -1,7 +1,7 @@
 {
-  "name": "atlas06-scraper",
+  "name": "atlas-scraper",
   "version": "1.0.0",
-  "description": "Atlas06 - Google Maps Fitness Venue Scraper (Node 20, no API key)",
+  "description": "Atlas - Google Maps Fitness Venue Scraper (Node 20, no API key)",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
