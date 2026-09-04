@@ -51,7 +51,7 @@ export function AppProvider({ children }) {
 
   // Init API env
   useEffect(() => {
-    const prodUrl = isProdHost ? window.location.origin : 'https://atlas.onepassspace.com';
+    const prodUrl = import.meta.env.VITE_API_URL || 'https://atlas.onepassgym.com';
     setEnv(env, prodUrl);
   }, [env, isProdHost]);
 

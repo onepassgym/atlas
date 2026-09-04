@@ -5,7 +5,7 @@ import {
   MessageSquare, Camera, Clock, Dumbbell, RefreshCw, Sparkles,
   CheckCircle, XCircle, ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { api } from '../api/client';
+import { api, getProxyUrl } from '../api/client';
 import { useApp } from '../context/AppContext';
 
 const SECTIONS = [
@@ -157,7 +157,7 @@ export default function SpaceDrawer({ spaceId, onClose }) {
             <>
               {(space.photos?.[0]?.url || space.coverPhoto) && (
                 <img
-                  src={space.photos?.[0]?.url || space.coverPhoto}
+                  src={getProxyUrl(space.photos?.[0]?.url || space.coverPhoto)}
                   alt={space.name}
                   style={{ width: '100%', height: 180, objectFit: 'cover', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}
                   onError={e => e.target.style.display = 'none'}
@@ -404,10 +404,11 @@ export default function SpaceDrawer({ spaceId, onClose }) {
                     {space.photos.map((photo, i) => (
                       <div key={i} style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', height: 120, background: '#1f2937' }}>
                         <img 
-                          src={photo.thumbnailUrl || photo.url} 
+                          src={getProxyUrl(photo.thumbnailUrl || photo.url)} 
                           alt="Space" 
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           loading="lazy"
+                          onError={e => e.target.style.display = 'none'}
                         />
                         {/* Overlay for AI metadata */}
                         <div style={{

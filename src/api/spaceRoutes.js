@@ -602,4 +602,22 @@ router.patch('/:id',
   }
 );
 
+// DELETE /api/spaces/:id — permanently delete a space and all its related records
+router.delete('/:id',
+  param('id').isString().notEmpty().withMessage('ID or slug is required'),
+  resolveSpace,
+  async (req, res) => {
+    if (validate(req, res)) return;
+    try {
+      const { deleteSpaceFull } = require('../db/deleteSpace');
+      const deletionStats = await deleteSpaceFull(req.space._id);
+      
+      ok(res, { 
+        message: 'Space and all related records successfully deleted',
+        stats: deletionStats
+      });
+    } catch (e) { err(res, e.message); }
+  }
+);
+
 module.exports = router;

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Star, MapPin, Globe, Phone, Dumbbell, Map, Clock, Zap, MessageSquare, Camera } from 'lucide-react';
 import { api, getProxyUrl } from '../api/client';
 import { useApp } from '../context/AppContext';
@@ -8,9 +8,11 @@ import RatingStars from '../components/RatingStars';
 
 export default function SpaceDetails() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { toast } = useApp();
   const [space, setSpace] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -23,6 +25,27 @@ export default function SpaceDetails() {
       .catch(e => toast(e.message, 'error'))
       .finally(() => setLoading(false));
   }, [id, toast]);
+
+  const handleDelete = async () => {
+    if (!window.confirm(`Are you absolutely sure you want to delete "${space.name}" and ALL its related data (reviews, photos, etc.)? This cannot be undone.`)) {
+      return;
+    }
+    
+    setIsDeleting(true);
+    try {
+      const res = await api.delete(`/api/spaces/${space._id || space.opgId || space.slug}`);
+      if (res?.success) {
+        toast(`Space deleted. Removed ${res.stats?.space || 1} space and ${res.stats?.reviews || 0} reviews.`, 'success');
+        navigate('/'); // Go back to explorer/home
+      } else {
+        toast('Failed to delete space', 'error');
+      }
+    } catch (e) {
+      toast(`Error deleting space: ${e.message}`, 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -150,6 +173,15 @@ export default function SpaceDetails() {
                   <Map size={14} /> Open in Google Maps
                 </a>
               )}
+              <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '8px 0' }} />
+              <button 
+                className="btn" 
+                style={{ width: '100%', justifyContent: 'center', color: '#ef4444', borderColor: '#ef4444', background: 'transparent' }}
+                onClick={handleDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Space'}
+              </button>
             </div>
           </div>
 
