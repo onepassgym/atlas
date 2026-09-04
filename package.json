@@ -25,8 +25,6 @@
     "dev:all": "concurrently -c \"cyan,magenta,yellow,green,blue\" \"npm run dev\" \"npm run dev:worker\" \"npm run dev:worker:enrich\" \"npm run dev:worker:chain\" \"npm run dashboard:dev\"",
     "migrate:opgid": "node migration/index.js --run=addOpgIds",
     "migrate:opgid:prod": "NODE_ENV=production node migration/index.js --run=addOpgIds",
-    "migrate:slugs": "node migration/index.js --run=backfillSlugs",
-    "migrate:slugs:prod": "NODE_ENV=production node migration/index.js --run=backfillSlugs",
     "migration": "node migration/index.js",
     "migration:prod": "NODE_ENV=production node migration/index.js"
   },
