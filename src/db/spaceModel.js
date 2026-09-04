@@ -248,14 +248,14 @@ const SpaceSchema = new mongoose.Schema({
 
 SpaceSchema.virtual('reviews', {
   ref: 'Review',
-  localField: '_id',
-  foreignField: 'spaceId'
+  localField: 'opgId',
+  foreignField: 'opgId'
 });
 
 SpaceSchema.virtual('photos', {
   ref: 'Photo',
-  localField: '_id',
-  foreignField: 'spaceId'
+  localField: 'opgId',
+  foreignField: 'opgId'
 });
 
 SpaceSchema.virtual('crawlMeta', {

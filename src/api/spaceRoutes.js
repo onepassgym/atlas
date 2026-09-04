@@ -185,6 +185,24 @@ router.get('/cities', async (_, res) => {
  *         schema:
  *           type: string
  *         description: Text search on name/address/area/chain
+ *       - in: query
+ *         name: lat
+ *         schema:
+ *           type: number
+ *           format: float
+ *         description: Latitude for geospatial nearby search
+ *       - in: query
+ *         name: lng
+ *         schema:
+ *           type: number
+ *           format: float
+ *         description: Longitude for geospatial nearby search
+ *       - in: query
+ *         name: radiusKm
+ *         schema:
+ *           type: number
+ *           format: float
+ *         description: Radius in kilometers (default 5)
  *     responses:
  *       200:
  *         description: Paginated list of spaces
@@ -197,10 +215,13 @@ router.get('/',
   query('limit').optional().isInt({ min: 1, max: 100 }),
   query('page').optional().isInt({ min: 1 }),
   query('sortBy').optional().isIn(['rating','totalReviews','name','createdAt','qualityScore','sentimentScore','relevance']),
+  query('lat').optional().isFloat(),
+  query('lng').optional().isFloat(),
+  query('radiusKm').optional().isFloat({ min: 0.1, max: 50 }),
   async (req, res) => {
     if (validate(req, res)) return;
     const startTime = Date.now();
-    const { city, category, minRating, limit = 20, page = 1, sortBy = 'qualityScore', order = 'desc', search } = req.query;
+    const { city, category, minRating, limit = 20, page = 1, sortBy = 'qualityScore', order = 'desc', search, lat, lng, radiusKm = 5 } = req.query;
     const filter = {};
     let useTextScore = false;
 
@@ -239,9 +260,20 @@ router.get('/',
     if (req.query.isChainMember) filter.isChainMember  = req.query.isChainMember === 'true';
     if (req.query.minReviews)    filter.totalReviews   = { ...(filter.totalReviews || {}), $gte: +req.query.minReviews };
 
+    if (lat && lng) {
+      filter.location = { 
+        $near: { 
+          $geometry: { type: 'Point', coordinates: [+lng, +lat] }, 
+          $maxDistance: +radiusKm * 1000 
+        } 
+      };
+    }
+
     // Build sort order
     let sortObj;
-    if (useTextScore && (sortBy === 'qualityScore' || sortBy === 'relevance')) {
+    if (lat && lng) {
+      sortObj = undefined; // $near sorts by distance
+    } else if (useTextScore && (sortBy === 'qualityScore' || sortBy === 'relevance')) {
       // Blend text relevance with quality score
       sortObj = { score: { $meta: 'textScore' }, qualityScore: -1 };
     } else {
@@ -296,7 +328,7 @@ router.get('/',
                .populate('categoryId', 'slug label')
                .populate('amenityIds', 'slug label icon')
                .populate('pageSlug', 'slug pageData')
-               .sort({ [sortBy]: order === 'asc' ? 1 : -1 })
+               .sort(sortObj)
                .limit(+limit)
                .skip((+page - 1) * +limit)
                .lean(),
@@ -563,6 +595,60 @@ async function resolveSpace(req, res, next) {
   } catch (e) { err(res, e.message); }
 }
 
+/**
+ * @swagger
+ * /api/spaces/{id}/reviews:
+ *   get:
+ *     summary: Get reviews for a specific space
+ *     tags: [Spaces]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: Paginated list of reviews for the space
+ *       404:
+ *         description: Space not found
+ */
+// GET /api/spaces/:id/reviews
+router.get('/:id/reviews',
+  param('id').isString().notEmpty().withMessage('ID or slug is required'),
+  resolveSpace,
+  async (req, res) => {
+    if (validate(req, res)) return;
+    try {
+      const page  = Math.max(1, parseInt(req.query.page)  || 1);
+      const limit = Math.min(100, parseInt(req.query.limit) || 20);
+      const skip  = (page - 1) * limit;
+
+      const { Review } = require('../db/reviewModel');
+      const [reviews, total] = await Promise.all([
+        Review.find({ opgId: req.space.opgId })
+          .sort({ publishedAt: -1, createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        Review.countDocuments({ opgId: req.space.opgId })
+      ]);
+
+      ok(res, { reviews, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+    } catch (e) { err(res, e.message); }
+  }
+);
+
 // GET /api/spaces/:id
 router.get('/:id',
   param('id').isString().notEmpty().withMessage('ID or slug is required'),
@@ -574,7 +660,7 @@ router.get('/:id',
         .populate('categoryId', 'slug label description')
         .populate('amenityIds', 'slug label icon')
         .populate('reviews')
-        .populate('photos', '-localPath')
+        .populate({ path: 'photos', select: '-localPath', options: { limit: 10 } })
         .populate('crawlMeta')
         .populate('pageSlug', 'slug pageData')
         .lean({ virtuals: true });

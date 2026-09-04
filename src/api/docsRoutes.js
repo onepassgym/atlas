@@ -9,7 +9,8 @@ const router = express.Router();
 
 const envBaseUrl = process.env.PUBLIC_BASE_URL ||
   process.env.PROD_PUBLIC_BASE_URL ||
-  process.env.DEV_PUBLIC_BASE_URL 
+  process.env.DEV_PUBLIC_BASE_URL || 
+  'https://atlas.onepassgym.com';
 
 const publicBaseUrl = envBaseUrl.replace(/\/$/, '');
 
@@ -25,7 +26,7 @@ const swaggerOptions = {
     servers: [
       {
         url: publicBaseUrl,
-        description: process.env.NODE_ENV === 'production' ? 'Production server' : 'Local development server',
+        description: 'Production server',
       },
     ],
   },
