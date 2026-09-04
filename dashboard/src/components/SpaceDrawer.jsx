@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Star, MapPin, Phone, Globe, Map, ExternalLink, Zap,
   MessageSquare, Camera, Clock, Dumbbell, RefreshCw, Sparkles,
-  CheckCircle, XCircle, ChevronDown, ChevronUp,
+  CheckCircle, XCircle, ChevronDown, ChevronUp, Trash2
 } from 'lucide-react';
 import { api, getProxyUrl } from '../api/client';
 import { useApp } from '../context/AppContext';
@@ -25,6 +25,27 @@ export default function SpaceDrawer({ spaceId, onClose }) {
   const [enrichLogs, setEnrichLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!window.confirm('Are you sure you want to completely delete this space and all related data? This cannot be undone.')) {
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      const res = await api.delete(`/api/spaces/${space.opgId}`);
+      if (res?.success) {
+        toast('Space has been deleted.', 'success');
+        onClose();
+        window.dispatchEvent(new Event('spaceDeleted'));
+      }
+    } catch (err) {
+      console.error(err);
+      toast('Failed to delete space.', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Toggle a section chip
   const toggleSection = useCallback((key) => {
@@ -155,15 +176,25 @@ export default function SpaceDrawer({ spaceId, onClose }) {
             <div className="empty-state">Failed to load space details</div>
           ) : (
             <>
-              {(space.photos?.[0]?.url || space.coverPhoto) && (
-                <img
-                  src={getProxyUrl(space.photos?.[0]?.url || space.coverPhoto)}
-                  alt={space.name}
-                  style={{ width: '100%', height: 180, objectFit: 'cover', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}
-                  onError={e => e.target.style.display = 'none'}
-                />
-              )}
-              <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{space.name}</h2>
+              {(() => {
+                const firstPhotoUrl = space.photos?.[0]?.proxyUrl || space.photos?.[0]?.publicUrl || space.photos?.[0]?.originalUrl || space.photos?.[0]?.thumbnailUrl;
+              const coverUrl = typeof space.coverPhoto === 'string' ? space.coverPhoto : space.coverPhoto?.publicUrl || space.coverPhoto?.thumbnailUrl || space.coverPhoto?.originalUrl;
+              const heroImgUrl = firstPhotoUrl || coverUrl;
+
+              return (
+                <>
+                  {heroImgUrl && (
+                    <img
+                      src={getProxyUrl(heroImgUrl)}
+                      alt={space.name}
+                      style={{ width: '100%', height: 180, objectFit: 'cover', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}
+                      onError={e => e.target.style.display = 'none'}
+                    />
+                  )}
+                  <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{space.name}</h2>
+                </>
+              );
+            })()}
               <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
                 <span style={{ color: 'var(--warning)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4 }}>
                   <Star size={14} /> {space.rating?.toFixed(1) || '—'}
@@ -401,16 +432,20 @@ export default function SpaceDrawer({ spaceId, onClose }) {
                     Media Gallery <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>({space.photos.length})</span>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8, marginTop: 8 }}>
-                    {space.photos.map((photo, i) => (
-                      <div key={i} style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', height: 120, background: '#1f2937' }}>
-                        <img 
-                          src={getProxyUrl(photo.thumbnailUrl || photo.url)} 
-                          alt="Space" 
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          loading="lazy"
-                          onError={e => e.target.style.display = 'none'}
-                        />
-                        {/* Overlay for AI metadata */}
+                    {space.photos.map((photo, i) => {
+                      const photoUrl = photo.proxyUrl || photo.publicUrl || photo.originalUrl || photo.thumbnailUrl;
+                      return (
+                        <div key={i} style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', height: 120, background: '#1f2937' }}>
+                          {photoUrl && (
+                            <img 
+                              src={getProxyUrl(photoUrl)} 
+                              alt="Space" 
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              loading="lazy"
+                              onError={e => e.target.style.display = 'none'}
+                            />
+                          )}
+                          {/* Overlay for AI metadata */}
                         <div style={{
                           position: 'absolute', bottom: 0, left: 0, right: 0, 
                           background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)',
@@ -432,12 +467,24 @@ export default function SpaceDrawer({ spaceId, onClose }) {
                           )}
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
-              <div style={{ marginTop: 16, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>ID: {space.opgId}</div>
+              <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>ID: {space.opgId}</div>
+                <button 
+                  className="btn" 
+                  style={{ background: 'transparent', borderColor: 'var(--danger)', color: 'var(--danger)', fontSize: 12, padding: '4px 12px' }}
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                >
+                  <Trash2 size={13} style={{ marginRight: 4 }} />
+                  {isDeleting ? 'Deleting...' : 'Delete Space'}
+                </button>
+              </div>
             </>
           )}
         </div>

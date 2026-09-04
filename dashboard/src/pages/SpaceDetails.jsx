@@ -86,20 +86,37 @@ export default function SpaceDetails() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {/* Header & Main Image */}
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            {(space.photos?.[0]?.proxyUrl || space.photos?.[0]?.url || space.coverPhoto) ? (
-              <img 
-                src={getProxyUrl(space.photos?.[0]?.proxyUrl || space.photos?.[0]?.url || space.coverPhoto?.publicUrl || space.coverPhoto)} 
-                alt={space.name} 
-                style={{ width: '100%', height: 350, objectFit: 'cover' }} 
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                  e.target.nextElementSibling.style.display = 'flex';
-                }}
-              />
-            ) : null}
-            <div style={{ width: '100%', height: 350, background: 'var(--bg-surface)', display: (space.photos?.[0]?.proxyUrl || space.photos?.[0]?.url || space.coverPhoto) ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-              <MapPin size={48} />
-            </div>
+            {(() => {
+              const firstPhotoUrl = space.photos?.[0]?.proxyUrl || space.photos?.[0]?.publicUrl || space.photos?.[0]?.originalUrl || space.photos?.[0]?.thumbnailUrl;
+              const coverUrl = typeof space.coverPhoto === 'string' ? space.coverPhoto : space.coverPhoto?.publicUrl || space.coverPhoto?.thumbnailUrl || space.coverPhoto?.originalUrl;
+              const heroImgUrl = firstPhotoUrl || coverUrl;
+              
+              if (heroImgUrl) {
+                return (
+                  <img 
+                    src={getProxyUrl(heroImgUrl)} 
+                    alt={space.name} 
+                    style={{ width: '100%', height: 350, objectFit: 'cover' }} 
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.nextElementSibling.style.display = 'flex';
+                    }}
+                  />
+                );
+              }
+              return null;
+            })()}
+            {(() => {
+              const firstPhotoUrl = space.photos?.[0]?.proxyUrl || space.photos?.[0]?.publicUrl || space.photos?.[0]?.originalUrl || space.photos?.[0]?.thumbnailUrl;
+              const coverUrl = typeof space.coverPhoto === 'string' ? space.coverPhoto : space.coverPhoto?.publicUrl || space.coverPhoto?.thumbnailUrl || space.coverPhoto?.originalUrl;
+              const heroImgUrl = firstPhotoUrl || coverUrl;
+              
+              return (
+                <div style={{ width: '100%', height: 350, background: 'var(--bg-surface)', display: heroImgUrl ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                  <MapPin size={48} />
+                </div>
+              );
+            })()}
             
             <div style={{ padding: 24 }}>
               <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 16 }}>

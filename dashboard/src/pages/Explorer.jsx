@@ -132,6 +132,14 @@ export default function Explorer() {
     }
   }, [search, city, category, chain, rating, sort, minReviews, chainOnly, toast]);
 
+  useEffect(() => {
+    const handleSpaceDeleted = () => {
+      searchSpaces(page);
+    };
+    window.addEventListener('spaceDeleted', handleSpaceDeleted);
+    return () => window.removeEventListener('spaceDeleted', handleSpaceDeleted);
+  }, [searchSpaces, page]);
+
   // ── Fetch suggestions ──
   const fetchSuggestions = useCallback(async (query) => {
     if (query.length < 2) { setSuggestions([]); return; }

@@ -91,14 +91,15 @@ function QualityBadge({ score }) {
 
 export default React.memo(function SpaceRow({ space, onClick, searchTerm = '' }) {
   const categoryLabel = formatCategory(space.category) || (space.categoryId?.label ? formatCategory(space.categoryId.label) : null);
+  const coverUrl = typeof space.coverPhoto === 'string' ? space.coverPhoto : space.coverPhoto?.thumbnailUrl || space.coverPhoto?.publicUrl || space.coverPhoto?.originalUrl;
 
   return (
     <div className="space-row-card" onClick={() => onClick?.(space.opgId)} id={`space-${space.opgId}`}>
       {/* Thumbnail */}
       <div className="space-row-thumb">
-        {space.coverPhoto?.thumbnailUrl || space.coverPhoto?.publicUrl || typeof space.coverPhoto === 'string' ? (
+        {coverUrl ? (
           <img 
-            src={getProxyUrl(space.coverPhoto?.thumbnailUrl || space.coverPhoto?.publicUrl || space.coverPhoto)} 
+            src={getProxyUrl(coverUrl)} 
             alt="" 
             loading="lazy"
             onError={(e) => {
@@ -107,7 +108,7 @@ export default React.memo(function SpaceRow({ space, onClick, searchTerm = '' })
             }}
           />
         ) : null}
-        <div className="space-row-thumb-fallback" style={{ display: (space.coverPhoto?.thumbnailUrl || space.coverPhoto?.publicUrl || typeof space.coverPhoto === 'string') ? 'none' : 'flex' }}>
+        <div className="space-row-thumb-fallback" style={{ display: coverUrl ? 'none' : 'flex' }}>
           <MapPin size={18} />
         </div>
       </div>
