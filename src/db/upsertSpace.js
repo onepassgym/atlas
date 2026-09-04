@@ -26,6 +26,7 @@ const Category       = require('./categoryModel');
 const Amenity        = require('./amenityModel');
 const PlaceType      = require('./placeTypeModel');
 const SpaceChangeLog = require('./spaceChangeLogModel');
+const { ensureUniquePageSlug } = require('./pageSlugHelper');
 const { calculateQualityScore } = require('../services/intelligence/scoring');
 const { analyzeSpaceSentiment } = require('../services/intelligence/sentiment');
 const logger       = require('../utils/logger');
@@ -584,6 +585,7 @@ async function upsertSpace(crawledData) {
         upsertPhotos(spaceId, crawledData.photoUrls, now, opgId),
         upsertCrawlMeta(spaceId, crawledData.crawlMeta, now, opgId),
         upsertSpaceSource({ spaceId, opgId, crawledData: normalizedData, now, status: 'completed' }),
+        ensureUniquePageSlug(normalizedData.slug || slugifyValue(normalizedData.name), spaceId, opgId, normalizedData.name, normalizedData.address, normalizedData.category).catch(e => logger.error(`Slug error: ${e.message}`)),
       ]);
 
       result.newReviews = revCount || 0;
@@ -633,6 +635,7 @@ async function upsertSpace(crawledData) {
       upsertPhotos(spaceId, crawledData.photoUrls, now, opgId),
       upsertCrawlMeta(spaceId, crawledData.crawlMeta, now, opgId),
       upsertSpaceSource({ spaceId, opgId, crawledData: normalizedData, now, status: 'completed' }),
+      ensureUniquePageSlug(normalizedData.slug || slugifyValue(normalizedData.name), spaceId, opgId, normalizedData.name, normalizedData.address, normalizedData.category).catch(e => logger.error(`Slug error: ${e.message}`)),
     ]);
     result.newReviews = reviewResult;
     result.newPhotos = photoResult;

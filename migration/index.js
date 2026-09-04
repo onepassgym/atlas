@@ -152,6 +152,8 @@ const manualRun = process.argv.find(a => a.startsWith('--run='));
 if (manualRun === '--run=addOpgIds') {
   // Standalone script mode — addOpgIds.js handles its own connect/disconnect
   require('./addOpgIds');
+} else if (manualRun === '--run=backfillSlugs') {
+  require('./backfillSlugs');
 } else if (require.main === module) {
   // Long-lived scheduler mode
   (async () => {

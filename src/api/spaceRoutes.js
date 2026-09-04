@@ -5,6 +5,7 @@ const { query, param, validationResult } = require('express-validator');
 const router    = express.Router();
 const Space       = require('../db/spaceModel');
 const Photo     = require('../db/photoModel');
+const PageSlug  = require('../db/pageSlugModel');
 
 const { ok, err, validate } = require('../utils/apiUtils');
 const { isValidOpgId } = require('../utils/opgId');
@@ -257,6 +258,7 @@ router.get('/',
            .select('-crawlMeta')
            .populate('categoryId', 'slug label')
            .populate('amenityIds', 'slug label icon')
+           .populate('pageSlug', 'slug pageData')
            .sort(sortObj)
            .limit(+limit)
            .skip((+page - 1) * +limit)
@@ -293,6 +295,7 @@ router.get('/',
                .select('-crawlMeta')
                .populate('categoryId', 'slug label')
                .populate('amenityIds', 'slug label icon')
+               .populate('pageSlug', 'slug pageData')
                .sort({ [sortBy]: order === 'asc' ? 1 : -1 })
                .limit(+limit)
                .skip((+page - 1) * +limit)
@@ -532,19 +535,27 @@ router.get('/photos', async (req, res) => {
 });
 
 /**
- * resolveSpace — shared middleware for /:opgId routes.
- * Validates format, fetches the space, attaches as req.space.
+ * resolveSpace — shared middleware for /:id routes.
+ * Validates format, fetches the space (by Mongo ID, OPG ID, or SEO slug), attaches as req.space.
  * All subsequent DB queries use req.space._id (ObjectId) only.
  */
 async function resolveSpace(req, res, next) {
-  const { opgId } = req.params;
-  const isMongoId = /^[a-fA-F0-9]{24}$/.test(opgId);
+  const { id } = req.params;
+  const isMongoId = /^[a-fA-F0-9]{24}$/.test(id);
+  const isOpgId = /^OPG-[A-Z]+-[A-Z0-9]+$/.test(id);
   
-  if (!isMongoId && !isValidOpgId(opgId)) return err(res, 'Invalid ID format — expected OPG-KEYWORD-XXXX or Mongo ID', 400);
   try {
-    const space = isMongoId 
-      ? await Space.findById(opgId).lean({ virtuals: true })
-      : await Space.findOne({ opgId }).lean({ virtuals: true });
+    let space;
+    if (isMongoId) {
+      space = await Space.findById(id).lean({ virtuals: true });
+    } else if (isOpgId) {
+      space = await Space.findOne({ opgId: id }).lean({ virtuals: true });
+    } else {
+      // Treat as slug
+      const slugRecord = await PageSlug.findOne({ slug: id.toLowerCase(), isActive: true }).lean();
+      if (!slugRecord) return err(res, 'Space not found for the given slug', 404);
+      space = await Space.findById(slugRecord.spaceId).lean({ virtuals: true });
+    }
       
     if (!space) return err(res, 'Space not found', 404);
     req.space = space;
@@ -552,11 +563,9 @@ async function resolveSpace(req, res, next) {
   } catch (e) { err(res, e.message); }
 }
 
-// GET /api/spaces/:opgId
-router.get('/:opgId',
-  param('opgId')
-    .matches(/^(OPG-[A-Z]+-[A-Z0-9]+|[a-fA-F0-9]{24})$/)
-    .withMessage('Invalid ID — expected OPG-KEYWORD-XXXX or Mongo ObjectId'),
+// GET /api/spaces/:id
+router.get('/:id',
+  param('id').isString().notEmpty().withMessage('ID or slug is required'),
   resolveSpace,
   async (req, res) => {
     if (validate(req, res)) return;
@@ -567,6 +576,7 @@ router.get('/:opgId',
         .populate('reviews')
         .populate('photos', '-localPath')
         .populate('crawlMeta')
+        .populate('pageSlug', 'slug pageData')
         .lean({ virtuals: true });
 
       if (!space) return err(res, 'Space not found', 404);
@@ -575,11 +585,9 @@ router.get('/:opgId',
   }
 );
 
-// PATCH /api/spaces/:opgId  — update platform fields only
-router.patch('/:opgId',
-  param('opgId')
-    .matches(/^(OPG-[A-Z]+-[A-Z0-9]+|[a-fA-F0-9]{24})$/)
-    .withMessage('Invalid ID — expected OPG-KEYWORD-XXXX or Mongo ObjectId'),
+// PATCH /api/spaces/:id  — update platform fields only
+router.patch('/:id',
+  param('id').isString().notEmpty().withMessage('ID or slug is required'),
   resolveSpace,
   async (req, res) => {
     if (validate(req, res)) return;

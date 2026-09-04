@@ -265,6 +265,13 @@ SpaceSchema.virtual('crawlMeta', {
   justOne: true
 });
 
+SpaceSchema.virtual('pageSlug', {
+  ref: 'PageSlug',
+  localField: '_id',
+  foreignField: 'spaceId',
+  justOne: true
+});
+
 // ── Indexes (declared once, no duplicates) ────────────────────────────────────
 
 SpaceSchema.index({ opgId:       1 },         { unique: true, sparse: true }); // public canonical id
