@@ -232,7 +232,8 @@ router.get('/',
     if (search) {
       const trimmed = search.trim();
       // Try $text search first for multi-word queries (better relevance)
-      if (trimmed.length >= 3) {
+      // Note: MongoDB does not allow $text and $near in the same query.
+      if (trimmed.length >= 3 && !(lat && lng)) {
         try {
           // Use MongoDB text index for relevance-scored search
           filter.$text = { $search: trimmed };
@@ -263,8 +264,8 @@ router.get('/',
     if (lat && lng) {
       filter.location = { 
         $near: { 
-          $geometry: { type: 'Point', coordinates: [+lng, +lat] }, 
-          $maxDistance: +radiusKm * 1000 
+          $geometry: { type: 'Point', coordinates: [+lng, +lat] }
+          // Removed $maxDistance to ensure we always return records, sorting nearest first
         } 
       };
     }
@@ -287,11 +288,8 @@ router.get('/',
 
       const countFilter = { ...filter };
       if (lat && lng) {
-        countFilter.location = {
-          $geoWithin: {
-            $centerSphere: [[+lng, +lat], (+radiusKm) / 6378.1] // radius in radians (km / earth radius in km)
-          }
-        };
+        // Since we removed $maxDistance, we count all spaces that have a location
+        countFilter.location = { $ne: null };
       }
 
       const [spaces, total] = await Promise.all([
