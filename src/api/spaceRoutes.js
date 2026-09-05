@@ -285,6 +285,15 @@ router.get('/',
         ? { score: { $meta: 'textScore' }, crawlMeta: 0 }
         : { crawlMeta: 0 };
 
+      const countFilter = { ...filter };
+      if (lat && lng) {
+        countFilter.location = {
+          $geoWithin: {
+            $centerSphere: [[+lng, +lat], (+radiusKm) / 6378.1] // radius in radians (km / earth radius in km)
+          }
+        };
+      }
+
       const [spaces, total] = await Promise.all([
         Space.find(filter, useTextScore ? { score: { $meta: 'textScore' } } : undefined)
            .select('-crawlMeta')
@@ -295,7 +304,7 @@ router.get('/',
            .limit(+limit)
            .skip((+page - 1) * +limit)
            .lean(),
-        Space.countDocuments(filter),
+        Space.countDocuments(countFilter),
       ]);
 
       const elapsed = Date.now() - startTime;
