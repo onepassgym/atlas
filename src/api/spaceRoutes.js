@@ -489,6 +489,122 @@ router.get('/stats', async (_, res) => {
   } catch (e) { err(res, e.message); }
 });
 
+/**
+ * @swagger
+ * tags:
+ *   name: Sitemap
+ *   description: Endpoints for generating sitemaps
+ *
+ * /api/spaces/sitemap:
+ *   get:
+ *     summary: Get all active space slugs for sitemap generation (paginated)
+ *     tags: [Spaces, Sitemap]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number for sitemap chunking
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10000
+ *         description: Items per page (max 50,000 for standard XML sitemaps)
+ *     responses:
+ *       200:
+ *         description: Paginated list of rich sitemap metadata
+ */
+router.get('/sitemap', async (req, res) => {
+  try {
+    const baseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    
+    // Implement pagination to handle hundreds of thousands (lakhs) of spaces
+    // Standard sitemap limit is 50,000 URLs per file. We default to 10,000 to be safe.
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50000, parseInt(req.query.limit) || 10000);
+    const skip = (page - 1) * limit;
+
+    const [pageSlugs, total] = await Promise.all([
+      PageSlug.find({ isActive: true })
+        .skip(skip)
+        .limit(limit)
+        .populate({
+          path: 'spaceId',
+          select: 'name description qualityScore rating totalReviews coverPhoto updatedAt'
+        })
+        .lean(),
+      PageSlug.countDocuments({ isActive: true })
+    ]);
+
+    const spaces = pageSlugs.map(ps => {
+      const space = ps.spaceId || {};
+      
+      // Calculate dynamic priority based on quality score or rating (0.1 to 1.0)
+      let priority = 0.5;
+      if (space.qualityScore) {
+        priority = 0.3 + (space.qualityScore / 100) * 0.7;
+      } else if (space.rating) {
+        priority = 0.4 + (space.rating / 5) * 0.6;
+      }
+      priority = parseFloat(Math.min(1.0, Math.max(0.1, priority)).toFixed(1));
+
+      // Helper to route external image URLs through our proxy endpoint
+      // This ensures images appear as first-party assets on our domain
+      const getProxiedUrl = (url) => {
+        if (!url) return null;
+        if (url.match(/googleusercontent\.com|fbcdn\.net|cdninstagram\.com|fitternity\.com|fitmania\.in/)) {
+          return `${baseUrl}/api/media/proxy?url=${encodeURIComponent(url)}`;
+        }
+        return url;
+      };
+
+      // Aggregate rich media for image sitemaps (highly valued by AI search)
+      const images = [];
+      const ogImgUrl = getProxiedUrl(ps.pageData?.ogImage);
+      if (ogImgUrl) {
+        images.push({ 
+          url: ogImgUrl, 
+          title: ps.pageData.ogTitle || ps.pageData.seoTitle || space.name 
+        });
+      }
+      
+      const coverImgUrl = getProxiedUrl(space.coverPhoto?.publicUrl);
+      if (coverImgUrl) {
+        images.push({ 
+          url: coverImgUrl, 
+          title: `${space.name} cover photo` 
+        });
+      }
+
+      return {
+        url: `${baseUrl}/${ps.slug}`,
+        slug: ps.slug,
+        lastmod: space.updatedAt || ps.updatedAt,
+        changefreq: 'weekly',
+        priority,
+        seo: {
+          title: ps.pageData?.seoTitle || space.name || '',
+          description: ps.pageData?.metaDescription || space.description || '',
+          keywords: ps.pageData?.keywords || []
+        },
+        images
+      };
+    });
+
+    ok(res, { 
+      spaces,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (e) { err(res, e.message); }
+});
+
 // GET /api/spaces/export — download all space data as JSON
 router.get('/export', async (req, res) => {
   res.setHeader('Content-disposition', 'attachment; filename=spaces-export.json');
