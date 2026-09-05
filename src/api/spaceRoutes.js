@@ -518,7 +518,11 @@ router.get('/stats', async (_, res) => {
  */
 router.get('/sitemap', async (req, res) => {
   try {
-    const baseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const baseUrl = process.env.API_ATLAS_BASE_URL ||
+      process.env.PUBLIC_BASE_URL || 
+      process.env.PROD_PUBLIC_BASE_URL || 
+      process.env.DEV_PUBLIC_BASE_URL || 
+      'https://onepassgym.com/api-atlas';
     
     // Implement pagination to handle hundreds of thousands (lakhs) of spaces
     // Standard sitemap limit is 50,000 URLs per file. We default to 10,000 to be safe.

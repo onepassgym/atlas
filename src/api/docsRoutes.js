@@ -7,10 +7,11 @@ const cfg = require('../../config');
 
 const router = express.Router();
 
-const envBaseUrl = process.env.PUBLIC_BASE_URL ||
+const envBaseUrl = process.env.API_ATLAS_BASE_URL ||
+  process.env.PUBLIC_BASE_URL ||
   process.env.PROD_PUBLIC_BASE_URL ||
   process.env.DEV_PUBLIC_BASE_URL || 
-  'https://atlas.onepassgym.com';
+  'https://onepassgym.com/api-atlas';
 
 const publicBaseUrl = envBaseUrl.replace(/\/$/, '');
 
