@@ -804,9 +804,10 @@ async function scrapeReviews(page, maxReviews = 30) {
     let lastCount = 0; let noNew = 0;
 
     while (reviews.length < maxReviews) {
-      for (const btn of await page.locator('button.w8nwRe').all()) {
+      for (const btn of await page.locator('button.w8nwRe, button:has-text("More")').all()) {
         try { await btn.click({ force: true }); } catch (_) {}
       }
+      await sleep(300, 500); // Wait for text expansion
 
       for (const card of await page.locator('.jftiEf, .MyEned').all()) {
         try {
@@ -835,13 +836,17 @@ async function scrapeReviews(page, maxReviews = 30) {
               ownerReplyText = ownerReplyBlock.querySelector('.wiI7pd')?.textContent?.trim() || ownerReplyBlock.textContent?.trim();
               if (ownerReplyText) {
                 ownerReplyText = ownerReplyText.replace(/^Response from the owner.*?ago\s*/i, '').trim();
-                ownerReplyText = ownerReplyText.replace(/^["“”\s]+|["“”\s]+$/g, '');
+                ownerReplyText = ownerReplyText.replace(/^["'“”‘’`´«»\s]+|["'“”‘’`´«»\s]+$/g, '');
+                ownerReplyText = ownerReplyText.replace(/(?:\.\.\.\s*)?More$/i, '').trim(); // Remove trailing "More" if unexpanded
               }
               ownerRespondedAtRaw = ownerReplyBlock.querySelector('.n5VP6b')?.textContent?.trim() || t('.n5VP6b');
             }
 
             let text = t('.wiI7pd') || t('.MyEned span');
-            if (text) text = text.replace(/^["“”\s]+|["“”\s]+$/g, '');
+            if (text) {
+              text = text.replace(/^["'“”‘’`´«»\s]+|["'“”‘’`´«»\s]+$/g, '');
+              text = text.replace(/(?:\.\.\.\s*)?More$/i, '').trim(); // Remove trailing "More" if unexpanded
+            }
 
             return {
               reviewId:    el.getAttribute('data-review-id') || null,
