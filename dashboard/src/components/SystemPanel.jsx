@@ -98,6 +98,15 @@ export default function SystemPanel() {
   const triggerSchedule = async (freq) => {
     try { const res = await api.post('/api/system/schedule/trigger', { frequency: freq }); toast(res?.message || 'Triggered', 'success'); } catch { toast('Failed', 'error'); }
   };
+
+  const triggerCityCrawl = async (cityName) => {
+    try {
+      const res = await api.post('/api/crawl/city', { cityName });
+      toast(res?.success ? `Queued: ${cityName}` : (res?.error || 'Failed'), res?.success ? 'success' : 'error');
+    } catch {
+      toast('Network error', 'error');
+    }
+  };
   const triggerStale = async () => { try { const res = await api.post('/api/system/schedule/trigger/stale'); toast(res?.message || 'Triggered', 'success'); } catch { toast('Failed', 'error'); } };
   const triggerEnrichment = async () => { try { const res = await api.post('/api/system/schedule/trigger/enrichment'); toast(res?.message || 'Triggered', 'success'); } catch { toast('Failed', 'error'); } };
   const retryFailed = async () => { try { const res = await api.post('/api/crawl/retry/failed'); toast(res?.message || 'Retrying', 'success'); } catch { toast('Failed', 'error'); } };
@@ -218,7 +227,12 @@ export default function SystemPanel() {
                     <td style={{ color: 'var(--text-primary)' }}>{c.name}</td>
                     <td><span className={`freq-badge ${c.frequency}`}>{c.frequency}</span></td>
                     <td>P{c.priority}</td>
-                    <td><button className="btn sm danger" onClick={() => removeCity(c.name)}>🗑️</button></td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button className="btn sm primary" title="Start Crawl" onClick={() => triggerCityCrawl(c.name)}>▶️</button>
+                        <button className="btn sm danger" title="Remove" onClick={() => removeCity(c.name)}>🗑️</button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {schedule.length === 0 && <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No cities scheduled</td></tr>}

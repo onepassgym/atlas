@@ -106,6 +106,38 @@ services:
         limits:
           memory: 1G
 
+  chain-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - MONGODB_URI=mongodb://mongo:27051/atlas
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NODE_ENV=${NODE_ENV:-production}
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./media:/app/media
+      - ./logs:/app/logs
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [ opg ]
+    command: >
+      sh -c "if [ \"$$NODE_ENV\" = \"production\" ]; then 
+               node src/queue/chainWorker.js; 
+             else 
+               node --watch src/queue/chainWorker.js; 
+             fi"
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 2G
+
   media-worker:
     build:
       context: .
