@@ -4,6 +4,7 @@ import { RefreshCw, XCircle, Trash2, Zap, AlertTriangle, CheckCircle } from 'luc
 import Pagination from '../components/Pagination';
 import Skeleton from '../components/Skeleton';
 import JobDrawer from '../components/JobDrawer';
+import StatCard from '../components/StatCard';
 import { api } from '../api/client';
 import { useApp } from '../context/AppContext';
 
@@ -43,6 +44,7 @@ export default function JobsPanel() {
   const [loading, setLoading] = useState(true);
   const [promoting, setPromoting] = useState(null);
   const [selectedJobId, setSelectedJobId] = useState(null);
+  const [queueStats, setQueueStats] = useState(null);
 
   const fetchJobs = useCallback(async (p = page) => {
     setLoading(true);
@@ -55,10 +57,15 @@ export default function JobsPanel() {
         setTotal(res.total || 0);
         setPage(res.page || p);
       }
+      
+      const statsRes = await api.get('/api/crawl/queue/stats');
+      if (statsRes?.success) {
+        setQueueStats(statsRes.queue);
+      }
     } catch {} finally { setLoading(false); }
   }, [filter, page]);
 
-  useEffect(() => { fetchJobs(1); }, [filter]);
+  useEffect(() => { fetchJobs(1); }, [filter, fetchJobs]);
 
   // Refresh on relevant SSE events
   useEffect(() => {
@@ -133,6 +140,16 @@ export default function JobsPanel() {
 
   return (
     <div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      
+      {/* ── Queue Stats Widget ────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+        <StatCard title="Active" value={queueStats?.active || 0} icon={<Zap size={14} />} color="blue" />
+        <StatCard title="Waiting" value={queueStats?.waiting || 0} icon={<RefreshCw size={14} />} color="yellow" />
+        <StatCard title="Delayed" value={queueStats?.delayed || 0} icon={<AlertTriangle size={14} />} color="purple" />
+        <StatCard title="Completed" value={queueStats?.completed || 0} icon={<CheckCircle size={14} />} color="green" />
+        <StatCard title="Failed" value={queueStats?.failed || 0} icon={<XCircle size={14} />} color="red" />
+      </div>
+
       {/* ── Filter Bar ────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span className="section-title" style={{ marginBottom: 0, flexShrink: 0 }}>Job History</span>
