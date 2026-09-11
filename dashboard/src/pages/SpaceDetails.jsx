@@ -33,7 +33,8 @@ export default function SpaceDetails() {
     
     setIsDeleting(true);
     try {
-      const res = await api.delete(`/api/spaces/${space._id || space.opgId || space.slug}`);
+      const targetSlug = space.slug || space.pageSlug?.slug;
+      const res = await api.delete(`/api/spaces/${targetSlug}`);
       if (res?.success) {
         toast(`Space deleted. Removed ${res.stats?.space || 1} space and ${res.stats?.reviews || 0} reviews.`, 'success');
         navigate('/'); // Go back to explorer/home

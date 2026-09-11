@@ -56,12 +56,14 @@ router.get('/suggestions', async (req, res) => {
     // Parallel search: names that start with query + areas + chains
     const [nameStartMatches, nameContainsMatches, areaMatches, chainMatches] = await Promise.all([
       Space.find({ name: startsWith })
-         .select('name areaName chainName rating totalReviews qualityScore category coverPhoto')
+         .select('name areaName chainName rating totalReviews qualityScore category coverPhoto pageSlug')
+         .populate('pageSlug', 'slug')
          .sort({ qualityScore: -1 })
          .limit(5)
          .lean(),
       Space.find({ name: contains })
-         .select('name areaName chainName rating totalReviews qualityScore category coverPhoto')
+         .select('name areaName chainName rating totalReviews qualityScore category coverPhoto pageSlug')
+         .populate('pageSlug', 'slug')
          .sort({ qualityScore: -1 })
          .limit(5)
          .lean(),
@@ -96,6 +98,7 @@ router.get('/suggestions', async (req, res) => {
           quality: g.qualityScore,
           category: g.category,
           thumbnail: g.coverPhoto?.thumbnailUrl || null,
+          slug: g.pageSlug?.slug || null,
         });
       }
       if (spaceSuggestions.length >= 6) break;
@@ -662,13 +665,13 @@ router.get('/export', async (req, res) => {
 
 /**
  * @swagger
- * /api/spaces/{id}:
+ * /api/spaces/{slug}:
  *   get:
  *     summary: Get full details for a specific space
  *     tags: [Spaces]
  *     parameters:
  *       - in: path
- *         name: id
+ *         name: slug
  *         required: true
  *         schema:
  *           type: string
@@ -710,29 +713,20 @@ router.get('/photos', async (req, res) => {
 });
 
 /**
- * resolveSpace — shared middleware for /:id routes.
- * Validates format, fetches the space (by Mongo ID, OPG ID, or SEO slug), attaches as req.space.
+ * resolveSpace — shared middleware for /:slug routes.
+ * Validates format, fetches the space by SEO slug, attaches as req.space.
  * All subsequent DB queries use req.space._id (ObjectId) only.
  */
 async function resolveSpace(req, res, next) {
-  const { id } = req.params;
-  const isMongoId = /^[a-fA-F0-9]{24}$/.test(id);
-  const isOpgId = /^OPG-[A-Z]+-[A-Z0-9]+$/.test(id);
+  const { slug } = req.params;
   
   try {
-    let space;
-    if (isMongoId) {
-      space = await Space.findById(id).lean({ virtuals: true });
-    } else if (isOpgId) {
-      space = await Space.findOne({ opgId: id }).lean({ virtuals: true });
-    } else {
-      // Treat as slug
-      const slugRecord = await PageSlug.findOne({ slug: id.toLowerCase(), isActive: true }).lean();
-      if (!slugRecord) return err(res, 'Space not found for the given slug', 404);
-      space = await Space.findById(slugRecord.spaceId).lean({ virtuals: true });
-    }
-      
+    const slugRecord = await PageSlug.findOne({ slug: slug.toLowerCase(), isActive: true }).lean();
+    if (!slugRecord) return err(res, 'Space not found for the given slug', 404);
+    
+    const space = await Space.findById(slugRecord.spaceId).lean({ virtuals: true });
     if (!space) return err(res, 'Space not found', 404);
+    
     req.space = space;
     next();
   } catch (e) { err(res, e.message); }
@@ -740,13 +734,13 @@ async function resolveSpace(req, res, next) {
 
 /**
  * @swagger
- * /api/spaces/{id}/reviews:
+ * /api/spaces/{slug}/reviews:
  *   get:
  *     summary: Get reviews for a specific space
  *     tags: [Spaces]
  *     parameters:
  *       - in: path
- *         name: id
+ *         name: slug
  *         required: true
  *         schema:
  *           type: string
@@ -766,9 +760,9 @@ async function resolveSpace(req, res, next) {
  *       404:
  *         description: Space not found
  */
-// GET /api/spaces/:id/reviews
-router.get('/:id/reviews',
-  param('id').isString().notEmpty().withMessage('ID or slug is required'),
+// GET /api/spaces/:slug/reviews
+router.get('/:slug/reviews',
+  param('slug').isString().notEmpty().withMessage('Slug is required'),
   resolveSpace,
   async (req, res) => {
     if (validate(req, res)) return;
@@ -792,9 +786,9 @@ router.get('/:id/reviews',
   }
 );
 
-// GET /api/spaces/:id
-router.get('/:id',
-  param('id').isString().notEmpty().withMessage('ID or slug is required'),
+// GET /api/spaces/:slug
+router.get('/:slug',
+  param('slug').isString().notEmpty().withMessage('Slug is required'),
   resolveSpace,
   async (req, res) => {
     if (validate(req, res)) return;
@@ -831,9 +825,9 @@ router.patch('/:id',
   }
 );
 
-// DELETE /api/spaces/:id — permanently delete a space and all its related records
-router.delete('/:id',
-  param('id').isString().notEmpty().withMessage('ID or slug is required'),
+// DELETE /api/spaces/:slug — permanently delete a space and all its related records
+router.delete('/:slug',
+  param('slug').isString().notEmpty().withMessage('Slug is required'),
   resolveSpace,
   async (req, res) => {
     if (validate(req, res)) return;

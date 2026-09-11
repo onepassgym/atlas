@@ -94,7 +94,10 @@ export default React.memo(function SpaceRow({ space, onClick, searchTerm = '' })
   const coverUrl = typeof space.coverPhoto === 'string' ? space.coverPhoto : space.coverPhoto?.thumbnailUrl || space.coverPhoto?.publicUrl || space.coverPhoto?.originalUrl;
 
   return (
-    <div className="space-row-card" onClick={() => onClick?.(space.opgId)} id={`space-${space.opgId}`}>
+    <div className="space-row-card" onClick={() => {
+      const slug = space.pageSlug?.slug || space.slug;
+      if (slug) onClick?.(slug);
+    }} id={`space-${space.opgId}`}>
       {/* Thumbnail */}
       <div className="space-row-thumb">
         {coverUrl ? (

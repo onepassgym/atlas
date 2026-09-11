@@ -114,14 +114,14 @@ export default function SpaceDrawer({ spaceId, onClose }) {
 
   // Load enrichment history for this space
   const loadEnrichLogs = useCallback(async () => {
-    if (!spaceId) return;
+    if (!space?.opgId) return;
     setLogsLoading(true);
     try {
-      const res = await api.get(`/api/enrichment/logs/${spaceId}?limit=5`);
+      const res = await api.get(`/api/enrichment/logs/${space.opgId}?limit=5`);
       if (res?.success) setEnrichLogs(res.logs || []);
     } catch (_) {}
     finally { setLogsLoading(false); }
-  }, [spaceId]);
+  }, [space?.opgId]);
 
   useEffect(() => {
     if (!spaceId) return;
@@ -130,8 +130,13 @@ export default function SpaceDrawer({ spaceId, onClose }) {
       .then(res => { if (res?.success) setSpace(res.space); })
       .catch(() => {})
       .finally(() => setLoading(false));
-    loadEnrichLogs();
-  }, [spaceId, loadEnrichLogs]);
+  }, [spaceId]);
+
+  useEffect(() => {
+    if (space?.opgId) {
+      loadEnrichLogs();
+    }
+  }, [space?.opgId, loadEnrichLogs]);
 
   // Lock body scroll when drawer is open
   useEffect(() => {

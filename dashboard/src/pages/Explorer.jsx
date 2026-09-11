@@ -219,7 +219,11 @@ export default function Explorer() {
 
   const handleSuggestionClick = (suggestion) => {
     if (suggestion.type === 'space') {
-      setSelectedSpace(suggestion.id);
+      if (suggestion.slug) {
+        setSelectedSpace(suggestion.slug);
+      } else {
+        toast('This space is not accessible via a slug yet', 'warning');
+      }
       setShowSuggestions(false);
     } else if (suggestion.type === 'area') {
       setCity(suggestion.name);
