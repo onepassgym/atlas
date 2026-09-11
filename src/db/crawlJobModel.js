@@ -44,6 +44,7 @@ const CrawlJobSchema = new mongoose.Schema({
   // Never used for $lookup or joins; spaceIds (ObjectId array) is always the join key.
   opgId:      { type: String, index: true, uppercase: true, trim: true },
   jobErrors:  [{ message: String, url: String, at: Date }],  // renamed from 'errors' (reserved)
+  skipLogs:   [{ message: String, url: String, spaceName: String, at: Date }],
   errorCount: { type: Number, default: 0 },
 
   queueJobId: String,

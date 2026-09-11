@@ -58,6 +58,7 @@ export default function JobDrawer({ jobId, onClose }) {
   const scraped = (p.scraped || 0) + (p.failed || 0) + (p.skipped || 0);
   const pct = total > 0 ? Math.min(100, Math.round((scraped / total) * 100)) : 0;
   const errors = job?.jobErrors || [];
+  const skips = job?.skipLogs || [];
   const name = job?.input?.cityName || job?.input?.spaceName || job?.input?.chainName || 'Unknown';
 
   // Filter job-related events from SSE history
@@ -189,6 +190,31 @@ export default function JobDrawer({ jobId, onClose }) {
                       {err.at && <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>{fmtDate(err.at)}</div>}
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Skips */}
+            {skips.length > 0 && (
+              <div className="drawer-section">
+                <div className="drawer-section-title" style={{ color: 'var(--text-muted)' }}>
+                  <Clock size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
+                  Skipped Items ({skips.length})
+                </div>
+                <div style={{ maxHeight: 200, overflowY: 'auto', scrollbarWidth: 'thin' }}>
+                  {skips.slice(0, 20).map((skip, i) => (
+                    <div key={i} style={{
+                      padding: '6px 8px', marginBottom: 4, borderRadius: 6,
+                      background: 'var(--bg-surface)', border: '1px solid var(--table-border)',
+                      fontSize: 11, fontFamily: 'var(--mono)',
+                    }}>
+                      <div style={{ color: 'var(--text-primary)', marginBottom: 2 }}>{skip.spaceName || 'URL Skipped'}</div>
+                      <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>{skip.message?.slice(0, 100)}</div>
+                      {skip.url && <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>URL: {skip.url.slice(-50)}</div>}
+                      {skip.at && <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>{fmtDate(skip.at)}</div>}
+                    </div>
+                  ))}
+                  {skips.length > 20 && <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', marginTop: 4 }}>...and {skips.length - 20} more</div>}
                 </div>
               </div>
             )}

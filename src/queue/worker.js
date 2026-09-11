@@ -246,7 +246,13 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
         await updateJob(jobId, { $inc: { 'progress.updatedSpaces': 1, 'progress.scraped': 1 }, $push: { spaceIds: res.spaceId } });
         bus.publish('space:updated', { name: scraped.name, area: cityName, spaceId: String(res.spaceId), changes: 1 });
       }
-      if (res.action === 'skipped') { stats.skipped++; await updateJob(jobId, { $inc: { 'progress.skipped': 1 } }); }
+      if (res.action === 'skipped') {
+        stats.skipped++; 
+        await updateJob(jobId, { 
+          $inc: { 'progress.skipped': 1 },
+          $push: { skipLogs: { message: res.skipReason || 'Already up to date in database', url, spaceName: scraped.name, at: new Date() } }
+        }); 
+      }
       if (res.action === 'error')   {
         stats.failed++;
         await updateJob(jobId, {
@@ -357,12 +363,16 @@ async function preFilterUrls(urls, cityName) {
     );
 
     const fresh   = urls.filter(u => !knownUrls.has(u));
-    const skipped = urls.length - fresh.length;
+    const skippedUrls = urls.filter(u => knownUrls.has(u));
+    const skipped = skippedUrls.length;
 
     if (skipped > 0) {
       logger.info(`  🔎 Pre-filter: skipping ${skipped}/${urls.length} recently-crawled URLs (within ${SKIP_RECENT_DAYS}d)`);
+      // We don't have job ID here easily unless we pass it to preFilterUrls. 
+      // Actually, wait, preFilterUrls is not receiving jobId right now.
+      // We will need to handle this below in processCityJob where preFilterUrls is called.
     }
-    return fresh;
+    return { fresh, skippedUrls };
   } catch (err) {
     // Non-fatal — fall back to scraping all URLs
     logger.warn(`Pre-filter query failed (scraping all): ${err.message}`);
@@ -408,15 +418,26 @@ async function processCityJob(job) {
     logger.info(`\n📋 Discovered ${discoveredTotal} unique URLs for ${cityName}`);
 
     // ── Phase 7: Pre-filter recently-crawled URLs ──────────────────────────
-    const urlsToScrape = stopReason ? [] : await preFilterUrls([...allUrls], cityName);
+    const preFilterResult = stopReason ? { fresh: [], skippedUrls: [] } : await preFilterUrls([...allUrls], cityName);
+    const urlsToScrape = preFilterResult.fresh;
     const total = urlsToScrape.length;
-    const skippedPreFilter = discoveredTotal - total;
+    const skippedPreFilter = preFilterResult.skippedUrls.length;
 
     await updateJob(jobId, { 
       'progress.total': discoveredTotal, 
       'progress.toScrape': total,
       $inc: { 'progress.skipped': skippedPreFilter }
     });
+    
+    if (skippedPreFilter > 0) {
+      await updateJob(jobId, {
+        $push: { 
+          skipLogs: { 
+            $each: preFilterResult.skippedUrls.slice(0, 50).map(u => ({ message: `Recently crawled within ${SKIP_RECENT_DAYS} days`, url: u, at: new Date() })) 
+          }
+        }
+      });
+    }
 
     if (total === 0 || stopReason) {
       const durationMs = Date.now() - startTime;
@@ -527,15 +548,26 @@ async function processGridJob(job) {
     const discoveredTotal = allUrls.size;
     logger.info(`\n📋 Discovered ${discoveredTotal} unique URLs at grid [${lat}, ${lng}]`);
 
-    const urlsToScrape = stopReason ? [] : await preFilterUrls([...allUrls], regionName);
+    const preFilterResult = stopReason ? { fresh: [], skippedUrls: [] } : await preFilterUrls([...allUrls], regionName);
+    const urlsToScrape = preFilterResult.fresh;
     const total = urlsToScrape.length;
-    const skippedPreFilter = discoveredTotal - total;
+    const skippedPreFilter = preFilterResult.skippedUrls.length;
 
     await updateJob(jobId, { 
       'progress.total': discoveredTotal, 
       'progress.toScrape': total,
       $inc: { 'progress.skipped': skippedPreFilter }
     });
+    
+    if (skippedPreFilter > 0) {
+      await updateJob(jobId, {
+        $push: { 
+          skipLogs: { 
+            $each: preFilterResult.skippedUrls.slice(0, 50).map(u => ({ message: `Recently crawled within ${SKIP_RECENT_DAYS} days`, url: u, at: new Date() })) 
+          }
+        }
+      });
+    }
 
     if (total === 0 || stopReason) {
       const durationMs = Date.now() - startTime;
@@ -763,6 +795,12 @@ async function processSpaceNameJob(job) {
         const res = await processSpace(scraped, targetName, jobId, true);
         if (res.action === 'created') { stats.created++; await updateJob(jobId, { $inc: { 'progress.newSpaces': 1, 'progress.scraped': 1 }, $push: { spaceIds: res.spaceId } }); }
         if (res.action === 'updated') { stats.updated++; await updateJob(jobId, { $inc: { 'progress.updatedSpaces': 1, 'progress.scraped': 1 }, $push: { spaceIds: res.spaceId } }); }
+        if (res.action === 'skipped') { 
+          await updateJob(jobId, { 
+            $inc: { 'progress.skipped': 1 },
+            $push: { skipLogs: { message: res.skipReason || 'Already up to date', url, spaceName: scraped.name, at: new Date() } }
+          });
+        }
       } catch (err) {
         stats.failed++;
         logger.warn(`space-name job err: ${err.message}`);
