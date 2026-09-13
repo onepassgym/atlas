@@ -59,6 +59,15 @@ export default function JobDrawer({ jobId, onClose }) {
   const pct = total > 0 ? Math.min(100, Math.round((scraped / total) * 100)) : 0;
   const errors = job?.jobErrors || [];
   const skips = job?.skipLogs || [];
+  
+  // Group skip logs by message
+  const groupedSkips = skips.reduce((acc, skip) => {
+    const msg = skip.message || 'Unknown reason';
+    if (!acc[msg]) acc[msg] = [];
+    acc[msg].push(skip);
+    return acc;
+  }, {});
+  
   const name = job?.input?.cityName || job?.input?.spaceName || job?.input?.chainName || 'Unknown';
 
   // Filter job-related events from SSE history
@@ -201,20 +210,34 @@ export default function JobDrawer({ jobId, onClose }) {
                   <Clock size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
                   Skipped Items ({skips.length})
                 </div>
-                <div style={{ maxHeight: 200, overflowY: 'auto', scrollbarWidth: 'thin' }}>
-                  {skips.slice(0, 20).map((skip, i) => (
-                    <div key={i} style={{
-                      padding: '6px 8px', marginBottom: 4, borderRadius: 6,
-                      background: 'var(--bg-surface)', border: '1px solid var(--table-border)',
-                      fontSize: 11, fontFamily: 'var(--mono)',
-                    }}>
-                      <div style={{ color: 'var(--text-primary)', marginBottom: 2 }}>{skip.spaceName || 'URL Skipped'}</div>
-                      <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>{skip.message?.slice(0, 100)}</div>
-                      {skip.url && <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>URL: {skip.url.slice(-50)}</div>}
-                      {skip.at && <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>{fmtDate(skip.at)}</div>}
+                <div style={{ maxHeight: 300, overflowY: 'auto', scrollbarWidth: 'thin' }}>
+                  {Object.entries(groupedSkips).map(([reason, items], idx) => (
+                    <div key={idx} style={{ marginBottom: 16 }}>
+                      <div style={{ 
+                        fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', 
+                        marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid var(--table-border)' 
+                      }}>
+                        {reason} <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({items.length})</span>
+                      </div>
+                      
+                      {items.slice(0, 10).map((skip, i) => (
+                        <div key={i} style={{
+                          padding: '6px 8px', marginBottom: 4, borderRadius: 6,
+                          background: 'var(--bg-surface)', border: '1px solid var(--table-border)',
+                          fontSize: 11, fontFamily: 'var(--mono)',
+                        }}>
+                          {skip.spaceName && <div style={{ color: 'var(--text-primary)', marginBottom: 2 }}>{skip.spaceName}</div>}
+                          {skip.url && <div style={{ color: 'var(--text-muted)', fontSize: 10, wordBreak: 'break-all' }}>URL: {skip.url}</div>}
+                          {skip.at && <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>{fmtDate(skip.at)}</div>}
+                        </div>
+                      ))}
+                      {items.length > 10 && (
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', marginTop: 4, padding: 4, background: 'var(--bg-surface)', borderRadius: 4 }}>
+                          ...and {items.length - 10} more for this reason
+                        </div>
+                      )}
                     </div>
                   ))}
-                  {skips.length > 20 && <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', marginTop: 4 }}>...and {skips.length - 20} more</div>}
                 </div>
               </div>
             )}

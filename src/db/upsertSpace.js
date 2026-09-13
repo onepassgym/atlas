@@ -734,6 +734,10 @@ async function upsertSpace(crawledData) {
       }}, { new: false });
       logger.info(`[SKIP]   "${crawledData.name}" → already up to date & sync finished.`);
       result.action = 'skipped';
+      
+      const revs = crawledData.reviews?.length || 0;
+      const photos = crawledData.photoUrls?.length || 0;
+      result.skipReason = `Data identical (0 field updates, ${revs} unchanged reviews, ${photos} unchanged photos)`;
     }
 
     result.spaceId = spaceId;

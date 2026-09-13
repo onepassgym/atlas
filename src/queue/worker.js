@@ -355,22 +355,22 @@ async function preFilterUrls(urls, cityName) {
       { $project: { googleMapsUrl: 1 } },
     ]);
 
-    const knownUrls = new Set(
-      recentSpaces
-        .map(g => g.googleMapsUrl)
-        .filter(Boolean)
-        .map(u => u.split('?')[0].split('/@')[0])
-    );
+    const knownUrlMap = new Map();
+    recentSpaces.forEach(g => {
+      if (g.googleMapsUrl) {
+        knownUrlMap.set(g.googleMapsUrl.split('?')[0].split('/@')[0], g.effectiveLastCrawledAt);
+      }
+    });
 
-    const fresh   = urls.filter(u => !knownUrls.has(u));
-    const skippedUrls = urls.filter(u => knownUrls.has(u));
+    const fresh   = urls.filter(u => !knownUrlMap.has(u));
+    const skippedUrls = urls.filter(u => knownUrlMap.has(u)).map(u => ({
+      url: u,
+      lastCrawledAt: knownUrlMap.get(u)
+    }));
     const skipped = skippedUrls.length;
 
     if (skipped > 0) {
       logger.info(`  🔎 Pre-filter: skipping ${skipped}/${urls.length} recently-crawled URLs (within ${SKIP_RECENT_DAYS}d)`);
-      // We don't have job ID here easily unless we pass it to preFilterUrls. 
-      // Actually, wait, preFilterUrls is not receiving jobId right now.
-      // We will need to handle this below in processCityJob where preFilterUrls is called.
     }
     return { fresh, skippedUrls };
   } catch (err) {
@@ -433,7 +433,15 @@ async function processCityJob(job) {
       await updateJob(jobId, {
         $push: { 
           skipLogs: { 
-            $each: preFilterResult.skippedUrls.slice(0, 50).map(u => ({ message: `Recently crawled within ${SKIP_RECENT_DAYS} days`, url: u, at: new Date() })) 
+            $each: preFilterResult.skippedUrls.slice(0, 50).map(u => {
+              const daysAgo = u.lastCrawledAt ? Math.round((Date.now() - new Date(u.lastCrawledAt).getTime()) / 86400000) : 0;
+              const timeText = daysAgo === 0 ? 'today' : `${daysAgo} days ago`;
+              return { 
+                message: `Pre-filtered: crawled ${timeText}`, 
+                url: u.url, 
+                at: new Date() 
+              };
+            }) 
           }
         }
       });
@@ -563,7 +571,15 @@ async function processGridJob(job) {
       await updateJob(jobId, {
         $push: { 
           skipLogs: { 
-            $each: preFilterResult.skippedUrls.slice(0, 50).map(u => ({ message: `Recently crawled within ${SKIP_RECENT_DAYS} days`, url: u, at: new Date() })) 
+            $each: preFilterResult.skippedUrls.slice(0, 50).map(u => {
+              const daysAgo = u.lastCrawledAt ? Math.round((Date.now() - new Date(u.lastCrawledAt).getTime()) / 86400000) : 0;
+              const timeText = daysAgo === 0 ? 'today' : `${daysAgo} days ago`;
+              return { 
+                message: `Pre-filtered: crawled ${timeText}`, 
+                url: u.url, 
+                at: new Date() 
+              };
+            }) 
           }
         }
       });

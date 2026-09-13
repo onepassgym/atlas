@@ -177,7 +177,7 @@ export default function JobsPanel() {
             <thead>
             <tr>
               <th>Type</th><th>Name</th><th>Status</th><th>Progress</th>
-              <th className="col-hide-mobile">Batches</th><th>New</th><th className="col-hide-mobile">Updated</th><th>Failed</th><th className="col-hide-mobile">Errors</th><th className="col-hide-mobile">Duration</th><th className="col-hide-mobile">When</th><th>Actions</th>
+              <th className="col-hide-mobile">Batches</th><th>New</th><th className="col-hide-mobile">Updated</th><th>Failed</th><th>Skipped</th><th className="col-hide-mobile">Errors</th><th className="col-hide-mobile">Duration</th><th className="col-hide-mobile">When</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -216,6 +216,7 @@ export default function JobsPanel() {
                   <td style={{ color: 'var(--success)', fontFamily: 'var(--mono)' }}>{p.newSpaces || 0}</td>
                   <td className="col-hide-mobile" style={{ color: 'var(--accent)', fontFamily: 'var(--mono)' }}>{p.updatedSpaces || 0}</td>
                   <td style={{ color: 'var(--danger)', fontFamily: 'var(--mono)' }}>{p.failed || 0}</td>
+                  <td style={{ color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>{p.skipped || 0}</td>
                   <td className="col-hide-mobile">
                     {errorCount > 0 ? (
                       <span className="error-badge">{errorCount}</span>
