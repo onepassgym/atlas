@@ -57,12 +57,12 @@ module.exports = {
     skipRecentDays: parseInt(process.env.SCRAPER_SKIP_RECENT_DAYS || '7', 10),
     // URLs per batch-scrape job
     batchSize:      parseInt(process.env.SCRAPER_BATCH_SIZE       || '12', 10),
-    // Phase 1c / Phase 4: depth caps per standard-mode scrape
-    maxReviews:  parseInt(process.env.SCRAPER_MAX_REVIEWS || '30', 10),
-    maxPhotos:   parseInt(process.env.SCRAPER_MAX_PHOTOS  || '20', 10),
-    // Enrichment mode: deeper caps for NCR targeted pass
-    enrichMaxReviews: parseInt(process.env.ENRICHMENT_MAX_REVIEWS || '500', 10),
-    enrichMaxPhotos:  parseInt(process.env.ENRICHMENT_MAX_PHOTOS  || '500', 10),
+    // Phase 1c / Phase 4: depth caps per standard-mode scrape (capped to prevent Google Maps lockups)
+    maxReviews:  Math.min(parseInt(process.env.SCRAPER_MAX_REVIEWS || '30', 10), 100),
+    maxPhotos:   Math.min(parseInt(process.env.SCRAPER_MAX_PHOTOS  || '20', 10), 50),
+    // Enrichment mode: deeper caps for targeted pass
+    enrichMaxReviews: Math.min(parseInt(process.env.ENRICHMENT_MAX_REVIEWS || '500', 10), 1000),
+    enrichMaxPhotos:  Math.min(parseInt(process.env.ENRICHMENT_MAX_PHOTOS  || '500', 10), 1000),
     enrichBatchSize:  parseInt(process.env.ENRICHMENT_BATCH_SIZE  || '50',  10),
     userAgent:   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   },

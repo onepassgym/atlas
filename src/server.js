@@ -107,6 +107,14 @@ app.use((err, req, res, _next) => {
     startScheduler();
     startWebhookService();
 
+    // Reconcile orphaned running jobs from prior crashes
+    try {
+      const { reconcileOrphanedJobs } = require('./services/jobReconciliationService');
+      await reconcileOrphanedJobs();
+    } catch (recErr) {
+      logger.warn(`Orphaned job reconciliation error: ${recErr.message}`);
+    }
+
     // Seed space chains if not already in DB
     try {
       const SpaceChain = require('./db/spaceChainModel');

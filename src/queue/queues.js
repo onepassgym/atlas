@@ -176,35 +176,11 @@ async function clearCrawlQueue() {
 }
 
 // ── Cancellation system (Redis-backed for fast polling) ──────────────────────
-
-/**
- * Set a cancellation flag in Redis. The worker polls this mid-crawl.
- * TTL of 1 hour prevents stale flags from accumulating.
- */
-async function requestCancelJob(jobId) {
-  await redis.set(`atlas:cancel:${jobId}`, '1', 'EX', 3600);
-  logger.info(`🛑 Cancel requested for job: ${jobId}`);
-}
-
-/**
- * Check if a job has been flagged for cancellation.
- * Called by the worker in its scraping loops.
- */
-async function isJobCancelled(jobId) {
-  try {
-    const flag = await redis.get(`atlas:cancel:${jobId}`);
-    return flag === '1';
-  } catch (_) {
-    return false;
-  }
-}
-
-/**
- * Clear the cancellation flag after the worker has handled it.
- */
-async function clearCancelFlag(jobId) {
-  await redis.del(`atlas:cancel:${jobId}`);
-}
+const {
+  requestCancelJob,
+  isJobCancelled,
+  clearCancelFlag,
+} = require('../services/jobCancelState');
 
 /**
  * Remove a BullMQ job and all its possible batch children from the queue.

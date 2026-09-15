@@ -55,6 +55,16 @@ async function ensureIndexes() {
   // Missing indexes identified in audit:
   await photos.createIndex({ isOrphaned: 1 },       { name: 'photos_isOrphaned' });
   await photos.createIndex({ fsExists: 1, spaceId: 1 }, { name: 'photos_fsExists_spaceId' });
+  // Drop legacy index if it previously used gymId
+  try {
+    const existingPhotoIndexes = await photos.indexes();
+    const legacyUnlinked = existingPhotoIndexes.find(i => i.name === 'photos_unlinked_partial' && i.key?.gymId);
+    if (legacyUnlinked) {
+      await photos.dropIndex('photos_unlinked_partial');
+      logger.info('Dropped legacy index photos_unlinked_partial (gymId)');
+    }
+  } catch (_) {}
+
   await photos.createIndex({ spaceId: 1 }, { name: 'photos_unlinked_partial', partialFilterExpression: { spaceId: null } });
   // Task 7: enrichment-specific indexes
   await photos.createIndex({ spaceId: 1, sourceType: 1 }, { name: 'photos_spaceId_sourceType' });
@@ -64,6 +74,16 @@ async function ensureIndexes() {
 
   // ── space_crawl_meta ──────────────────────────────────────────────────────
   const crawlMeta = db.collection(c.spaceCrawlMeta);
+  // Drop legacy gymId unique index if present to prevent E11000 duplicate null key errors
+  try {
+    const existingMetaIndexes = await crawlMeta.indexes();
+    const legacyMeta = existingMetaIndexes.find(i => i.name === 'crawlMeta_gymId_unique');
+    if (legacyMeta) {
+      await crawlMeta.dropIndex('crawlMeta_gymId_unique');
+      logger.info('Dropped legacy unique index crawlMeta_gymId_unique');
+    }
+  } catch (_) {}
+
   await crawlMeta.createIndex({ spaceId: 1 },  { unique: true, name: 'crawlMeta_spaceId_unique' });
   await crawlMeta.createIndex({ jobId: 1 },  { name: 'crawlMeta_jobId' });
 

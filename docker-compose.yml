@@ -138,32 +138,8 @@ services:
         limits:
           memory: 2G
 
-  media-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      - MONGODB_URI=mongodb://mongo:27051/atlas
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - NODE_ENV=${NODE_ENV:-production}
-      - MEDIA_WORKER_CONCURRENCY=8
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - ./media:/app/media
-      - ./logs:/app/logs
-    depends_on:
-      mongo: { condition: service_healthy }
-      redis: { condition: service_healthy }
-    networks: [ opg ]
-    command: node src/queue/mediaWorker.js
-    deploy:
-      resources:
-        limits:
-          memory: 512M
+  # media-worker: disabled — media downloader was replaced by URL capture in v1.0
+  #   command: node src/queue/mediaWorker.js
 
   mongo:
     image: mongo:7.0
@@ -193,7 +169,7 @@ services:
       - "6847:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --save 60 1 --loglevel warning --maxmemory 200mb --maxmemory-policy allkeys-lru
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 200mb --maxmemory-policy noeviction
     deploy:
       resources:
         limits:

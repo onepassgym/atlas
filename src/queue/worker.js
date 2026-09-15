@@ -884,6 +884,14 @@ async function processEnrichmentJobHandler(job) {
 async function start() {
   await connectDB();
 
+  // Reconcile orphaned running jobs left from prior worker crashes
+  try {
+    const { reconcileOrphanedJobs } = require('../services/jobReconciliationService');
+    await reconcileOrphanedJobs();
+  } catch (recErr) {
+    logger.warn(`Worker startup reconciliation error: ${recErr.message}`);
+  }
+
   // ── Crawl Worker (city-crawl, batch-scrape, space-name-crawl) ───────────────
   const worker = new Worker('atlas-crawl', async (job) => {
     logger.info(`⚙️  Processing job: ${job.name} [${job.id}]`);
