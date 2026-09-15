@@ -28,6 +28,39 @@ async function writeChangeLogs(spaceId, diffs, now) {
 }
 
 /**
+ * Normalizes existing amenities from various historical schema formats:
+ *   - rawAmenities.raw (array)
+ *   - rawAmenities (array or boolean flags map)
+ *   - amenities.raw (array)
+ *   - amenities (array)
+ */
+function extractExistingAmenities(existing = {}) {
+  if (Array.isArray(existing.rawAmenities?.raw)) {
+    return existing.rawAmenities.raw;
+  }
+  if (Array.isArray(existing.rawAmenities)) {
+    return existing.rawAmenities;
+  }
+  if (Array.isArray(existing.amenities?.raw)) {
+    return existing.amenities.raw;
+  }
+  if (Array.isArray(existing.amenities)) {
+    return existing.amenities;
+  }
+  // If rawAmenities is boolean map ({ has_pool: true, ... }), reconstruct string tags
+  if (existing.rawAmenities && typeof existing.rawAmenities === 'object') {
+    const fromMap = [];
+    if (existing.rawAmenities.has_pool) fromMap.push('Swimming pool');
+    if (existing.rawAmenities.has_sauna) fromMap.push('Sauna');
+    if (existing.rawAmenities.accessible) fromMap.push('Wheelchair accessible');
+    if (existing.rawAmenities.free_parking) fromMap.push('Free parking');
+    if (existing.rawAmenities.has_showers) fromMap.push('Showers');
+    return fromMap;
+  }
+  return [];
+}
+
+/**
  * Upsert photo URLs captured during enrichment into space_photos.
  * Only inserts new URLs. Never overwrites existing records that have localPath populated.
  *
@@ -154,9 +187,17 @@ async function processEnrichmentJob(enriched, spaceId, jobId) {
     // ── Task 4: Amenities & Offerings ────────────────────────────────────────
     if (enriched.deepAmenities?.length) {
       // Merge with existing amenities — don't overwrite if already richer
-      const existingAmenities = existing.rawAmenities?.raw || [];
+      const existingAmenities = extractExistingAmenities(existing);
       const merged = [...new Set([...existingAmenities, ...enriched.deepAmenities])];
+      $set['amenities.raw'] = merged;
       $set['rawAmenities.raw'] = merged;
+      // Sync boolean flags for backward compatibility
+      $set['rawAmenities.has_pool'] = merged.some(a => a.toLowerCase().includes('pool'));
+      $set['rawAmenities.has_sauna'] = merged.some(a => a.toLowerCase().includes('sauna'));
+      $set['rawAmenities.accessible'] = merged.some(a => a.toLowerCase().includes('wheelchair') || a.toLowerCase().includes('accessible'));
+      $set['rawAmenities.free_parking'] = merged.some(a => a.toLowerCase().includes('parking') && !a.toLowerCase().includes('paid'));
+      $set['rawAmenities.has_showers'] = merged.some(a => a.toLowerCase().includes('shower') || a.toLowerCase().includes('bathroom'));
+
       $set.offerings      = enriched.extraAttributes?.offerings     || existing.offerings     || [];
       $set.serviceOptions = enriched.extraAttributes?.['service options'] || existing.serviceOptions || [];
       $set.accessibility  = enriched.extraAttributes?.accessibility  || existing.accessibility  || [];

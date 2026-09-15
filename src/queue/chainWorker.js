@@ -46,36 +46,14 @@ const MAX_RETRIES = cfg.scraper.maxRetries;
 
 let isShuttingDown = false;
 
-function sleep(min, max) {
-  return new Promise(async (resolve) => {
-    let state = await SystemState.getGlobalState().catch(() => ({ crawlPace: 'normal', globalPause: false }));
-    
-    // Hold while globally paused
-    while (state.globalPause && !isShuttingDown) {
-      await new Promise(r => setTimeout(r, 5000));
-      state = await SystemState.getGlobalState().catch(() => ({ crawlPace: 'normal', globalPause: false }));
-    }
+const {
+  sleep: sleepUtil,
+  updateJob,
+  shouldStop: shouldStopUtil,
+} = require('./workerUtils');
 
-    let paceMultiplier = 1;
-    if (state.crawlPace === 'slow') paceMultiplier = 3;
-    if (state.crawlPace === 'fast') paceMultiplier = 0.5;
-
-    const waitMs = (min + Math.random() * (max - min)) * paceMultiplier;
-    setTimeout(resolve, waitMs);
-  });
-}
-
-async function updateJob(jobId, update) {
-  try { await CrawlJob.findOneAndUpdate({ jobId }, update); } catch (_) {}
-}
-
-async function shouldStop(jobId) {
-  if (isShuttingDown) return 'shutdown';
-  try {
-    if (await isJobCancelled(jobId)) return 'cancelled';
-  } catch (_) {}
-  return false;
-}
+const sleep = (min, max) => sleepUtil(min, max, () => isShuttingDown);
+const shouldStop = (jobId) => shouldStopUtil(jobId, () => isShuttingDown);
 
 // ── Freshness check: skip spaces crawled within N days ──────────────────────────
 

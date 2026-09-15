@@ -3,6 +3,14 @@
 /**
  * enrichmentWorker.js — Continuous Enrichment Loop Worker
  *
+ * NOTE (Architecture / Gap 12):
+ * ATLAS currently contains two enrichment pathways:
+ *   1. Standalone loop (this file, `npm run worker:enrich`): An autonomous daemon
+ *      that polls Redis priority queue + MongoDB to continuously enrich oldest/priority spaces.
+ *   2. BullMQ job handler (`worker.js` -> `enrichmentQueue`): Queue-driven enrichment for
+ *      explicitly scheduled/triggered jobs via API or orchestrator.
+ * Both pathways use `googleMapsScraper.js` and `enrichmentProcessor.js` to ensure consistent data.
+ *
  * Runs as a standalone process (npm run worker:enrich) that:
  *   1. Checks for priority space IDs in the Redis priority queue
  *   2. If none, picks the oldest-updated space from MongoDB
@@ -28,6 +36,7 @@ const {
   setStatus,
   getStatus,
 } = require('../services/enrichmentService');
+const { sleep: sleepUtil, randomDelay } = require('./workerUtils');
 const cfg = require('../../config');
 const logger = require('../utils/logger');
 const bus = require('../services/eventBus');
@@ -42,13 +51,7 @@ let processedTotal = 0;
 let processedToday = 0;
 let todayDate = new Date().toISOString().slice(0, 10);
 
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
-
-function randomDelay(min, max) {
-  return new Promise(r => setTimeout(r, min + Math.random() * (max - min)));
-}
+const sleep = (ms) => sleepUtil(ms, ms, () => isShuttingDown);
 
 // Reset daily counter at midnight
 function checkDayRollover() {
@@ -114,7 +117,7 @@ async function enrichSpace(browser, space, source, sections = ['all']) {
     // Use selective scraper for targeted sections, full scraper otherwise
     const scraped = isSelective
       ? await scrapeSelective(page, space.googleMapsUrl, sections)
-      : await scrapeSpaceDetail(page, space.googleMapsUrl, sections.includes('deep') ? 'deep' : 'standard');
+      : await scrapeSpaceDetail(page, space.googleMapsUrl, sections.includes('deep') ? 'deep' : 'standard', browser.ctx);
 
     if (!scraped?.name) {
       throw new Error('Could not extract space data from page');
@@ -122,9 +125,9 @@ async function enrichSpace(browser, space, source, sections = ['all']) {
 
     // ── Multi-Source Data Fusion: Extract supplementary photos from official website
     const websiteUrl = scraped.website || space.contact?.website;
-    if (websiteUrl && sections.includes('photos') || sections.includes('all')) {
+    if (websiteUrl && (sections.includes('photos') || sections.includes('all'))) {
       try {
-        const websitePhotos = await scrapeWebsitePhotos(page, websiteUrl);
+        const websitePhotos = await scrapeWebsitePhotos(browser.ctx, websiteUrl);
         if (websitePhotos && websitePhotos.length > 0) {
           scraped.photoUrls = [...new Set([...(scraped.photoUrls || []), ...websitePhotos])];
         }

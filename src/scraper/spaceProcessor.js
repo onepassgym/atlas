@@ -70,7 +70,7 @@ async function processSpace(raw, areaName, jobId, downloadMedia = true) {
       totalReviews:    raw.totalReviews    || 0,
       ratingBreakdown: raw.ratingBreakdown || {},
 
-      reviews:        (raw.reviews || []).slice(0, 150),
+      reviews:        raw.reviews || [],
       reviewsScraped: (raw.reviews || []).length,
 
       openingHours: raw.openingHours   || [],

@@ -26,22 +26,31 @@ const FITNESS_CATEGORIES = [
 ];
 
 // ── User-Agent rotation pool ─────────────────────────────────────────────────
+// Last updated: 2026-09 — Chrome 136, Firefox 138, Edge 136, Safari 18.x
+// Review and refresh every 6 months to avoid fingerprint-based blocking.
 const USER_AGENTS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:125.0) Gecko/20100101 Firefox/125.0',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  // Chrome 136 — Windows
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.6778.139 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+  // Chrome 136 — macOS
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+  // Chrome 136 — Linux
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+  // Firefox 138
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:138.0) Gecko/20100101 Firefox/138.0',
+  'Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0',
+  // Edge 136
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0',
+  // Safari 18.x — macOS
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15',
+  // Chrome 134 — slightly older for diversity
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
 ];
 
 // ── Viewport rotation pool ───────────────────────────────────────────────────
@@ -85,6 +94,21 @@ function getRandomUA() { return pickRandom(USER_AGENTS); }
 
 function sleep(min, max) {
   return new Promise(r => setTimeout(r, min + Math.random() * (max - min)));
+}
+
+/**
+ * Normalize a Google Maps place URL: keep the place name and coordinate anchor
+ * (/@lat,lng,zoom) but strip query params (?...) and the /data= segment.
+ * The coordinate anchor is critical — without it, Google may redirect to a
+ * generic search or a different place entirely.
+ */
+function normalizeMapUrl(href) {
+  if (!href) return null;
+  // Strip query params
+  let url = href.split('?')[0];
+  // Strip /data=... segment (internal Google routing data)
+  url = url.replace(/\/data=[^/]*$/, '');
+  return url;
 }
 
 // ── Browser pool ──────────────────────────────────────────────────────────────
@@ -237,7 +261,7 @@ async function searchSpacesInCity(page, cityName, category) {
       for (const a of links) {
         try {
           const href = await a.getAttribute('href');
-          if (href) spaceUrls.add(href.split('?')[0].split('/@')[0]);
+          if (href) spaceUrls.add(normalizeMapUrl(href));
         } catch (_) {}
       }
 
@@ -355,7 +379,7 @@ async function searchSpacesInGrid(page, lat, lng, zoom, category) {
       for (const a of links) {
         try {
           const href = await a.getAttribute('href');
-          if (href) spaceUrls.add(href.split('?')[0].split('/@')[0]);
+          if (href) spaceUrls.add(normalizeMapUrl(href));
         } catch (_) {}
       }
 
@@ -388,7 +412,7 @@ async function searchSpacesInGrid(page, lat, lng, zoom, category) {
 //   'standard' → core + about tab + 30 reviews + 20 photos (default)
 //   'deep'     → core + about tab + 150 reviews + 80 photos
 
-async function scrapeSpaceDetail(page, url, mode = 'standard') {
+async function scrapeSpaceDetail(page, url, mode = 'standard', ctx = null) {
   // enrichment mode: 500 reviews, 500 photos (URL capture only)
   const maxReviews = mode === 'deep' ? 150 : mode === 'enrichment' ? cfg.scraper.enrichMaxReviews : (mode === 'fast' ? 0 : cfg.scraper.maxReviews);
   const maxPhotos  = mode === 'deep' ? 80  : mode === 'enrichment' ? cfg.scraper.enrichMaxPhotos  : (mode === 'fast' ? 0 : cfg.scraper.maxPhotos);
@@ -415,46 +439,81 @@ async function scrapeSpaceDetail(page, url, mode = 'standard') {
   }
 
   // ── Core data from DOM ───────────────────────────────────────────────────
+  // Uses multi-selector fallback chains for resilience against Google Maps
+  // DOM changes. Each field tries primary → secondary → aria-label-based selectors.
   const core = await page.evaluate(() => {
-    const t  = s => document.querySelector(s)?.textContent?.trim() || null;
-    const a  = (s, attr) => document.querySelector(s)?.getAttribute(attr) || null;
-    const ta = (sel, attr) => [...document.querySelectorAll(sel)].map(el => el.getAttribute(attr)).filter(Boolean);
+    // Fallback helpers: try selectors in order, return first truthy result
+    function tryText(...selectors) {
+      for (const s of selectors) {
+        const el = document.querySelector(s);
+        if (el?.textContent?.trim()) return el.textContent.trim();
+      }
+      return null;
+    }
+    function tryAttr(attr, ...selectors) {
+      for (const s of selectors) {
+        const el = document.querySelector(s);
+        const val = el?.getAttribute(attr);
+        if (val) return val;
+      }
+      return null;
+    }
+    function tryAll(...selectors) {
+      for (const s of selectors) {
+        const els = [...document.querySelectorAll(s)];
+        if (els.length > 0) return els;
+      }
+      return [];
+    }
 
-    // Name
-    const name = t('h1.DUwDvf') || t('h1') || t('[data-attrid="title"]');
+    // Name — primary: h1.DUwDvf, secondary: any h1, tertiary: data-attrid
+    const name = tryText('h1.DUwDvf', 'h1.fontHeadlineLarge', 'h1', '[data-attrid="title"]');
 
-    // Rating
-    const ratingRaw = t('.F7nice span[aria-hidden="true"]') || t('.MW4etd');
+    // Rating — primary: .F7nice hidden span, secondary: .MW4etd, tertiary: role=img star
+    const ratingRaw = tryText('.F7nice span[aria-hidden="true"]', '.MW4etd', '.fontDisplayLarge');
     const rating    = ratingRaw ? parseFloat(ratingRaw) : null;
 
-    // Review count
-    const revText     = document.querySelector('.F7nice')?.getAttribute('aria-label') || '';
-    const revMatch    = revText.match(/([\d,]+)\s*review/i);
+    // Review count — primary: .F7nice aria-label, secondary: any element with "reviews" label
+    const revEl = document.querySelector('.F7nice') || document.querySelector('[aria-label*="review" i]');
+    const revText = revEl?.getAttribute('aria-label') || revEl?.textContent || '';
+    const revMatch = revText.match(/([\d,]+)\s*review/i);
     const totalReviews = revMatch ? parseInt(revMatch[1].replace(/,/g, ''), 10) : 0;
 
-    // Address
-    const address = t('button[data-item-id="address"] .Io6YTe') ||
-                    t('[data-tooltip="Copy address"] .Io6YTe');
+    // Address — primary: data-item-id, secondary: data-tooltip, tertiary: aria-label
+    const address = tryText(
+      'button[data-item-id="address"] .Io6YTe',
+      '[data-tooltip="Copy address"] .Io6YTe',
+      'button[data-item-id="address"] .rogA2c',
+      '[aria-label*="Address" i]'
+    );
 
-    // Phone
-    const phone = t('button[data-item-id^="phone:tel"] .Io6YTe') ||
-                  t('[data-tooltip="Copy phone number"] .Io6YTe');
+    // Phone — primary: data-item-id phone, secondary: data-tooltip, tertiary: aria-label
+    const phone = tryText(
+      'button[data-item-id^="phone:tel"] .Io6YTe',
+      '[data-tooltip="Copy phone number"] .Io6YTe',
+      'button[data-item-id^="phone:tel"] .rogA2c',
+      '[aria-label*="Phone" i][role="button"]'
+    );
 
-    // Website
-    const website = a('a[data-item-id="authority"]', 'href') ||
-                    a('a[aria-label*="website" i]', 'href');
+    // Website — primary: authority link, secondary: aria-label, tertiary: external link
+    const website = tryAttr('href',
+      'a[data-item-id="authority"]',
+      'a[aria-label*="website" i]',
+      'a[aria-label*="Website" i]',
+      'a[data-tooltip*="website" i]'
+    );
 
-    // Category
-    const category = t('.DkEaL') || t('button.DkEaL') || null;
+    // Category — primary: .DkEaL, secondary: button.DkEaL, tertiary: category label
+    const category = tryText('.DkEaL', 'button.DkEaL', '.fontBodyMedium [jsaction*="category"]', '[data-attrid="subtitle"]');
 
     // Price level
-    const priceLevel = t('[aria-label*="price range" i]') || null;
+    const priceLevel = tryText('[aria-label*="price range" i]', '[aria-label*="Price" i]');
 
-    // Description
-    const description = t('.PYvSYb') || t('[data-attrid="description"] span') || null;
+    // Description — primary: .PYvSYb, secondary: data-attrid, tertiary: editorial summary
+    const description = tryText('.PYvSYb', '[data-attrid="description"] span', '.WeS02d', '.editorial-summary span');
 
-    // Opening hours
-    const hourRows = [...document.querySelectorAll('table.WgFkxc tr, .t39EBf tr')];
+    // Opening hours — try multiple table selectors
+    const hourRows = [...document.querySelectorAll('table.WgFkxc tr, .t39EBf tr, table.eK4R0e tr, [aria-label*="hours" i] table tr')];
     const openingHours = hourRows.map(row => {
       const cells = row.querySelectorAll('td, th');
       const day   = cells[0]?.textContent?.trim();
@@ -466,20 +525,25 @@ async function scrapeSpaceDetail(page, url, mode = 'standard') {
       return { day, open: parts[0] || null, close: parts[1] || null, isClosed: closed, isOpen24: open24 };
     }).filter(Boolean);
 
-    // Open now
-    const openNowEl = document.querySelector('.dpoVLd, [aria-label*="Open now" i], [aria-label*="Closed" i]');
+    // Open now — try multiple selectors
+    const openNowEl = document.querySelector('.dpoVLd, .o0Svhf, [aria-label*="Open now" i], [aria-label*="Closed" i]');
     const isOpenNow = openNowEl ? /open now/i.test(openNowEl.textContent) : null;
 
     // Plus code
-    const plusCode = t('button[data-item-id="oloc"] .Io6YTe');
+    const plusCode = tryText('button[data-item-id="oloc"] .Io6YTe', 'button[data-item-id="oloc"] .rogA2c');
 
-    // Amenities / highlights
-    const amenities = [...document.querySelectorAll('[aria-label].iP2t7d, .E0DTEd [aria-label]')]
-      .map(el => el.getAttribute('aria-label')).filter(Boolean);
-    const highlights = [...document.querySelectorAll('.aSftqf .iP2t7d, .PJEMsc li')]
-      .map(el => el.getAttribute('aria-label') || el.textContent?.trim()).filter(Boolean);
-    const serviceOptions = [...document.querySelectorAll('.LTs0Rc li span')]
-      .map(el => el.textContent?.trim()).filter(Boolean);
+    // Amenities / highlights — try multiple selector patterns
+    const amenityEls = tryAll(
+      '[aria-label].iP2t7d', '.E0DTEd [aria-label]',
+      '.LQjSr [aria-label]', '.CK16pd [aria-label]'
+    );
+    const amenities = amenityEls.map(el => el.getAttribute('aria-label')).filter(Boolean);
+
+    const highlightEls = tryAll('.aSftqf .iP2t7d', '.PJEMsc li', '.m6QErb .iP2t7d');
+    const highlights = highlightEls.map(el => el.getAttribute('aria-label') || el.textContent?.trim()).filter(Boolean);
+
+    const serviceOptionEls = tryAll('.LTs0Rc li span', '.E0DTEd li span');
+    const serviceOptions = serviceOptionEls.map(el => el.textContent?.trim()).filter(Boolean);
 
     // Lat/lng from URL
     const urlMatch = window.location.href.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
@@ -491,15 +555,16 @@ async function scrapeSpaceDetail(page, url, mode = 'standard') {
     const placeId  = pidMatch ? pidMatch[1] : null;
 
     // Photo URLs (visible on main page — hero images, no tab navigation needed)
+    const photoSelectors = 'button[jsaction*="heroHeaderImage"] img, .RZ66Rb img, .Uf0tqf img, a[data-photo-index] img, [data-photo-index] img, .p6VvSf img, .ZKbJif img';
     const photoUrls = [...new Set(
-      [...document.querySelectorAll('button[jsaction*="heroHeaderImage"] img, .RZ66Rb img, .Uf0tqf img, a[data-photo-index] img, [data-photo-index] img')]
+      [...document.querySelectorAll(photoSelectors)]
         .map(img => img.src || img.dataset?.src)
         .filter(src => src?.startsWith('http') && src.includes('googleusercontent') && !src.includes('StreetView'))
         .map(src => src.replace(/=w\d+-h\d+[^&]*/, '=w1600-h1200'))
     )];
 
-    // Rating breakdown
-    const starEls = [...document.querySelectorAll('.jANrlb .dneCp')];
+    // Rating breakdown — try multiple selectors
+    const starEls = [...document.querySelectorAll('.jANrlb .dneCp, .JdqNPe .dneCp, .ExlQHd [role="img"]')];
     const starKeys = ['fiveStar','fourStar','threeStar','twoStar','oneStar'];
     const ratingBreakdown = Object.fromEntries(starKeys.map(k => [k, 0]));
     starEls.slice(0, 5).forEach((el, i) => {
@@ -542,9 +607,11 @@ async function scrapeSpaceDetail(page, url, mode = 'standard') {
   const mergedAmenities = [...new Set([...(core.amenities || []), ...(deepAmenities || [])])];
 
   // ── Website Photos (Supplementary) ───────────────────────────────────────
-  if (core.website && mode !== 'fast') {
+  // Only attempt if we have a browser context (ctx) — scrapeWebsitePhotos
+  // needs its own page to avoid navigating this Google Maps page away.
+  if (core.website && mode !== 'fast' && ctx) {
     try {
-      const webPhotos = await scrapeWebsitePhotos(page, core.website);
+      const webPhotos = await scrapeWebsitePhotos(ctx, core.website);
       if (webPhotos?.length > 0) {
         allPhotos.push(...webPhotos);
       }

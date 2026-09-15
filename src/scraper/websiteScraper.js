@@ -5,11 +5,24 @@ const logger = require('../utils/logger');
 /**
  * Extracts high-quality photo URLs from a space's official website.
  * Looks for OpenGraph images, Twitter cards, and large <img> tags.
+ *
+ * IMPORTANT: This function opens its OWN page via the browser context
+ * and closes it when done. This prevents navigating the caller's Google
+ * Maps page away to a different domain, which would corrupt the page
+ * context for subsequent scraping operations in the pool.
+ *
+ * @param {BrowserContext} ctx  - Playwright browser context (NOT a page)
+ * @param {string}         websiteUrl - URL to scrape photos from
+ * @returns {Promise<string[]>} - Array of photo URLs
  */
-async function scrapeWebsitePhotos(page, websiteUrl) {
+async function scrapeWebsitePhotos(ctx, websiteUrl) {
   if (!websiteUrl || !websiteUrl.startsWith('http')) return [];
   
+  let page = null;
   try {
+    // Open a dedicated page for website scraping — never touch the caller's page
+    page = await ctx.newPage();
+
     // Navigate with a fast timeout and only wait for DOM to be ready
     await page.goto(websiteUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
     
@@ -79,6 +92,11 @@ async function scrapeWebsitePhotos(page, websiteUrl) {
   } catch (err) {
     logger.warn(`  🌐 Failed to scrape website photos from ${websiteUrl}: ${err.message}`);
     return []; 
+  } finally {
+    // Always close the dedicated page to prevent resource leaks
+    if (page) {
+      try { await page.close(); } catch (_) {}
+    }
   }
 }
 

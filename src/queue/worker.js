@@ -33,98 +33,18 @@ const SKIP_RECENT_DAYS  = cfg.scraper.skipRecentDays;
 // Phase 9: how many URLs per batch-scrape job
 const BATCH_SIZE        = cfg.scraper.batchSize;
 
-// ── Graceful shutdown state ──────────────────────────────────────────────────
+// ── Graceful shutdown state & shared worker utils ────────────────────────────
 let isShuttingDown = false;
 
-function sleep(min, max) {
-  return new Promise(async (resolve) => {
-    let state = await SystemState.getGlobalState().catch(() => ({ crawlPace: 'normal', globalPause: false }));
-    
-    // Hold while globally paused
-    while (state.globalPause && !isShuttingDown) {
-      await new Promise(r => setTimeout(r, 5000));
-      state = await SystemState.getGlobalState().catch(() => ({ crawlPace: 'normal', globalPause: false }));
-    }
+const {
+  sleep: sleepUtil,
+  updateJob,
+  shouldStop: shouldStopUtil,
+  AdaptiveThrottle,
+} = require('./workerUtils');
 
-    let paceMultiplier = 1;
-    if (state.crawlPace === 'slow') paceMultiplier = 3;
-    if (state.crawlPace === 'fast') paceMultiplier = 0.5;
-
-    const waitMs = (min + Math.random() * (max - min)) * paceMultiplier;
-    setTimeout(resolve, waitMs);
-  });
-}
-
-async function updateJob(jobId, update) {
-  try { await CrawlJob.findOneAndUpdate({ jobId }, update); } catch (_) {}
-}
-
-/**
- * Check if this job should stop — either due to worker shutdown or API cancellation.
- */
-async function shouldStop(jobId) {
-  if (isShuttingDown) return 'shutdown';
-  try {
-    if (await isJobCancelled(jobId)) return 'cancelled';
-  } catch (_) {}
-  return false;
-}
-
-// ── Adaptive Throttle System ───────────────────────────────────────────────────
-// Dynamically adjusts inter-URL delay based on success/failure patterns.
-// Starts moderate, speeds up when everything is working, slows way down
-// when Google starts blocking.
-
-class AdaptiveThrottle {
-  constructor(baseMin, baseMax) {
-    this.baseMin = baseMin;
-    this.baseMax = baseMax;
-    this.multiplier = 1.0;
-    this.consecutiveSuccess = 0;
-    this.consecutiveFails = 0;
-  }
-
-  onSuccess(jobId) {
-    const prevMultiplier = this.multiplier;
-    this.consecutiveSuccess++;
-    this.consecutiveFails = 0;
-    // Speed up slightly after 5+ consecutive successes (min multiplier 0.8)
-    if (this.consecutiveSuccess >= 5) {
-      this.multiplier = Math.max(0.8, this.multiplier - 0.05);
-    }
-    // Publish throttle change if multiplier shifted
-    if (prevMultiplier !== this.multiplier && jobId) {
-      bus.publish('crawl:throttle', { jobId, multiplier: this.multiplier, direction: 'faster', consecutiveSuccess: this.consecutiveSuccess });
-    }
-  }
-
-  onFailure(isBlock = false, jobId = null) {
-    const prevMultiplier = this.multiplier;
-    this.consecutiveFails++;
-    this.consecutiveSuccess = 0;
-    if (isBlock) {
-      // Google actively blocking — slam the brakes
-      this.multiplier = 4.0;
-    } else {
-      // Progressive slowdown: 1.5× → 2× → 3× → 4×
-      this.multiplier = Math.min(4.0, 1.5 + (this.consecutiveFails * 0.5));
-    }
-    // Publish throttle change
-    if (jobId) {
-      bus.publish('crawl:throttle', { jobId, multiplier: this.multiplier, direction: 'slower', reason: isBlock ? 'google_block' : 'failure', consecutiveFails: this.consecutiveFails });
-    }
-  }
-
-  async wait() {
-    const min = Math.round(this.baseMin * this.multiplier);
-    const max = Math.round(this.baseMax * this.multiplier);
-    await sleep(min, max);
-  }
-
-  get status() {
-    return `${this.multiplier.toFixed(2)}x (ok:${this.consecutiveSuccess} fail:${this.consecutiveFails})`;
-  }
-}
+const sleep = (min, max) => sleepUtil(min, max, () => isShuttingDown);
+const shouldStop = (jobId) => shouldStopUtil(jobId, () => isShuttingDown);
 
 // ── Phase 2: Parallel page pool URL processor ────────────────────────────────
 /**
@@ -141,7 +61,15 @@ class AdaptiveThrottle {
  */
 async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJob, mode = 'standard') {
   const total = urls.length;
-  let urlIndex = 0;
+  // Shared mutable state for work-stealing across parallel workers.
+  // claimNextUrl() provides an explicit, synchronous index claim to prevent
+  // any future refactor from accidentally splitting read+increment across awaits.
+  const shared = { nextIndex: 0 };
+  function claimNextUrl() {
+    const idx = shared.nextIndex;
+    shared.nextIndex++;
+    return idx;
+  }
   let stopReason = false;
   const throttle = new AdaptiveThrottle(DELAY_MIN, DELAY_MAX);
 
@@ -159,18 +87,40 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
    * Worker function: each page keeps grabbing the next URL until exhausted
    * or a stop signal is received.
    */
-  async function workerLoop(page) {
-    while (true) {
-      // Atomically claim the next URL index
-      const idx = urlIndex++;
-      if (idx >= total) break;
+  async function workerLoop(initialPage) {
+    let page = initialPage;
+    let urlsOnPage = 0;
+    const PAGE_RECYCLE_BUDGET = 35; // Gap 10: Refresh page every 35 URLs to release Chromium renderer memory
 
-      const url = urls[idx];
-      const urlShort = url.split('/maps/place/')[1]?.split('/')[0] || url.slice(-50);
+    try {
+      while (true) {
+        // Claim the next URL index — synchronous, no await between read and increment
+        const idx = claimNextUrl();
+        if (idx >= total) break;
+
+        // Gap 10: Recycle browser page when budget exceeded
+        if (urlsOnPage >= PAGE_RECYCLE_BUDGET) {
+          try {
+            await page.close();
+            page = await browser.newPage();
+            urlsOnPage = 0;
+          } catch (_) {}
+        }
+        urlsOnPage++;
+
+        const url = urls[idx];
+        const urlShort = url.split('/maps/place/')[1]?.split('/')[0] || url.slice(-50);
 
       // Check cancellation before each URL
       const stop = await shouldStop(jobId);
       if (stop) { stopReason = stop; break; }
+
+      // Gap 8: Circuit breaker check — halt pool if consecutive failures/blocks tripped breaker
+      if (throttle.tripped) {
+        logger.error(`  🚨 Circuit breaker tripped after ${throttle.consecutiveFails} failures (${throttle.tripReason}). Stopping URL processing pool.`);
+        stopReason = 'circuit_breaker';
+        break;
+      }
 
       // Human-like pause: every 5-8 URLs, take a random break
       if (idx > 0 && idx >= nextPauseAt) {
@@ -191,7 +141,7 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
       let lastError = null;
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try { scraped = await scrapeSpaceDetail(page, url, mode); break; }
+        try { scraped = await scrapeSpaceDetail(page, url, mode, browser.ctx); break; }
         catch (err) {
           lastError = err;
           const isBlock = err.message.includes('Google blocked');
@@ -264,7 +214,10 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
       // Adaptive inter-URL delay
       await throttle.wait();
     }
+  } finally {
+    try { await page.close(); } catch (_) {}
   }
+}
 
   // Run all page workers concurrently
   await Promise.all(pages.map(page => workerLoop(page)));
@@ -374,9 +327,10 @@ async function preFilterUrls(urls, cityName) {
     }
     return { fresh, skippedUrls };
   } catch (err) {
-    // Non-fatal — fall back to scraping all URLs
+    // Non-fatal — fall back to scraping all URLs.
+    // IMPORTANT: must return the same { fresh, skippedUrls } shape that callers expect.
     logger.warn(`Pre-filter query failed (scraping all): ${err.message}`);
-    return [...urls];
+    return { fresh: [...urls], skippedUrls: [] };
   }
 }
 
@@ -661,7 +615,11 @@ async function processBatchJob(job) {
       const p = parentJob?.progress || {};
       const totalDone = (p.scraped || 0) + (p.failed || 0) + (p.skipped || 0);
 
-      if (p.batchesDone >= p.batches || (p.total > 0 && totalDone >= p.total)) {
+      // Gap 15: batchesDone >= batches is authoritative; totalDone >= toScrape is secondary safety
+      const isComplete = (p.batches > 0 && p.batchesDone >= p.batches) ||
+                         (p.toScrape > 0 && totalDone >= p.toScrape);
+
+      if (isComplete && parentJob.status === 'running') {
         const totalDuration = parentJob.startedAt ? (Date.now() - new Date(parentJob.startedAt).getTime()) : durationMs;
         
         await updateJob(parentJobId, {
@@ -670,8 +628,12 @@ async function processBatchJob(job) {
           durationMs: totalDuration,
         });
 
-        // Clear any remaining pending batches for this job
-        await removeJobAndBatches(parentJobId);
+        // Gap 17: Defer batch cleanup out of lock-holding path
+        setImmediate(() => {
+          removeJobAndBatches(parentJobId).catch(err => {
+            logger.warn(`Deferred batch cleanup error: ${err.message}`);
+          });
+        });
 
         bus.publish('job:completed', {
           jobId: parentJobId, cityName,
@@ -705,13 +667,27 @@ async function processBatchJob(job) {
       $push: { jobErrors: { message: `Batch ${batchIndex} failed: ${err.message}`, at: new Date() } },
     });
 
-    // Final safeguard: check if this was the last batch (même logic as success)
-    const parentJob = await CrawlJob.findOne({ jobId: parentJobId }).lean();
-    const p = parentJob?.progress || {};
-    const totalDone = (p.scraped || 0) + (p.failed || 0) + (p.skipped || 0);
-    if (p.total > 0 && totalDone >= p.total && parentJob.status === 'running') {
-      await updateJob(parentJobId, { status: 'completed', completedAt: new Date() });
-    }
+    // Final safeguard: check if this was the last batch (Gap 15 & Gap 17)
+    try {
+      const parentJob = await CrawlJob.findOne({ jobId: parentJobId }).lean();
+      const p = parentJob?.progress || {};
+      const totalDone = (p.scraped || 0) + (p.failed || 0) + (p.skipped || 0);
+      const isComplete = (p.batches > 0 && p.batchesDone >= p.batches) ||
+                         (p.toScrape > 0 && totalDone >= p.toScrape);
+
+      if (isComplete && parentJob?.status === 'running') {
+        const totalDuration = parentJob.startedAt ? (Date.now() - new Date(parentJob.startedAt).getTime()) : durationMs;
+        await updateJob(parentJobId, { status: 'completed', completedAt: new Date(), durationMs: totalDuration });
+        setImmediate(() => {
+          removeJobAndBatches(parentJobId).catch(() => {});
+        });
+        bus.publish('job:completed', {
+          jobId: parentJobId, cityName,
+          status: 'completed',
+          durationMs: totalDuration,
+        });
+      }
+    } catch (_) {}
 
     throw err;
   }
@@ -806,7 +782,7 @@ async function processSpaceNameJob(job) {
       i++;
       await job.updateProgress(40 + Math.floor((i / Math.min(urls.length, 15)) * 60));
       try {
-        const scraped = await scrapeSpaceDetail(page, url, mode);
+        const scraped = await scrapeSpaceDetail(page, url, mode, browser.ctx);
         if (!scraped?.name) continue;
         const res = await processSpace(scraped, targetName, jobId, true);
         if (res.action === 'created') { stats.created++; await updateJob(jobId, { $inc: { 'progress.newSpaces': 1, 'progress.scraped': 1 }, $push: { spaceIds: res.spaceId } }); }
