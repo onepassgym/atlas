@@ -8,6 +8,7 @@ import Globe from './components/Globe';
 import Skeleton from './components/Skeleton';
 
 const Overview  = lazy(() => import('./pages/Overview'));
+const CommandCenter = lazy(() => import('./pages/CommandCenter'));
 const Explorer  = lazy(() => import('./pages/Explorer'));
 const GlobePage = lazy(() => import('./pages/GlobePage'));
 const Enrichment = lazy(() => import('./pages/Enrichment'));
@@ -35,6 +36,8 @@ function AppShell() {
       <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/overview" element={<Overview />} />
+          <Route path="/command-center" element={<CommandCenter />} />
+          <Route path="/jobs" element={<Navigate to="/command-center" replace />} />
           <Route path="/explorer" element={<Explorer />} />
           <Route path="/globe"    element={<GlobePage />} />
           <Route path="/enrichment" element={<Enrichment />} />

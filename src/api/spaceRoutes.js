@@ -452,10 +452,23 @@ router.get('/stats', async (_, res) => {
     const [total, byCategory, topCities, globalStats, todayCreated, todayUpdated] = await Promise.all([
       Space.countDocuments(),
       Space.aggregate([
-        { $group: { _id: '$categoryId', count: { $sum: 1 } } },
-        { $lookup: { from: 'space_categories', localField: '_id', foreignField: '_id', as: 'cat' } },
+        {
+          $project: {
+            resolvedCategory: {
+              $ifNull: ['$category', '$primaryCategorySlug']
+            }
+          }
+        },
+        { $group: { _id: { $ifNull: ['$resolvedCategory', 'fitness_venue'] }, count: { $sum: 1 } } },
+        { $lookup: { from: 'space_categories', localField: '_id', foreignField: 'slug', as: 'cat' } },
         { $unwind: { path: '$cat', preserveNullAndEmptyArrays: true } },
-        { $project: { _id: { $ifNull: ['$cat.label', 'Unknown'] }, count: 1 } },
+        {
+          $project: {
+            _id: 1,
+            label: { $ifNull: ['$cat.label', '$_id'] },
+            count: 1
+          }
+        },
         { $sort: { count: -1 } }
       ]),
       Space.aggregate([

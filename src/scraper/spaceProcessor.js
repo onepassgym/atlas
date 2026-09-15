@@ -4,28 +4,42 @@ const { upsertSpace } = require('../db/upsertSpace');
 const logger      = require('../utils/logger');
 
 const CATEGORY_MAP = {
-  yoga:        'yoga_studio',
-  crossfit:    'crossfit',
-  pilates:     'pilates',
-  martial:     'martial_arts',
-  boxing:      'martial_arts',
-  karate:      'martial_arts',
-  dance:       'dance_studio',
-  swim:        'swimming_club',
+  gym:          'gym',
+  yoga:         'yoga_studio',
+  crossfit:     'crossfit',
+  pilates:      'pilates_studio',
+  martial:      'martial_arts',
+  boxing:       'boxing_gym',
+  karate:       'martial_arts',
+  taekwondo:    'martial_arts',
+  dance:        'dance_studio',
+  swim:         'swimming_club',
+  climb:        'climbing_gym',
+  boulder:      'climbing_gym',
   'health club':'health_club',
-  fitness:     'fitness_center',
-  space:         'space',
-  cycle:       'cycling_studio',
-  spinning:    'cycling_studio',
-  zumba:       'fitness_center',
-  functional:  'fitness_center',
-  strength:    'space',
+  fitness:      'fitness_center',
+  cowork:       'coworking_space',
+  office:       'coworking_space',
+  cycle:        'cycling_studio',
+  spinning:     'cycling_studio',
+  zumba:        'fitness_center',
+  functional:   'fitness_center',
+  trainer:      'personal_trainer',
+  strength:     'gym',
 };
 
-function mapCategory(raw = '') {
-  const l = raw.toLowerCase();
+function mapCategory(raw = '', name = '') {
+  const l = (raw || '').toLowerCase().trim();
   for (const [key, val] of Object.entries(CATEGORY_MAP)) {
     if (l.includes(key)) return val;
+  }
+  const nl = (name || '').toLowerCase().trim();
+  for (const [key, val] of Object.entries(CATEGORY_MAP)) {
+    if (nl.includes(key)) return val;
+  }
+  if (l) {
+    const slug = l.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (slug) return slug;
   }
   return 'fitness_venue';
 }
@@ -49,7 +63,7 @@ async function processSpace(raw, areaName, jobId, downloadMedia = true) {
       googleMapsUrl: raw.googleMapsUrl || null,
       name:          raw.name,
       slug,
-      category:      mapCategory(raw.category || ''),
+      category:      mapCategory(raw.category || '', raw.name || ''),
       categories:    [raw.category].filter(Boolean),
       primaryType:   raw.category || null,
 
