@@ -28,6 +28,13 @@ async function ensureIndexes() {
   await spaces.createIndex({ chainName: 1 },       { sparse: true, name: 'chainName_sparse' });
   await spaces.createIndex({ primaryCategorySlug: 1 }, { name: 'primaryCategorySlug_1' });
   await spaces.createIndex({ areaName: 1, primaryCategorySlug: 1 }, { name: 'areaName_primaryCategorySlug' });
+  // Relevance-scored text search backing GET /api/spaces?search=... — declared on the
+  // schema but never actually built (autoIndex: false on every model, same as the rest
+  // of this file), so $text queries were silently failing and falling back to regex.
+  await spaces.createIndex(
+    { name: 'text', description: 'text', areaName: 'text' },
+    { name: 'spaces_text_search', weights: { name: 10, areaName: 5, description: 1 } }
+  );
 
   // ── space_reviews ─────────────────────────────────────────────────────────
   const reviews = db.collection(c.spaceReviews);

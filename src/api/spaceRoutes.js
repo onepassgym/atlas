@@ -16,6 +16,37 @@ let _spaceStatsCache = null;
 let _spaceStatsCacheAt = 0;
 const STATS_CACHE_TTL = 30_000; // 30 seconds
 
+// Raw scrape artifacts kept for internal/debug use, never needed by the public
+// search/nearby/detail responses — the normalized equivalents (photos virtual,
+// amenityIds, crawlMeta virtual) are what the app actually renders.
+const RAW_FIELDS_EXCLUDE = '-rawPhotos -rawAmenities -rawCrawlMeta -rawPhotoUrls';
+
+const SEARCHABLE_FIELDS = ['name', 'areaName', 'chainName', 'address', 'category', 'primaryType'];
+const SEARCH_STOPWORDS = new Set(['the', 'and', 'of', 'a', 'an', 'in', 'at', 'near', 'for']);
+
+/**
+ * Builds a word-level match filter: every significant token in the query
+ * must appear as a substring in at least one searchable field.
+ * Tighter than a full-string character-subsequence match (which matches
+ * almost anything containing the query's letters in order) — needed
+ * because geo search can't combine with $text, so this is the only
+ * relevance signal available when lat/lng is also present, and it directly
+ * gates which results are even eligible for the nearest-first distance sort.
+ */
+function buildTokenMatchOr(trimmed) {
+  const exactSanitized = trimmed.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&');
+  const tokens = exactSanitized
+    .split(/\s+/)
+    .filter(t => t.length >= 2 && !SEARCH_STOPWORDS.has(t.toLowerCase()));
+  const words = tokens.length ? tokens : [exactSanitized];
+
+  return {
+    $and: words.map(w => ({
+      $or: SEARCHABLE_FIELDS.map(f => ({ [f]: { $regex: new RegExp(w, 'i') } })),
+    })),
+  };
+}
+
 /**
  * @swagger
  * tags:
@@ -229,42 +260,39 @@ router.get('/',
     let useTextScore = false;
 
     if (city)      filter.areaName = { $regex: new RegExp(city.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&'), 'i') };
-    if (category)  filter.category = category;
+    if (category)  filter.category = category.toLowerCase().trim();
     if (minRating) filter.rating   = { $gte: +minRating };
 
     if (search) {
       const trimmed = search.trim();
       const isOpgId = /^OPG-/i.test(trimmed);
       const isPhone = /^\+?\d{6,15}$/.test(trimmed.replace(/[\s-]/g, ''));
+      const exactSanitized = trimmed.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&');
 
-      // Try $text search first for multi-word queries (better relevance)
-      // Note: MongoDB does not allow $text and $near in the same query.
-      if (!isOpgId && !isPhone && trimmed.length >= 3 && !(lat && lng)) {
-        try {
-          // Use MongoDB text index for relevance-scored search
-          filter.$text = { $search: trimmed };
-          useTextScore = true;
-        } catch (ignored) {
-          // Fallback: regex-based search
-          useTextScore = false;
-        }
-      }
-      
-      if (!useTextScore) {
-        // Regex fallback — character-sequence matching for fuzzy behavior
-        const exactSanitized = trimmed.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&');
-        const fuzzyPattern = exactSanitized.replace(/\s+/g, '').split('').join('.*?');
+      if (isOpgId) {
+        filter.opgId = { $regex: new RegExp(exactSanitized, 'i') };
+      } else if (isPhone) {
         filter.$or = [
-          { name: { $regex: new RegExp(fuzzyPattern, 'i') } },
-          { areaName: { $regex: new RegExp(fuzzyPattern, 'i') } },
-          { chainName: { $regex: new RegExp(fuzzyPattern, 'i') } },
-          { address: { $regex: new RegExp(fuzzyPattern, 'i') } },
-          { opgId: { $regex: new RegExp(exactSanitized, 'i') } },
-          { 'contact.phone': { $regex: new RegExp(exactSanitized, 'i') } },
+          { 'contact.phone':  { $regex: new RegExp(exactSanitized, 'i') } },
           { 'contact.phone2': { $regex: new RegExp(exactSanitized, 'i') } },
-          { category: { $regex: new RegExp(exactSanitized, 'i') } },
-          { primaryType: { $regex: new RegExp(exactSanitized, 'i') } }
         ];
+      } else if (trimmed.length >= 3 && !(lat && lng)) {
+        // MongoDB text index — relevance-scored, best option when it's available.
+        // Note: MongoDB does not allow $text and $near in the same query, so this
+        // path is only taken when lat/lng aren't both present (see the word-match
+        // branch below for that case).
+        filter.$text = { $search: trimmed };
+        useTextScore = true;
+      } else {
+        // Word-level match: every significant token must appear in a searchable
+        // field. This is what backs "closest match to the search string" when a
+        // geo $near sort is also active (lat+lng) — $text can't combine with
+        // $near, so this filter is the only relevance signal gating which
+        // results are even eligible for the nearest-first distance sort. It's
+        // deliberately tighter than a full-string character-subsequence match,
+        // which would match almost anything containing the query's letters in
+        // order and let distance alone decide ranking among mostly-noise hits.
+        Object.assign(filter, buildTokenMatchOr(trimmed));
       }
     }
 
@@ -273,11 +301,14 @@ router.get('/',
     if (req.query.minReviews)    filter.totalReviews   = { ...(filter.totalReviews || {}), $gte: +req.query.minReviews };
 
     if (lat && lng) {
-      filter.location = { 
-        $near: { 
-          $geometry: { type: 'Point', coordinates: [+lng, +lat] }
-          // Removed $maxDistance to ensure we always return records, sorting nearest first
-        } 
+      filter.location = {
+        $near: {
+          $geometry: { type: 'Point', coordinates: [+lng, +lat] },
+          // Only cap distance when the caller explicitly asks for a radius —
+          // default stays unbounded so nearest-first sorting always returns
+          // records instead of an empty page for sparsely-covered areas.
+          ...(req.query.radiusKm ? { $maxDistance: +req.query.radiusKm * 1000 } : {}),
+        },
       };
     }
 
@@ -293,10 +324,6 @@ router.get('/',
     }
 
     try {
-      const projection = useTextScore 
-        ? { score: { $meta: 'textScore' }, crawlMeta: 0 }
-        : { crawlMeta: 0 };
-
       const countFilter = { ...filter };
       if (lat && lng) {
         // Since we removed $maxDistance, we count all spaces that have a location
@@ -305,7 +332,7 @@ router.get('/',
 
       const [spaces, total] = await Promise.all([
         Space.find(filter, useTextScore ? { score: { $meta: 'textScore' } } : undefined)
-           .select('-crawlMeta')
+           .select(RAW_FIELDS_EXCLUDE)
            .populate('categoryId', 'slug label')
            .populate('amenityIds', 'slug label icon')
            .populate('pageSlug', 'slug pageData')
@@ -332,25 +359,13 @@ router.get('/',
         delete filter.$text;
         
         // Reset sortObj since textScore is no longer valid
-        sortObj = { [sortBy === 'relevance' ? 'qualityScore' : sortBy]: order === 'asc' ? 1 : -1 };
+        sortObj = lat && lng ? undefined : { [sortBy === 'relevance' ? 'qualityScore' : sortBy]: order === 'asc' ? 1 : -1 };
 
-        const exactSanitized = search.trim().replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&');
-        const fuzzyPattern = exactSanitized.replace(/\s+/g, '').split('').join('.*?');
-        filter.$or = [
-          { name: { $regex: new RegExp(fuzzyPattern, 'i') } },
-          { areaName: { $regex: new RegExp(fuzzyPattern, 'i') } },
-          { chainName: { $regex: new RegExp(fuzzyPattern, 'i') } },
-          { address: { $regex: new RegExp(fuzzyPattern, 'i') } },
-          { opgId: { $regex: new RegExp(exactSanitized, 'i') } },
-          { 'contact.phone': { $regex: new RegExp(exactSanitized, 'i') } },
-          { 'contact.phone2': { $regex: new RegExp(exactSanitized, 'i') } },
-          { category: { $regex: new RegExp(exactSanitized, 'i') } },
-          { primaryType: { $regex: new RegExp(exactSanitized, 'i') } }
-        ];
+        Object.assign(filter, buildTokenMatchOr(search.trim()));
         try {
           const [spaces, total] = await Promise.all([
             Space.find(filter)
-               .select('-crawlMeta')
+               .select(RAW_FIELDS_EXCLUDE)
                .populate('categoryId', 'slug label')
                .populate('amenityIds', 'slug label icon')
                .populate('pageSlug', 'slug pageData')
@@ -416,14 +431,16 @@ router.get('/nearby',
     const filter = {
       location: { $near: { $geometry: { type: 'Point', coordinates: [+lng, +lat] }, $maxDistance: +radiusKm * 1000 } },
     };
-    if (category) filter.category = category;
+    if (category) filter.category = category.toLowerCase().trim();
     try {
       const spaces = await Space.find(filter)
+        .select(RAW_FIELDS_EXCLUDE)
         .limit(+limit)
         .populate('categoryId', 'slug label')
         .populate('amenityIds', 'slug label icon')
+        .populate('pageSlug', 'slug')
         .lean();
-      ok(res, { count: spaces.length, spaces });
+      ok(res, { count: spaces.length, hasMore: spaces.length >= +limit, spaces });
     } catch (e) { err(res, e.message); }
   }
 );
@@ -807,9 +824,13 @@ router.get('/:slug',
     if (validate(req, res)) return;
     try {
       const space = await Space.findById(req.space._id)
+        .select(RAW_FIELDS_EXCLUDE)
         .populate('categoryId', 'slug label description')
         .populate('amenityIds', 'slug label icon')
-        .populate('reviews')
+        // Capped preview — full pagination lives at GET /:slug/reviews. Some
+        // spaces carry 500-1000 reviews post-enrichment; inlining all of them
+        // here would balloon every detail-page load for no reason.
+        .populate({ path: 'reviews', options: { sort: { publishedAt: -1, createdAt: -1 }, limit: 20 } })
         .populate({ path: 'photos', select: '-localPath', options: { limit: 10 } })
         .populate('crawlMeta')
         .populate('pageSlug', 'slug pageData')
@@ -821,9 +842,9 @@ router.get('/:slug',
   }
 );
 
-// PATCH /api/spaces/:id  — update platform fields only
-router.patch('/:id',
-  param('id').isString().notEmpty().withMessage('ID or slug is required'),
+// PATCH /api/spaces/:slug  — update platform fields only
+router.patch('/:slug',
+  param('slug').isString().notEmpty().withMessage('Slug is required'),
   resolveSpace,
   async (req, res) => {
     if (validate(req, res)) return;
