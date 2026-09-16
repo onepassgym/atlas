@@ -211,6 +211,28 @@ async function removeJobAndBatches(jobId) {
 }
 
 /**
+ * Check whether any batch-scrape child jobs for a parent city/grid job are
+ * still waiting, active, delayed, or prioritized in the queue. Used by
+ * startup reconciliation to distinguish "still running across other worker
+ * replicas" from "genuinely orphaned" — the parent discovery job itself
+ * completes as soon as batches are enqueued, so its own BullMQ state can't
+ * be used as the liveness signal once batching has started.
+ */
+async function hasPendingBatchJobs(jobId) {
+  try {
+    const batchPrefix = `${jobId}:batch:`;
+    const states = ['waiting', 'active', 'delayed', 'prioritized'];
+    const jobs = await crawlQueue.getJobs(states, 0, 500);
+    return jobs.some(j => j.id && j.id.startsWith(batchPrefix));
+  } catch (e) {
+    // Fail safe: if we can't determine batch state, assume it might still be
+    // running rather than risk falsely failing an in-progress job.
+    logger.warn(`hasPendingBatchJobs check failed for ${jobId}: ${e.message}`);
+    return true;
+  }
+}
+
+/**
  * Remove a BullMQ job if it's still waiting in the queue.
  */
 async function removeBullJob(jobId) {
@@ -277,4 +299,5 @@ module.exports = {
   removeBullJob,
   removeJobAndBatches,
   promoteJobToFront,
+  hasPendingBatchJobs,
 };

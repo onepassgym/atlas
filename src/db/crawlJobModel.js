@@ -27,6 +27,12 @@ const CrawlJobSchema = new mongoose.Schema({
 
   progress: {
     total:       { type: Number, default: 0 },
+    // Phase 9 batch pipeline: URLs surviving pre-filter, and batch-scrape fan-out/fan-in counts.
+    // Required for the batch-completion check in queue/worker.js (isComplete) — without these,
+    // Mongoose strict mode silently drops the fields and city/grid jobs never auto-complete.
+    toScrape:    { type: Number, default: 0 },
+    batches:     { type: Number, default: 0 },
+    batchesDone: { type: Number, default: 0 },
     scraped:     { type: Number, default: 0 },
     failed:      { type: Number, default: 0 },
     skipped:     { type: Number, default: 0 },
