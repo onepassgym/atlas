@@ -7,7 +7,7 @@ const router   = express.Router();
 const { 
   addCityJob, addSpaceNameJob, getQueueStats, getQueueJobStatus, 
   clearCrawlQueue, requestCancelJob, removeBullJob, promoteJobToFront,
-  removeJobAndBatches
+  removeJobAndBatches, getPausedStates, crawlQueue, chainCrawlQueue, enrichmentQueue
 } = require('../queue/queues');
 const { FITNESS_CATEGORIES } = require('../scraper/googleMapsScraper');
 const CrawlJob = require('../db/crawlJobModel');
@@ -280,8 +280,40 @@ router.get('/jobs',
  */
 // GET /api/crawl/queue/stats
 router.get('/queue/stats', async (req, res) => {
-  try { ok(res, { queue: await getQueueStats() }); }
+  try { ok(res, { queue: await getQueueStats(), paused: await getPausedStates() }); }
   catch (e) { err(res, e.message); }
+});
+
+/**
+ * @swagger
+ * /api/crawl/queue/resume:
+ *   post:
+ *     summary: Resume paused crawl queues
+ *     description: >
+ *       A paused queue still accepts jobs but never runs them, so jobs appear
+ *       "queued" forever with no progress. This resumes any paused queue.
+ *     tags: [Crawl]
+ *     responses:
+ *       200:
+ *         description: Paused state before and after resuming
+ */
+// POST /api/crawl/queue/resume
+router.post('/queue/resume', async (req, res) => {
+  try {
+    const before = await getPausedStates();
+    const queues = { crawl: crawlQueue, chain: chainCrawlQueue, enrichment: enrichmentQueue };
+    const resumed = [];
+    for (const [name, q] of Object.entries(queues)) {
+      if (before[name]) { await q.resume(); resumed.push(name); }
+    }
+    if (resumed.length) logger.warn(`▶️ Resumed paused queue(s): ${resumed.join(', ')}`);
+    ok(res, {
+      message: resumed.length ? `Resumed: ${resumed.join(', ')}` : 'No queues were paused.',
+      resumed,
+      before,
+      after: await getPausedStates(),
+    });
+  } catch (e) { logger.error(e.message); err(res, e.message); }
 });
 
 /**

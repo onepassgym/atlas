@@ -97,18 +97,71 @@ function sleep(min, max) {
 }
 
 /**
- * Normalize a Google Maps place URL: keep the place name and coordinate anchor
- * (/@lat,lng,zoom) but strip query params (?...) and the /data= segment.
- * The coordinate anchor is critical — without it, Google may redirect to a
- * generic search or a different place entirely.
+ * Normalize a Google Maps place URL for navigation.
+ *
+ * IMPORTANT: the `/data=!4m…!1s0x<fid>:0x<fid>…!19sChIJ…` segment is the ONLY
+ * place identifier present on result-feed anchors — feed hrefs carry no
+ * `/@lat,lng` anchor at all. Stripping `/data=` leaves a bare
+ * `https://www.google.com/maps/place/<Name>` which Google resolves as a plain
+ * text search: the place panel never renders, `h1.DUwDvf` is absent and the
+ * body stays under 200 chars. That produced both the
+ * "Could not extract space name" failures and the bogus `isBlocked → 'empty'`
+ * detections that tripped the circuit breaker.
+ *
+ * So: keep the path (name + `/@` anchor + `/data=`) and drop only the tracking
+ * query string (authuser/hl/g_ep/rclk), which carries no routing information.
  */
 function normalizeMapUrl(href) {
   if (!href) return null;
-  // Strip query params
-  let url = href.split('?')[0];
-  // Strip /data=... segment (internal Google routing data)
-  url = url.replace(/\/data=[^/]*$/, '');
-  return url;
+  return href.split('?')[0];
+}
+
+/**
+ * Stable identity key for a Google Maps place URL, used to compare URLs coming
+ * from the result feed against `googleMapsUrl` values already stored in Mongo.
+ *
+ * The two differ in shape — feed hrefs are `/maps/place/<Name>/data=…` while a
+ * stored URL is the settled address bar `/maps/place/<Name>/@lat,lng,17z/data=…`
+ * — so comparing raw strings never matches. Prefers the feature ID
+ * (`!1s0x…:0x…`), then the CID (`!19sChIJ…`), and falls back to the decoded
+ * place-name path.
+ */
+function placeKeysFromUrl(url) {
+  if (!url) return [];
+  const keys = [];
+  const fid = url.match(/!1s(0x[0-9a-f]+:0x[0-9a-f]+)/i);
+  if (fid) keys.push(`fid:${fid[1].toLowerCase()}`);
+  const cid = url.match(/!19s(ChIJ[\w-]+)/) || url.match(/!1s(ChIJ[\w-]+)/);
+  if (cid) keys.push(`cid:${cid[1]}`);
+  const path = url.split('?')[0].split('/@')[0].replace(/\/data=.*$/, '');
+  const nameSeg = path.match(/\/maps\/place\/([^/]+)/);
+  if (nameSeg) {
+    try { keys.push(`name:${decodeURIComponent(nameSeg[1]).toLowerCase()}`); }
+    catch (_) { keys.push(`name:${nameSeg[1].toLowerCase()}`); }
+  }
+  return keys;
+}
+
+/**
+ * Wait until the place detail panel has actually rendered.
+ *
+ * Google Maps is a client-rendered SPA: `domcontentloaded` fires long before
+ * the panel exists, so the previous fixed `sleep(1800, 2800)` was a coin flip
+ * on a slow network — a still-hydrating page looked identical to a blocked one.
+ * Racing on the real signal makes fast pages fast and slow pages correct.
+ *
+ * @returns {Promise<boolean>} true if the place panel rendered
+ */
+async function waitForPlacePanel(page, timeout = 15000) {
+  try {
+    await page.waitForSelector('h1.DUwDvf, h1.fontHeadlineLarge, [role="main"] h1', {
+      timeout,
+      state: 'attached',
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 // ── Browser pool ──────────────────────────────────────────────────────────────
@@ -182,7 +235,8 @@ async function isBlocked(page) {
       if (/unusual traffic|captcha|are you a robot|automated queries/i.test(body)) return 'captcha';
       // Google consent wall that won't dismiss
       if (/before you continue|consent\.google/i.test(window.location.href)) return 'consent';
-      // Completely empty page (blocked silently)
+      // Completely empty page — may be a silent block, may just be a page that
+      // has not hydrated yet. Callers must treat this as soft/retryable.
       if (document.querySelectorAll('a[href*="/maps/place/"]').length === 0 &&
           !document.querySelector('h1') &&
           body.length < 200) return 'empty';
@@ -192,6 +246,17 @@ async function isBlocked(page) {
   } catch (_) {
     return false;
   }
+}
+
+/**
+ * True only for block reasons Google actually served us — a CAPTCHA or a
+ * consent wall. `'empty'` is NOT one of them: an unhydrated SPA shell looks
+ * exactly the same, and treating it as a block cost a 30–60s cooldown per
+ * occurrence and tripped the circuit breaker on what were really just slow
+ * page loads.
+ */
+function isHardBlock(reason) {
+  return reason === 'captcha' || reason === 'consent';
 }
 
 // ── Search: collect all place URLs for a query ───────────────────────────────
@@ -424,18 +489,36 @@ async function scrapeSpaceDetail(page, url, mode = 'standard', ctx = null) {
       // Fallback: 'commit' fires as soon as any response is received — catches slow pages
       await page.goto(url, { waitUntil: 'commit', timeout: cfg.scraper.timeout });
     }
-    // Optimized page load delay
-    await sleep(1800, 2800);
+    // Wait for the place panel to actually render rather than sleeping blindly.
+    // Resolves as soon as the h1 exists, so healthy pages are faster than the
+    // old fixed 1.8-2.8s wait and slow ones are no longer misread as blocked.
+    const panelReady = await waitForPlacePanel(page);
+    if (!panelReady) await sleep(1500, 2500); // give the DOM one last chance
+    else await sleep(400, 900);               // let sibling fields paint
   } catch (err) {
     throw new Error(`Navigation failed: ${err.message}`);
   }
 
-  // Check for Google block/CAPTCHA on detail page
+  // Check for Google block/CAPTCHA on detail page. Only a CAPTCHA or consent
+  // wall warrants the long cooldown — an 'empty' shell is retried cheaply by
+  // the caller instead of poisoning the throttle's circuit breaker.
   const blockReason = await isBlocked(page);
-  if (blockReason) {
+  if (isHardBlock(blockReason)) {
     logger.warn(`  🚫 Google blocked detail page (reason: ${blockReason}) — backing off`);
     await sleep(15000, 30000);
     throw new Error(`Google blocked: ${blockReason}`);
+  }
+  if (blockReason === 'empty') {
+    // One quick reload before giving up — most 'empty' hits are a lost race
+    // with SPA hydration, not a block.
+    try {
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: cfg.scraper.timeout });
+      await waitForPlacePanel(page);
+      await sleep(500, 1000);
+    } catch (_) {}
+    if (await isBlocked(page) === 'empty') {
+      throw new Error('Place panel did not render (empty page)');
+    }
   }
 
   // ── Core data from DOM ───────────────────────────────────────────────────
@@ -473,11 +556,24 @@ async function scrapeSpaceDetail(page, url, mode = 'standard', ctx = null) {
     const ratingRaw = tryText('.F7nice span[aria-hidden="true"]', '.MW4etd', '.fontDisplayLarge');
     const rating    = ratingRaw ? parseFloat(ratingRaw) : null;
 
-    // Review count — primary: .F7nice aria-label, secondary: any element with "reviews" label
-    const revEl = document.querySelector('.F7nice') || document.querySelector('[aria-label*="review" i]');
-    const revText = revEl?.getAttribute('aria-label') || revEl?.textContent || '';
-    const revMatch = revText.match(/([\d,]+)\s*review/i);
-    const totalReviews = revMatch ? parseInt(revMatch[1].replace(/,/g, ''), 10) : 0;
+    // ── Review count ───────────────────────────────────────────────────────
+    // `.F7nice` itself carries no aria-label and its text reads "4.7(562)" —
+    // no "review" token — so the old aria-label-or-textContent regex always
+    // returned 0. The count lives on a nested span:
+    //   <span role="img" aria-label="562 reviews">(562)</span>
+    // Try that, then any labelled element, then the parenthesised number.
+    const totalReviews = (() => {
+      const labelled =
+        document.querySelector('.F7nice [aria-label*="review" i]') ||
+        document.querySelector('[aria-label*="review" i][role="img"]') ||
+        document.querySelector('button[aria-label*="review" i]');
+      const fromLabel = labelled?.getAttribute('aria-label')?.match(/([\d,]+)\s*review/i);
+      if (fromLabel) return parseInt(fromLabel[1].replace(/,/g, ''), 10);
+
+      const paren = document.querySelector('.F7nice')?.textContent?.match(/\(([\d,]+)\)/);
+      if (paren) return parseInt(paren[1].replace(/,/g, ''), 10);
+      return 0;
+    })();
 
     // Address — primary: data-item-id, secondary: data-tooltip, tertiary: aria-label
     const address = tryText(
@@ -545,14 +641,26 @@ async function scrapeSpaceDetail(page, url, mode = 'standard', ctx = null) {
     const serviceOptionEls = tryAll('.LTs0Rc li span', '.E0DTEd li span');
     const serviceOptions = serviceOptionEls.map(el => el.textContent?.trim()).filter(Boolean);
 
-    // Lat/lng from URL
-    const urlMatch = window.location.href.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-    const lat = urlMatch ? parseFloat(urlMatch[1]) : null;
-    const lng = urlMatch ? parseFloat(urlMatch[2]) : null;
+    // ── Lat/lng ────────────────────────────────────────────────────────────
+    // The `/@lat,lng,zoom` anchor is only present once Google rewrites the
+    // address bar. When we navigate straight to a feed href it may never
+    // appear, so fall back to the `!8m2!3d<lat>!4d<lng>` pair that the
+    // /data= segment always carries.
+    const href = window.location.href;
+    const atMatch   = href.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    const dataMatch = href.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+    const coordMatch = atMatch || dataMatch;
+    const lat = coordMatch ? parseFloat(coordMatch[1]) : null;
+    const lng = coordMatch ? parseFloat(coordMatch[2]) : null;
 
-    // Place ID from URL data-lsp attribute or URL path
-    const pidMatch = window.location.href.match(/!1s(ChIJ[^!]+)/);
-    const placeId  = pidMatch ? pidMatch[1] : null;
+    // ── Place ID ───────────────────────────────────────────────────────────
+    // Maps encodes the ChIJ-form place ID after `!19s`, not `!1s` — `!1s`
+    // holds the hex feature ID (`0x…:0x…`). Check both, preferring ChIJ.
+    const placeId =
+      href.match(/!19s(ChIJ[\w-]+)/)?.[1] ||
+      href.match(/!1s(ChIJ[\w-]+)/)?.[1] ||
+      href.match(/!1s(0x[0-9a-f]+:0x[0-9a-f]+)/i)?.[1] ||
+      null;
 
     // Photo URLs (visible on main page — hero images, no tab navigation needed)
     const photoSelectors = 'button[jsaction*="heroHeaderImage"] img, .RZ66Rb img, .Uf0tqf img, a[data-photo-index] img, [data-photo-index] img, .p6VvSf img, .ZKbJif img';
@@ -563,15 +671,19 @@ async function scrapeSpaceDetail(page, url, mode = 'standard', ctx = null) {
         .map(src => src.replace(/=w\d+-h\d+[^&]*/, '=w1600-h1200'))
     )];
 
-    // Rating breakdown — try multiple selectors
-    const starEls = [...document.querySelectorAll('.jANrlb .dneCp, .JdqNPe .dneCp, .ExlQHd [role="img"]')];
-    const starKeys = ['fiveStar','fourStar','threeStar','twoStar','oneStar'];
-    const ratingBreakdown = Object.fromEntries(starKeys.map(k => [k, 0]));
-    starEls.slice(0, 5).forEach((el, i) => {
-      const lbl = el.closest('[aria-label]')?.getAttribute('aria-label') || '';
-      const n   = parseInt(lbl.replace(/[^0-9]/g, '') || '0', 10);
-      if (starKeys[i]) ratingBreakdown[starKeys[i]] = n;
-    });
+    // ── Rating breakdown ───────────────────────────────────────────────────
+    // Labels read "5 stars, 454 reviews". Stripping all non-digits produced
+    // 5454 for that row; parse the star tier and its count separately and key
+    // the result by the tier rather than by DOM order.
+    const starKeys = { 5: 'fiveStar', 4: 'fourStar', 3: 'threeStar', 2: 'twoStar', 1: 'oneStar' };
+    const ratingBreakdown = { fiveStar: 0, fourStar: 0, threeStar: 0, twoStar: 0, oneStar: 0 };
+    const breakdownLabels = [...document.querySelectorAll('[aria-label*="stars," i], [aria-label*="star," i]')]
+      .map(el => el.getAttribute('aria-label'))
+      .filter(Boolean);
+    for (const lbl of breakdownLabels) {
+      const m = lbl.match(/^(\d)\s*stars?,\s*([\d,]+)\s*review/i);
+      if (m && starKeys[m[1]]) ratingBreakdown[starKeys[m[1]]] = parseInt(m[2].replace(/,/g, ''), 10);
+    }
 
     // Popular Times (on main overview page)
     const popularTimes = [...document.querySelectorAll('[aria-label*="busy at" i], [aria-label*="Busy at" i], [aria-label*="Usually" i]')]
@@ -634,15 +746,20 @@ async function scrapeEnrichmentDetail(page, url) {
     } catch (_) {
       await page.goto(url, { waitUntil: 'commit', timeout: cfg.scraper.timeout });
     }
-    await sleep(1800, 2800);
+    const panelReady = await waitForPlacePanel(page);
+    if (!panelReady) await sleep(1500, 2500);
+    else await sleep(400, 900);
   } catch (err) {
     throw new Error(`Navigation failed: ${err.message}`);
   }
 
   const blockReason = await isBlocked(page);
-  if (blockReason) {
+  if (isHardBlock(blockReason)) {
     await sleep(15000, 30000);
     throw new Error(`Google blocked: ${blockReason}`);
+  }
+  if (blockReason === 'empty') {
+    throw new Error('Place panel did not render (empty page)');
   }
 
   // ── Task 3 + 5: Core data + operational + contact enrichment ─────────────
@@ -1015,15 +1132,20 @@ async function scrapeSelective(page, url, sections = ['all']) {
     } catch (_) {
       await page.goto(url, { waitUntil: 'commit', timeout: cfg.scraper.timeout });
     }
-    await sleep(1800, 2800);
+    const panelReady = await waitForPlacePanel(page);
+    if (!panelReady) await sleep(1500, 2500);
+    else await sleep(400, 900);
   } catch (err) {
     throw new Error(`Navigation failed: ${err.message}`);
   }
 
   const blockReason = await isBlocked(page);
-  if (blockReason) {
+  if (isHardBlock(blockReason)) {
     await sleep(15000, 30000);
     throw new Error(`Google blocked: ${blockReason}`);
+  }
+  if (blockReason === 'empty') {
+    throw new Error('Place panel did not render (empty page)');
   }
 
   // Always scrape core data (fast — no tab navigation)
@@ -1052,13 +1174,17 @@ async function scrapeSelective(page, url, sections = ['all']) {
     const isOpenNow = (() => { const el = document.querySelector('.dpoVLd, [aria-label*="Open now" i]'); return el ? /open now/i.test(el.textContent) : null; })();
     const amenities = [...document.querySelectorAll('[aria-label].iP2t7d, .E0DTEd [aria-label]')].map(el => el.getAttribute('aria-label')).filter(Boolean);
     const photoUrls = [...new Set([...document.querySelectorAll('button[jsaction*="heroHeaderImage"] img, .RZ66Rb img, .Uf0tqf img, a[data-photo-index] img, [data-photo-index] img')].map(img => img.src || img.dataset?.src).filter(src => src?.startsWith('http') && src.includes('googleusercontent') && !src.includes('StreetView')).map(src => src.replace(/=w\d+-h\d+[^&]*/, '=w1600-h1200')))];
-    const urlMatch = window.location.href.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    const href = window.location.href;
+    // Same dual source as scrapeSpaceDetail: `/@lat,lng` may never appear when
+    // navigating straight to a feed href, so fall back to `!3d<lat>!4d<lng>`.
+    const urlMatch = href.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) ||
+                     href.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
     return {
       name, rating, totalReviews, address, phone, website, category, description,
       openingHours, isOpenNow, amenities, photoUrls,
       lat: urlMatch ? parseFloat(urlMatch[1]) : null,
       lng: urlMatch ? parseFloat(urlMatch[2]) : null,
-      googleMapsUrl: window.location.href,
+      googleMapsUrl: href,
     };
   });
 
@@ -1096,6 +1222,7 @@ async function scrapeSelective(page, url, sections = ['all']) {
 module.exports = {
   BrowserManager, searchSpacesInCity, searchSpacesInGrid, scrapeSpaceDetail, scrapeEnrichmentDetail, scrapeSelective,
   scrapeAboutTab, scrapeAboutTabExhaustive, scrapeReviews, scrapePhotosTab, scrapePhotosTabEnriched,
-  FITNESS_CATEGORIES, isBlocked,
+  FITNESS_CATEGORIES, isBlocked, isHardBlock,
+  normalizeMapUrl, placeKeysFromUrl, waitForPlacePanel,
 };
 

@@ -148,8 +148,12 @@ async function upsertSpaceSource({ spaceId, opgId, crawledData, now, status = 'c
         $set: setPayload,
         $setOnInsert: {
           firstSeenAt: now,
-          crawlVersion: 0,
         },
+        // NOTE: crawlVersion must NOT also appear in $setOnInsert — MongoDB
+        // rejects the whole update when one field is touched by two operators
+        // ("Updating the path 'crawlVersion' would create a conflict"), which
+        // made every SpaceSource write fail silently into the catch below. On
+        // insert $inc creates the field at 1, which is what we want anyway.
         $inc: {
           crawlVersion: 1,
         },

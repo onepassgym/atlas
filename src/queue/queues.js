@@ -35,6 +35,27 @@ function makeQueue(name, jobOpts = {}) {
   return q;
 }
 
+/**
+ * BullMQ de-duplicates on explicit job ids: adding a job whose id already
+ * exists (including one still retained by removeOnComplete/removeOnFail)
+ * returns the OLD job and enqueues nothing. The call looks successful, the API
+ * reports "queued", and the job never runs — the classic
+ * "job is in the queue but nothing happens" symptom. Detect it and say so.
+ */
+async function assertEnqueued(job, expectedId, label) {
+  try {
+    const state = await job.getState();
+    if (state === 'completed' || state === 'failed') {
+      logger.error(
+        `⚠️ Job id "${expectedId}" (${label}) already exists in state "${state}" — ` +
+        `BullMQ returned the existing job and enqueued nothing. It will NOT run.`
+      );
+      return false;
+    }
+  } catch (_) {}
+  return true;
+}
+
 const crawlQueue      = makeQueue('atlas-crawl');
 const chainCrawlQueue = makeQueue('atlas-chain-crawl');
 // Enrichment queue — targeted per-space enrichment jobs (Tasks 1-5)
@@ -53,6 +74,7 @@ async function addCityJob(jobId, cityName, categories) {
     { type: 'city', jobId, input: { cityName, categories } },
     { jobId }
   );
+  await assertEnqueued(job, jobId, `city ${cityName}`);
   logger.info(`📥 Queued city: ${cityName} (BullMQ #${job.id})`);
   return job;
 }
@@ -74,6 +96,7 @@ async function addSpaceNameJob(jobId, spaceName) {
     { type: 'space_name', jobId, input: { spaceName } },
     { jobId, priority: 1 }
   );
+  await assertEnqueued(job, jobId, `space ${spaceName}`);
   logger.info(`📥 Queued space name: ${spaceName} (BullMQ #${job.id})`);
   return job;
 }
@@ -86,7 +109,8 @@ async function getQueueStats() {
     crawlQueue.getFailedCount(),
     crawlQueue.getDelayedCount(),
   ]);
-  return { waiting, active, completed, failed, delayed };
+  const paused = await crawlQueue.isPaused().catch(() => null);
+  return { waiting, active, completed, failed, delayed, paused };
 }
 
 async function addChainJob(jobId, chainSlug, chainName, countries = []) {
@@ -140,17 +164,21 @@ async function getEnrichmentQueueStats() {
 
 // Phase 9: Enqueue a batch of URLs as a standalone scrape job.
 // Multiple batches from the same city compete for any available worker replica.
-async function addBatchScrapeJob(parentJobId, cityName, urls, batchIndex, mode) {
-  const batchJobId = `${parentJobId}:batch:${batchIndex}`;
+//
+// opts: { jobId, delay, requeueCount } — used when requeueing the leftovers of
+// a batch that stopped early, which needs a distinct id and a cooldown.
+async function addBatchScrapeJob(parentJobId, cityName, urls, batchIndex, mode, opts = {}) {
+  const batchJobId = opts.jobId || `${parentJobId}:batch:${batchIndex}`;
   const job = await crawlQueue.add(
     'batch-scrape',
     {
       type: 'batch',
       parentJobId,
-      input: { cityName, urls, batchIndex, mode },
+      input: { cityName, urls, batchIndex, mode, requeueCount: opts.requeueCount || 0 },
     },
-    { jobId: batchJobId, priority: 2 }
+    { jobId: batchJobId, priority: 2, ...(opts.delay ? { delay: opts.delay } : {}) }
   );
+  await assertEnqueued(job, batchJobId, `batch ${batchIndex} of ${cityName}`);
   return job;
 }
 
@@ -168,11 +196,46 @@ async function getQueueJobStatus(jobId) {
   } catch (_) { return null; }
 }
 
+/**
+ * Obliterate both crawl queues.
+ *
+ * obliterate() requires a paused queue and only deletes the `meta` key — which
+ * holds the `paused` flag — on its final successful iteration. If it throws
+ * partway (Redis hiccup, huge queue), the queue is left PAUSED with nothing to
+ * un-pause it: every subsequently added job lands in the paused list and no
+ * worker ever picks it up. Always resume, even on failure.
+ */
 async function clearCrawlQueue() {
-  await crawlQueue.pause();
-  await crawlQueue.obliterate({ force: true });
-  await chainCrawlQueue.pause();
-  await chainCrawlQueue.obliterate({ force: true });
+  try {
+    await crawlQueue.pause();
+    await crawlQueue.obliterate({ force: true });
+    await chainCrawlQueue.pause();
+    await chainCrawlQueue.obliterate({ force: true });
+  } finally {
+    for (const q of [crawlQueue, chainCrawlQueue]) {
+      try {
+        if (await q.isPaused()) {
+          await q.resume();
+          logger.warn(`▶️ Resumed ${q.name} after clear (queue was left paused)`);
+        }
+      } catch (e) {
+        logger.error(`Failed to resume ${q.name} after clear: ${e.message}`);
+      }
+    }
+  }
+}
+
+/**
+ * True when a queue is paused. A paused queue accepts jobs but never runs them,
+ * so this is the first thing to check when jobs "just sit there".
+ */
+async function getPausedStates() {
+  const [crawl, chain, enrichment] = await Promise.all([
+    crawlQueue.isPaused().catch(() => null),
+    chainCrawlQueue.isPaused().catch(() => null),
+    enrichmentQueue.isPaused().catch(() => null),
+  ]);
+  return { crawl, chain, enrichment };
 }
 
 // ── Cancellation system (Redis-backed for fast polling) ──────────────────────
@@ -300,4 +363,5 @@ module.exports = {
   removeJobAndBatches,
   promoteJobToFront,
   hasPendingBatchJobs,
+  getPausedStates,
 };

@@ -3,13 +3,13 @@ require('dotenv').config();
 
 const { Worker } = require('bullmq');
 const { connectDB }   = require('../db/connection');
-const { BrowserManager, searchSpacesInCity, searchSpacesInGrid, scrapeSpaceDetail, scrapeEnrichmentDetail, FITNESS_CATEGORIES, isBlocked } = require('../scraper/googleMapsScraper');
+const { BrowserManager, searchSpacesInCity, searchSpacesInGrid, scrapeSpaceDetail, scrapeEnrichmentDetail, FITNESS_CATEGORIES, isBlocked, placeKeysFromUrl } = require('../scraper/googleMapsScraper');
 const { processSpace }  = require('../scraper/spaceProcessor');
 const { processEnrichmentJob } = require('../scraper/enrichmentProcessor');
 const CrawlJob        = require('../db/crawlJobModel');
 const Space             = require('../db/spaceModel');
 const SystemState     = require('../db/systemStateModel');
-const { isJobCancelled, clearCancelFlag, addBatchScrapeJob, enrichmentQueue } = require('./queues');
+const { isJobCancelled, clearCancelFlag, addBatchScrapeJob, removeJobAndBatches, enrichmentQueue } = require('./queues');
 const cfg             = require('../../config');
 const logger          = require('../utils/logger');
 const bus             = require('../services/eventBus');
@@ -32,6 +32,16 @@ const SEARCH_POOL       = cfg.scraper.searchPool;
 const SKIP_RECENT_DAYS  = cfg.scraper.skipRecentDays;
 // Phase 9: how many URLs per batch-scrape job
 const BATCH_SIZE        = cfg.scraper.batchSize;
+
+// ── BullMQ lock timing ───────────────────────────────────────────────────────
+// A live worker renews its job lock every LOCK_RENEW_TIME, so LOCK_DURATION
+// governs how long a CRASHED worker's job stays stuck in `active` before the
+// stalled-checker can hand it to another worker. Keep it a small multiple of
+// the renew interval, not the length of the longest job.
+const LOCK_DURATION        = parseInt(process.env.WORKER_LOCK_DURATION_MS   || '900000', 10);  // 15 min
+const ENRICH_LOCK_DURATION = parseInt(process.env.ENRICH_LOCK_DURATION_MS   || '900000', 10);  // 15 min
+const LOCK_RENEW_TIME      = parseInt(process.env.WORKER_LOCK_RENEW_MS      || '300000', 10);  // 5 min
+const STALLED_INTERVAL     = parseInt(process.env.WORKER_STALLED_INTERVAL_MS || '30000', 10);  // 30 s
 
 // ── Graceful shutdown state & shared worker utils ────────────────────────────
 let isShuttingDown = false;
@@ -70,6 +80,11 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
     shared.nextIndex++;
     return idx;
   }
+  // Every index that reached a terminal outcome (created/updated/skipped/failed).
+  // Anything missing at the end was claimed and abandoned — by cancellation,
+  // shutdown, or the circuit breaker — and must be reported to the caller so it
+  // can be requeued instead of silently vanishing from the job's totals.
+  const settled = new Set();
   let stopReason = false;
   const throttle = new AdaptiveThrottle(DELAY_MIN, DELAY_MAX);
 
@@ -140,11 +155,19 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
       let scraped = null;
       let lastError = null;
 
+      // Whether any attempt for THIS url hit a genuine Google block. The
+      // throttle is notified once per URL below rather than once per attempt —
+      // counting every retry separately made a single bad URL look like three
+      // or four consecutive failures and tripped the circuit breaker after
+      // roughly two URLs.
+      let sawBlock = false;
+
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try { scraped = await scrapeSpaceDetail(page, url, mode, browser.ctx); break; }
         catch (err) {
           lastError = err;
           const isBlock = err.message.includes('Google blocked');
+          if (isBlock) sawBlock = true;
           logger.warn(`  ⚠  Attempt ${attempt}/${MAX_RETRIES} [${url.slice(-40)}]: ${err.message}`);
           bus.publish('crawl:space-failed', { jobId, url: urlShort, error: err.message.slice(0, 120), attempt, maxRetries: MAX_RETRIES, isBlock });
 
@@ -153,7 +176,6 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
             const cooldownMs = 30000 + Math.random() * 30000;
             logger.warn('  🛑 Google block detected — cooling down for 30-60s');
             bus.publish('crawl:block', { jobId, reason: err.message.slice(0, 80), cooldownMs: Math.round(cooldownMs) });
-            throttle.onFailure(true, jobId);
             await sleep(30000, 60000);
           } else {
             await sleep(3000 * attempt, 5000 * attempt);
@@ -162,8 +184,9 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
       }
 
       if (!scraped?.name) {
+        settled.add(idx);
         stats.failed++;
-        throttle.onFailure(false, jobId);
+        throttle.onFailure(sawBlock, jobId);
         await updateJob(jobId, {
           $inc: { 'progress.failed': 1, errorCount: 1 },
           $push: { jobErrors: { message: lastError?.message || 'Could not extract space data', url, at: new Date() } },
@@ -180,6 +203,7 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
       }
 
       // Success — let throttle speed up if appropriate
+      settled.add(idx);
       throttle.onSuccess(jobId);
       const spaceDuration = Date.now() - spaceStartTime;
       bus.publish('crawl:space-done', { jobId, spaceName: scraped.name, url: urlShort, action: 'pending', duration: spaceDuration });
@@ -225,8 +249,14 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
   // Close all pages
   await Promise.all(pages.map(async (page) => { try { await page.close(); } catch (_) {} }));
 
-  logger.info(`  📊 Batch complete — throttle final: ${throttle.status}`);
-  return stopReason;
+  // URLs that never reached a terminal outcome. Previously these were dropped
+  // on the floor whenever the pool stopped early, so a batch could report
+  // "completed" having touched half its URLs and the parent job's
+  // scraped+failed+skipped never added up to toScrape.
+  const unprocessed = urls.filter((_, i) => !settled.has(i));
+
+  logger.info(`  📊 Batch complete — throttle final: ${throttle.status}${unprocessed.length ? `, ${unprocessed.length} URL(s) unprocessed` : ''}`);
+  return { stopReason, unprocessed };
 }
 
 // ── Phase 6: Parallel category search ────────────────────────────────────────
@@ -305,21 +335,32 @@ async function preFilterUrls(urls, cityName) {
           effectiveLastCrawledAt: { $gte: cutoff },
         },
       },
-      { $project: { googleMapsUrl: 1 } },
+      { $project: { googleMapsUrl: 1, placeId: 1, effectiveLastCrawledAt: 1 } },
     ]);
 
-    const knownUrlMap = new Map();
+    // Discovery URLs are result-feed hrefs (`/maps/place/<Name>/data=…`) while
+    // stored googleMapsUrl values are settled address-bar URLs
+    // (`/maps/place/<Name>/@lat,lng,17z/data=…`). Raw string comparison never
+    // matches across those two shapes, so compare on extracted place identity
+    // (feature id → CID → place-name path) instead.
+    const knownKeyMap = new Map();
     recentSpaces.forEach(g => {
-      if (g.googleMapsUrl) {
-        knownUrlMap.set(g.googleMapsUrl.split('?')[0].split('/@')[0], g.effectiveLastCrawledAt);
+      const keys = placeKeysFromUrl(g.googleMapsUrl);
+      if (g.placeId) keys.push(`cid:${g.placeId}`, `fid:${String(g.placeId).toLowerCase()}`);
+      for (const k of keys) {
+        if (!knownKeyMap.has(k)) knownKeyMap.set(k, g.effectiveLastCrawledAt);
       }
     });
 
-    const fresh   = urls.filter(u => !knownUrlMap.has(u));
-    const skippedUrls = urls.filter(u => knownUrlMap.has(u)).map(u => ({
-      url: u,
-      lastCrawledAt: knownUrlMap.get(u)
-    }));
+    const matchKey = (u) => placeKeysFromUrl(u).find(k => knownKeyMap.has(k));
+
+    const fresh = [];
+    const skippedUrls = [];
+    for (const u of urls) {
+      const hit = matchKey(u);
+      if (hit) skippedUrls.push({ url: u, lastCrawledAt: knownKeyMap.get(hit) });
+      else fresh.push(u);
+    }
     const skipped = skippedUrls.length;
 
     if (skipped > 0) {
@@ -578,13 +619,17 @@ async function processGridJob(job) {
 // Because each batch is a separate BullMQ job, different worker containers
 // (replicas) pick them up in parallel — this is where the real speedup is.
 
+// Max times a batch's leftover URLs may be requeued after an early stop
+// (circuit breaker). Bounded so a permanently-blocked IP can't loop forever.
+const MAX_BATCH_REQUEUES = 2;
+
 async function processBatchJob(job) {
   const { parentJobId, input } = job.data;
-  const { cityName, urls, batchIndex, mode = 'standard' } = input;
+  const { cityName, urls, batchIndex, mode = 'standard', requeueCount = 0 } = input;
   const startTime = Date.now();
 
   await connectDB();
-  logger.info(`\n📦 [BATCH ${batchIndex}] ${cityName} — ${urls.length} URLs, pagePool:${PAGE_POOL}, mode:${mode}`);
+  logger.info(`\n📦 [BATCH ${batchIndex}] ${cityName} — ${urls.length} URLs, pagePool:${PAGE_POOL}, mode:${mode}${requeueCount ? ` (requeue ${requeueCount}/${MAX_BATCH_REQUEUES})` : ''}`);
   bus.publish('crawl:batch-start', { jobId: parentJobId, cityName, batchIndex, urlCount: urls.length, pagePool: PAGE_POOL, mode });
 
   const browser = new BrowserManager();
@@ -595,14 +640,47 @@ async function processBatchJob(job) {
     await browser.launch();
 
     // ── Scrape all URLs using the parallel page pool ──────────────────────
-    stopReason = await processUrlsWithPool(
+    const poolResult = await processUrlsWithPool(
       browser, urls, parentJobId, cityName, stats, job, mode
     );
+    stopReason = poolResult.stopReason;
+    const unprocessed = poolResult.unprocessed;
 
     await browser.close();
 
     const durationMs = Date.now() - startTime;
     const batchStatus = stopReason ? (stopReason === 'cancelled' ? 'cancelled' : 'partial') : 'completed';
+
+    // ── Account for URLs the pool never finished ──────────────────────────
+    // A circuit-breaker trip used to abandon the rest of the batch without
+    // touching the parent's counters, so the job looked complete while a
+    // chunk of the city had never been visited. Requeue them behind a cooldown
+    // (the breaker means Google is unhappy right now, not that the URLs are
+    // bad); only count them as failed once the requeue budget is spent.
+    let requeued = 0;
+    if (unprocessed.length > 0) {
+      const retryable = stopReason === 'circuit_breaker' || stopReason === 'shutdown';
+      if (retryable && requeueCount < MAX_BATCH_REQUEUES) {
+        const retryJobId = `${parentJobId}:batch:${batchIndex}r${requeueCount + 1}`;
+        const delayMs = 120_000 * (requeueCount + 1); // 2min, then 4min
+        await addBatchScrapeJob(
+          parentJobId, cityName, unprocessed, `${batchIndex}r${requeueCount + 1}`, mode,
+          { jobId: retryJobId, delay: delayMs, requeueCount: requeueCount + 1 }
+        );
+        requeued = unprocessed.length;
+        // The retry is a new batch the parent must wait for.
+        await updateJob(parentJobId, { $inc: { 'progress.batches': 1 } });
+        logger.warn(`  ↻ [BATCH ${batchIndex}] Requeued ${requeued} unprocessed URL(s) in ${delayMs / 1000}s (reason: ${stopReason})`);
+        bus.publish('crawl:batch-requeued', { jobId: parentJobId, cityName, batchIndex, count: requeued, delayMs, reason: stopReason });
+      } else if (stopReason !== 'cancelled') {
+        await updateJob(parentJobId, {
+          $inc: { 'progress.failed': unprocessed.length, errorCount: 1 },
+          $push: { jobErrors: { message: `Batch ${batchIndex}: ${unprocessed.length} URL(s) abandoned (${stopReason || 'unknown'})`, at: new Date() } },
+        });
+        stats.failed += unprocessed.length;
+        logger.warn(`  ⚠  [BATCH ${batchIndex}] ${unprocessed.length} URL(s) abandoned and counted as failed (${stopReason})`);
+      }
+    }
 
     // ── Report batch results to parent job ────────────────────────────────
     await updateJob(parentJobId, {
@@ -884,6 +962,33 @@ async function processEnrichmentJobHandler(job) {
 async function start() {
   await connectDB();
 
+  // ── Crash guards ─────────────────────────────────────────────────────────
+  // A stray async throw (e.g. from a setImmediate callback) used to kill this
+  // process outright with nothing in the winston logs, leaving jobs sitting in
+  // the queue with no worker to run them. Log loudly and keep serving instead.
+  process.on('unhandledRejection', (reason) => {
+    logger.error(`Unhandled promise rejection in worker: ${reason?.stack || reason}`);
+  });
+  process.on('uncaughtException', (err) => {
+    logger.error(`Uncaught exception in worker: ${err?.stack || err?.message || err}`);
+  });
+
+  // ── Paused-queue check ───────────────────────────────────────────────────
+  // A paused queue still accepts jobs but never runs them. This is the single
+  // most common reason for "the job is queued and nothing happens", and it is
+  // otherwise completely silent.
+  try {
+    const { getPausedStates } = require('./queues');
+    const paused = await getPausedStates();
+    for (const [name, isPaused] of Object.entries(paused)) {
+      if (isPaused) {
+        logger.error(`⏸️  Queue "${name}" is PAUSED — jobs will be accepted but never processed. Resume it via POST /api/crawl/queue/resume.`);
+      }
+    }
+  } catch (pauseErr) {
+    logger.warn(`Could not read queue paused state: ${pauseErr.message}`);
+  }
+
   // Reconcile orphaned running jobs left from prior worker crashes
   try {
     const { reconcileOrphanedJobs } = require('../services/jobReconciliationService');
@@ -903,8 +1008,16 @@ async function start() {
   }, {
     connection,
     concurrency: CONCURRENCY,
-    lockDuration:    2_700_000,
-    lockRenewTime:     300_000,
+    // lockDuration only has to outlast the renewal timer, not the whole job:
+    // BullMQ re-extends the lock every lockRenewTime for as long as the worker
+    // is alive. Sizing it to the worst-case job duration (45 min) meant that
+    // after a worker crash the in-flight batch sat in `active` — invisible and
+    // untouched — for 45 minutes before the stalled-checker could recover it,
+    // which reads to an operator as "the job is queued and nothing happens".
+    // 15 min still gives 3 renewal attempts of headroom.
+    lockDuration:    LOCK_DURATION,
+    lockRenewTime:   LOCK_RENEW_TIME,
+    stalledInterval: STALLED_INTERVAL,
   });
 
   // ── Enrichment Worker (space-enrichment) ────────────────────────────────
@@ -917,8 +1030,9 @@ async function start() {
   }, {
     connection,
     concurrency: 1,            // 1 browser per enrichment worker
-    lockDuration:    1_800_000, // 30 min lock per space (500 reviews takes time)
-    lockRenewTime:     300_000,
+    lockDuration:    ENRICH_LOCK_DURATION,
+    lockRenewTime:   LOCK_RENEW_TIME,
+    stalledInterval: STALLED_INTERVAL,
   });
 
   worker.on('completed',      (job) => logger.info(`✅ Job completed: ${job.id}`));
@@ -928,8 +1042,8 @@ async function start() {
   enrichWorker.on('failed',   (job, err) => logger.error(`❌ Enrichment failed: ${job?.id} — ${err.message}`));
   enrichWorker.on('error',    (err) => logger.error(`Enrichment worker error: ${err.message}`));
 
-  logger.info(`\n🚀 Atlas Worker started  [concurrency: ${CONCURRENCY}, pagePool: ${PAGE_POOL}, lockDuration: 1800s, lockRenewTime: 300s]`);
-  logger.info(`✨ Enrichment Worker started [concurrency: 1, lockDuration: 1800s]`);
+  logger.info(`\n🚀 Atlas Worker started  [concurrency: ${CONCURRENCY}, pagePool: ${PAGE_POOL}, lockDuration: ${LOCK_DURATION / 1000}s, lockRenewTime: ${LOCK_RENEW_TIME / 1000}s]`);
+  logger.info(`✨ Enrichment Worker started [concurrency: 1, lockDuration: ${ENRICH_LOCK_DURATION / 1000}s]`);
 
   // ── Graceful shutdown ────────────────────────────────────────────────────
   const shutdown = async (signal) => {

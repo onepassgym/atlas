@@ -9,6 +9,7 @@ const router  = express.Router();
 const cfg     = require('../../config');
 const logger  = require('../utils/logger');
 const { ok, err, validate } = require('../utils/apiUtils');
+const bus     = require('../services/eventBus');
 const {
   getScheduleConfig,
   saveScheduleConfig,
