@@ -9,6 +9,28 @@ const PageSlug  = require('../db/pageSlugModel');
 
 const { ok, err, validate } = require('../utils/apiUtils');
 const { isValidOpgId } = require('../utils/opgId');
+const { categoryGroupFilter } = require('../utils/categoryGroups');
+const { attachDistanceKm } = require('../utils/geo');
+
+// opg-web's /c/:category/:city route uses 'near-me' as a pseudo-city slug for
+// the geolocated variant of the page — there's no areaName to match against,
+// so it must skip city filtering entirely rather than search for the literal
+// string "near-me".
+const NEAR_ME_CITY_SLUG = 'near-me';
+
+/**
+ * Builds the `areaName` regex filter for a `city` query param. Tolerant of
+ * hyphenated slugs (e.g. "new-delhi") matching a space-separated areaName
+ * ("New Delhi") since URL slugs and scraped area names don't share a
+ * separator convention.
+ */
+function buildCityFilter(city) {
+  const pattern = city
+    .split('-')
+    .map(part => part.replace(/[[\]{}()*+?.,\\^$|#-]/g, '\\$&'))
+    .join('[- ]');
+  return { $regex: new RegExp(pattern, 'i') };
+}
 
 
 // ── In-memory stats cache (TTL-based) ─────────────────────────────────────────
@@ -189,11 +211,15 @@ router.get('/cities', async (_, res) => {
  *         name: city
  *         schema:
  *           type: string
- *         description: Area name (regex search)
+ *         description: Area name (regex search). "near-me" skips city filtering.
  *       - in: query
  *         name: category
  *         schema:
  *           type: string
+ *         description: >
+ *           Either a raw Space.category value (e.g. "gym") or one of opg-web's
+ *           /c/:category/:city landing slugs (gyms, fitness, yoga, pilates,
+ *           swimming, spaces), which expands to the matching raw values.
  *       - in: query
  *         name: minRating
  *         schema:
@@ -239,7 +265,10 @@ router.get('/cities', async (_, res) => {
  *         description: Radius in kilometers (default 5)
  *     responses:
  *       200:
- *         description: Paginated list of spaces
+ *         description: >
+ *           Paginated list of spaces. Each space carries `distanceKm` — the
+ *           great-circle distance from the request's lat/lng, or `null` when
+ *           lat/lng weren't both provided (or the space has no coordinates).
  */
 // GET /api/spaces  — list with filters
 router.get('/',
@@ -258,9 +287,16 @@ router.get('/',
     const { city, category, minRating, limit = 20, page = 1, sortBy = 'qualityScore', order = 'desc', search, lat, lng, radiusKm = 5 } = req.query;
     const filter = {};
     let useTextScore = false;
+    // Origin for the response's `distanceKm` field — null on either coordinate
+    // means the request carried no location, so distance stays null per-space.
+    const originLat = lat !== undefined ? +lat : null;
+    const originLng = lng !== undefined ? +lng : null;
 
-    if (city)      filter.areaName = { $regex: new RegExp(city.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&'), 'i') };
-    if (category)  filter.category = category.toLowerCase().trim();
+    if (city && city.toLowerCase().trim() !== NEAR_ME_CITY_SLUG) filter.areaName = buildCityFilter(city);
+    if (category) {
+      const normalizedCategory = category.toLowerCase().trim();
+      filter.category = categoryGroupFilter(normalizedCategory) ?? normalizedCategory;
+    }
     if (minRating) filter.rating   = { $gte: +minRating };
 
     if (search) {
@@ -345,14 +381,14 @@ router.get('/',
 
       const elapsed = Date.now() - startTime;
 
-      ok(res, { 
-        total, 
-        page: +page, 
-        limit: +limit, 
-        pages: Math.ceil(total / +limit), 
+      ok(res, {
+        total,
+        page: +page,
+        limit: +limit,
+        pages: Math.ceil(total / +limit),
         searchTime: elapsed,
         searchMode: useTextScore ? 'text' : (search ? 'fuzzy' : 'filter'),
-        spaces 
+        spaces: attachDistanceKm(spaces, originLat, originLng)
       });
     } catch (e) {
       if (useTextScore && e.message?.includes('text index')) {
@@ -376,7 +412,7 @@ router.get('/',
             Space.countDocuments(filter),
           ]);
           const elapsed = Date.now() - startTime;
-          ok(res, { total, page: +page, limit: +limit, pages: Math.ceil(total / +limit), searchTime: elapsed, searchMode: 'fuzzy_fallback', spaces });
+          ok(res, { total, page: +page, limit: +limit, pages: Math.ceil(total / +limit), searchTime: elapsed, searchMode: 'fuzzy_fallback', spaces: attachDistanceKm(spaces, originLat, originLng) });
         } catch (e2) { err(res, e2.message); }
       } else {
         err(res, e.message);
@@ -431,7 +467,10 @@ router.get('/nearby',
     const filter = {
       location: { $near: { $geometry: { type: 'Point', coordinates: [+lng, +lat] }, $maxDistance: +radiusKm * 1000 } },
     };
-    if (category) filter.category = category.toLowerCase().trim();
+    if (category) {
+      const normalizedCategory = category.toLowerCase().trim();
+      filter.category = categoryGroupFilter(normalizedCategory) ?? normalizedCategory;
+    }
     try {
       const spaces = await Space.find(filter)
         .select(RAW_FIELDS_EXCLUDE)
@@ -440,7 +479,7 @@ router.get('/nearby',
         .populate('amenityIds', 'slug label icon')
         .populate('pageSlug', 'slug')
         .lean();
-      ok(res, { count: spaces.length, hasMore: spaces.length >= +limit, spaces });
+      ok(res, { count: spaces.length, hasMore: spaces.length >= +limit, spaces: attachDistanceKm(spaces, +lat, +lng) });
     } catch (e) { err(res, e.message); }
   }
 );
