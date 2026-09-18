@@ -4,6 +4,7 @@ const stealthPlugin = require('puppeteer-extra-plugin-stealth');
 const cfg    = require('../../config');
 const logger = require('../utils/logger');
 const { scrapeWebsitePhotos } = require('./websiteScraper');
+const { withTimeout } = require('../utils/withTimeout');
 
 // ── Activate stealth anti-detection ──────────────────────────────────────────
 chromium.use(stealthPlugin());
@@ -171,18 +172,32 @@ class BrowserManager {
 
   async launch() {
     const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined;
-    this.browser = await chromium.launch({
-      headless: cfg.scraper.headless,
-      executablePath,
-      args: [
-        '--no-sandbox', '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage', '--disable-gpu',
-        '--no-first-run', '--no-zygote',
-        '--disable-background-networking',
-        '--disable-default-apps',
-        '--lang=en-US',
-      ],
-    });
+    const launchTimeoutMs = cfg.scraper.browserLaunchTimeoutMs;
+    try {
+      this.browser = await withTimeout(
+        chromium.launch({
+          headless: cfg.scraper.headless,
+          executablePath,
+          timeout: launchTimeoutMs,
+          args: [
+            '--no-sandbox', '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage', '--disable-gpu',
+            '--no-first-run', '--no-zygote',
+            '--disable-background-networking',
+            '--disable-default-apps',
+            '--lang=en-US',
+          ],
+        }),
+        launchTimeoutMs + 10000, // grace buffer over Playwright's own internal timeout
+        'chromium.launch()'
+      );
+    } catch (e) {
+      // Playwright's own timeout already tries to kill a partially-spawned
+      // process; this covers the case where even that cleanup hangs.
+      try { await this.browser?.close(); } catch (_) {}
+      this.browser = null;
+      throw e;
+    }
 
     // Randomize fingerprint per session — each batch looks like a different user
     const viewport = pickRandom(VIEWPORTS);

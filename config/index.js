@@ -47,6 +47,9 @@ module.exports = {
     delayMin:    parseInt(process.env.SCRAPER_DELAY_MIN   || '1200',  10),
     delayMax:    parseInt(process.env.SCRAPER_DELAY_MAX   || '2500', 10),
     timeout:     parseInt(process.env.SCRAPER_TIMEOUT     || '45000', 10),
+    // Bounds chromium.launch() specifically — a cold launch under load is a
+    // different cost profile than a page navigation (cfg.scraper.timeout above).
+    browserLaunchTimeoutMs: parseInt(process.env.SCRAPER_BROWSER_LAUNCH_TIMEOUT_MS || '60000', 10),
     maxRetries:  parseInt(process.env.SCRAPER_MAX_RETRIES || '3', 10),
     headless:    process.env.SCRAPER_HEADLESS !== 'false',
     // Parallel browser tabs per batch job

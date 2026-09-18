@@ -85,7 +85,10 @@ function randomDelay(min, max) {
  */
 async function updateJob(jobId, update) {
   try {
-    await CrawlJob.findOneAndUpdate({ jobId }, update);
+    await CrawlJob.findOneAndUpdate(
+      { jobId },
+      { ...update, $set: { ...(update.$set || {}), lastHeartbeatAt: new Date() } }
+    );
   } catch (_) {}
 }
 

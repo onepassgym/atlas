@@ -261,10 +261,14 @@ router.post('/global-pause', express.json(), async (req, res) => {
       await crawlQueue.pause();
       await chainCrawlQueue.pause();
       state.crawlQueuePaused = true;
+      state.pauseReason = 'operator';
+      state.pausedAt = new Date();
     } else {
       await crawlQueue.resume();
       await chainCrawlQueue.resume();
       state.crawlQueuePaused = false;
+      state.pauseReason = null;
+      state.pausedAt = null;
     }
     
     await state.save();

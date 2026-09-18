@@ -44,6 +44,9 @@ const CrawlJobSchema = new mongoose.Schema({
   startedAt:   Date,
   completedAt: Date,
   durationMs:  Number,
+  // Bumped on every updateJob() write — lets the watchdog tell a genuinely
+  // slow-but-progressing job apart from one that's silently stalled.
+  lastHeartbeatAt: Date,
 
   spaceIds:     [{ type: mongoose.Schema.Types.ObjectId, ref: 'Space' }],
   // Denormalized public identifier — set when job processes a single space target.

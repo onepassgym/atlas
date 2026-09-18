@@ -22,6 +22,7 @@ const dataHealthRoutes = require('./api/dataHealthRoutes');
 const systemRoutes    = require('./api/systemRoutes');
 const mediaRoutes     = require('./api/mediaRoutes');
 const { startScheduler } = require('./services/schedulerService');
+const { startWatchdog } = require('./services/watchdogService');
 const bus             = require('./services/eventBus');
 const { startWebhookService } = require('./services/webhookService');
 const cfg             = require('../config');
@@ -106,6 +107,7 @@ app.use((err, req, res, _next) => {
     // Start services
     startScheduler();
     startWebhookService();
+    startWatchdog();
 
     // Reconcile orphaned running jobs from prior crashes
     try {

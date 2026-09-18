@@ -344,6 +344,7 @@ module.exports = {
   crawlQueue,
   chainCrawlQueue,
   enrichmentQueue,
+  redis,
   addCityJob,
   addGridJob,
   addSpaceNameJob,

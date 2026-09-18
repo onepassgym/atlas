@@ -6,6 +6,11 @@ const SystemStateSchema = new mongoose.Schema({
   
   // System Flags
   globalPause: { type: Boolean, default: false }, // Pauses all queues
+  // Set only when globalPause is toggled via the operator-facing endpoint, so
+  // the watchdog can tell a deliberate pause apart from one left over from a
+  // crash/bug and auto-resume only the latter.
+  pauseReason: { type: String, enum: ['operator', null], default: null },
+  pausedAt:    { type: Date, default: null },
   crawlPace: { type: String, enum: ['slow', 'normal', 'fast'], default: 'normal' }, // Defines concurrency/delay
   
   mediaQueuePaused: { type: Boolean, default: false },

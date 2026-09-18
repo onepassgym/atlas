@@ -287,6 +287,7 @@ async function searchAllCategories(browser, cityName, categories, jobId, bullJob
       if (stop) { stopReason = stop; break; }
 
       bus.publish('crawl:search-start', { jobId, cityName, category: cat, categoryIndex: ci, totalCategories: cats.length });
+      await updateJob(jobId, {}); // heartbeat — discovery phase has no other DB write per category
       try {
         const urls = await searchSpacesInCity(page, cityName, cat);
         urls.forEach(u => allUrls.add(u));
@@ -505,6 +506,7 @@ async function searchAllCategoriesForGrid(browser, lat, lng, zoom, regionName, c
       if (stop) { stopReason = stop; break; }
 
       bus.publish('crawl:search-start', { jobId, regionName, category: cat, categoryIndex: ci, totalCategories: cats.length });
+      await updateJob(jobId, {}); // heartbeat — discovery phase has no other DB write per category
       try {
         const urls = await searchSpacesInGrid(page, lat, lng, zoom, cat);
         urls.forEach(u => allUrls.add(u));
