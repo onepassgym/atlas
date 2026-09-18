@@ -346,6 +346,16 @@ const shutdown = (signal) => {
   setTimeout(() => process.exit(0), 5000);
 };
 
+// ── Crash guards ─────────────────────────────────────────────────────────────
+// A stray async throw would otherwise kill this process outright with nothing
+// in the winston logs, leaving jobs queued with no worker to run them.
+process.on('unhandledRejection', (reason) => {
+  logger.error(`Unhandled promise rejection in enrichment worker: ${reason?.stack || reason}`);
+});
+process.on('uncaughtException', (err) => {
+  logger.error(`Uncaught exception in enrichment worker: ${err?.stack || err?.message || err}`);
+});
+
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 

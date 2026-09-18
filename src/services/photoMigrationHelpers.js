@@ -32,8 +32,11 @@ function buildOp(spaceId, spaceSlug, p, isCover) {
     updateOne: {
       filter: { publicUrl: p.publicUrl },
       update: {
+        // NOTE: a field must appear in $setOnInsert OR $set, never both —
+        // MongoDB rejects the entire op ("would create a conflict at '<field>'").
+        // spaceId used to sit in both, so EVERY photo upsert through this
+        // helper failed and photoSyncService wrote nothing at all.
         $setOnInsert: {
-          spaceId,
           originalUrl:  p.originalUrl  || null,
           localPath:    p.localPath    || null,
           publicUrl:    p.publicUrl,
@@ -49,7 +52,8 @@ function buildOp(spaceId, spaceSlug, p, isCover) {
           brightness:   p.brightness   || null,
           contrast:     p.contrast     || null,
           tags:         Array.isArray(p.tags) ? p.tags : [],
-          isCover:      Boolean(isCover),
+          // isCover is applied via $set when true, so only seed the false case here.
+          ...(isCover ? {} : { isCover: false }),
           downloadedAt: p.downloadedAt ? new Date(p.downloadedAt) : null,
           fsExists:     true,
           createdAt:    p.downloadedAt ? new Date(p.downloadedAt) : new Date(),

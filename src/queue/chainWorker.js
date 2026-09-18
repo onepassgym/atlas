@@ -220,6 +220,10 @@ async function processChainJob(job) {
 
   const stats = { total: 0, skipped: 0, fresh: 0, created: 0, updated: 0, failed: 0, tagged: 0 };
   let stopReason = false;
+  // Declared out here so the catch block can close it. Previously this lived
+  // inside the try, so any throw between launch() and close() leaked a whole
+  // Chromium process — and with `restart: unless-stopped` those accumulate.
+  let browser = null;
 
   try {
     // ── Phase 1: Fetch all locations from store locator ─────────────────────
@@ -307,7 +311,7 @@ async function processChainJob(job) {
     }
 
     // Launch browser for Google Maps enrichment
-    const browser = new BrowserManager();
+    browser = new BrowserManager();
     await browser.launch();
 
     // Process in parallel batches using p-limit
@@ -381,6 +385,7 @@ async function processChainJob(job) {
 
     await Promise.all(tasks);
     await browser.close();
+    browser = null;
 
     // ── Phase 4: Finalize ────────────────────────────────────────────────────
     const durationMs = Date.now() - startTime;
@@ -411,6 +416,7 @@ async function processChainJob(job) {
     return { summary: stats, jobId, durationMs, status: finalStatus };
 
   } catch (err) {
+    try { await browser?.close(); } catch (_) {}
     const durationMs = Date.now() - startTime;
     await updateJob(jobId, { status: 'failed', completedAt: new Date(), durationMs });
     bus.publish('job:failed', { jobId, chainSlug: slug, chainName, error: err.message, durationMs });
@@ -444,6 +450,16 @@ async function updateChainStats(chainId, chainSlug) {
 
 async function start() {
   await connectDB();
+
+// ── Crash guards ─────────────────────────────────────────────────────────────
+// A stray async throw would otherwise kill this process outright with nothing
+// in the winston logs, leaving jobs queued with no worker to run them.
+process.on('unhandledRejection', (reason) => {
+  logger.error(`Unhandled promise rejection in chain worker: ${reason?.stack || reason}`);
+});
+process.on('uncaughtException', (err) => {
+  logger.error(`Uncaught exception in chain worker: ${err?.stack || err?.message || err}`);
+});
 
   // Seed chains from config if not already in DB
   try {

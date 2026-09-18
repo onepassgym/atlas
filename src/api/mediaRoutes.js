@@ -393,11 +393,11 @@ router.post('/sync', async (req, res) => {
                   folder,
                   type:         isThumb ? 'thumbnail' : 'photo',
                   sizeBytes:    f.size,
-                  fsExists:     true,
-                  fsVerifiedAt: new Date(),
                   createdAt:    new Date(f.mtimeMs),
-                  ...(spaceId ? { spaceId } : {}),
                 },
+                // fsExists/fsVerifiedAt/spaceId live in $set only — repeating them
+                // in $setOnInsert made MongoDB reject the whole bulkWrite chunk
+                // ("would create a conflict at 'fsExists'").
                 $set: { fsExists: true, fsVerifiedAt: new Date(), ...(spaceId ? { spaceId } : {}) },
               },
               upsert: true,

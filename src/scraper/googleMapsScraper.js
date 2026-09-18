@@ -202,9 +202,16 @@ class BrowserManager {
     // ── Phase 1a: Aggressive resource blocking ────────────────────────────────
     // Block images, stylesheets, fonts, media — we only need DOM text content.
     // Also block tracking/analytics domains to reduce noise and page weight.
+    // NOTE: stylesheets are NOT blocked by default. Blocking them measurably
+    // reduces how much of the reviews list Google renders (observed 3 loaded
+    // reviews with CSS blocked vs 5 with CSS allowed on the same place) —
+    // layout-dependent lazy loading needs the real box model. Set
+    // SCRAPER_BLOCK_CSS=true to trade review depth for bandwidth.
+    const blocked = ['image', 'font', 'media', 'other'];
+    if (process.env.SCRAPER_BLOCK_CSS === 'true') blocked.push('stylesheet');
+
     await this.ctx.route('**/*', (route) => {
       const type = route.request().resourceType();
-      const blocked = ['image', 'stylesheet', 'font', 'media', 'other'];
       if (blocked.includes(type)) return route.abort();
       const url = route.request().url();
       if (/google-analytics|doubleclick|googlesyndication|facebook\.net|hotjar|clarity\.ms/.test(url))
@@ -958,13 +965,36 @@ async function scrapeReviews(page, maxReviews = 30) {
   if (maxReviews === 0) return { reviews, reviewSummary };
 
   try {
-    let tab = page.locator('[role="tab"][aria-label*="Reviews" i], [role="tab"]:has-text("Reviews")').first();
-    if (!await tab.isVisible({ timeout: 1500 }).catch(() => false)) {
-      tab = page.locator('button[aria-label*="reviews" i], button:has-text("Reviews")').first();
+    // ── Open the reviews list ────────────────────────────────────────────
+    // Google does NOT always render a Reviews tab: on some panel variants the
+    // only tabs are "Overview" and "About", and the reviews are reached via the
+    // review-count button instead. Relying on the tab alone silently returned
+    // whatever 3-5 preview reviews happened to be on the overview.
+    // Try each entry point in order and stop at the first that works.
+    const entryPoints = [
+      '[role="tab"][aria-label*="Reviews" i]',
+      '[role="tab"]:has-text("Reviews")',
+      'button[aria-label*="Reviews for" i]',
+      'button[jsaction*="moreReviews"]',
+      'button[aria-label$="reviews" i]',
+      'button:has-text("More reviews")',
+      'button[aria-label*="reviews" i]',
+    ];
+    let opened = false;
+    for (const sel of entryPoints) {
+      try {
+        const el = page.locator(sel).first();
+        if (!await el.isVisible({ timeout: 1200 }).catch(() => false)) continue;
+        await el.click({ force: true });
+        await sleep(1200, 2000);
+        opened = true;
+        break;
+      } catch (_) {}
     }
-    if (!await tab.isVisible({ timeout: 1500 }).catch(() => false)) return { reviews, reviewSummary };
-    await tab.click({ force: true });
-    await sleep(1200, 2000);
+    if (!opened) {
+      logger.warn('  ⚠  No reviews entry point found (no Reviews tab or review-count button on this panel variant)');
+      return { reviews, reviewSummary };
+    }
 
     try {
       reviewSummary = await page.evaluate(() => {
@@ -984,84 +1014,159 @@ async function scrapeReviews(page, maxReviews = 30) {
       }
     } catch (_) {}
 
-    const panel = page.locator('.m6QErb[aria-label*="review" i], .DxyBCb').first();
-    let lastCount = 0; let noNew = 0;
+    // ── Load + extract loop ──────────────────────────────────────────────
+    //
+    // Two bugs used to cap this at ~3 reviews regardless of maxReviews:
+    //
+    // 1. The scroll target was `.m6QErb[aria-label*="review"]`, whose
+    //    scrollHeight EQUALS its clientHeight — it is the fully-expanded list,
+    //    not the scrolling viewport. `scrollBy` on a non-scrollable element is
+    //    a silent no-op (it does not throw), so the `catch` fallback to
+    //    mouse.wheel never ran and scrollTop stayed 0 forever. Nothing new ever
+    //    lazy-loaded, `noNew` hit its limit, and the loop exited.
+    //    Fix: walk up from a review card to the nearest genuinely scrollable
+    //    ancestor and verify scrollTop actually moved.
+    //
+    // 2. The card selector `.jftiEf` is stale — it matched 3 nodes on a page
+    //    where `[data-review-id]` matched 23.
+    //
+    // Extraction also now runs as ONE page.evaluate for all cards instead of a
+    // round-trip per card, which is dramatically faster on large review sets.
+    const extractAll = () => page.evaluate(() => {
+      // `.jftiEf` alone is fragile (it matched 3 nodes on a page with more
+      // reviews), but `[data-review-id]` alone is WRONG — it also matches
+      // buttons inside a card (`.al6Kxe`, `.WEBjve`, `.PP3Y3d`). Take the
+      // union, then keep only nodes that actually contain an author name.
+      const cards = [...new Set([
+        ...document.querySelectorAll('.jftiEf'),
+        ...[...document.querySelectorAll('[data-review-id]')].filter(el => el.querySelector('.d4r55, .GHT2ce')),
+      ])];
+      return cards.map(el => {
+        const t  = s => el.querySelector(s)?.textContent?.trim() || null;
+        const g  = (s, a) => el.querySelector(s)?.getAttribute(a) || null;
+        const ratingLabel = g('.kvMYJc', 'aria-label') || el.querySelector('[role="img"][aria-label*="star" i]')?.getAttribute('aria-label') || '';
+        const ratingNum   = parseInt((ratingLabel.match(/(\d)/) || [])[1] || '0', 10) || null;
 
-    while (reviews.length < maxReviews) {
-      for (const btn of await page.locator('button.w8nwRe, button:has-text("More")').all()) {
-        try { await btn.click({ force: true }); } catch (_) {}
-      }
-      await sleep(300, 500); // Wait for text expansion
+        const lgText = t('.RfnDt, .QMUNef');
+        const lgMatch = lgText?.match(/Local Guide.*Level (\d+)/i);
+        const reviewerLocalGuideLevel = lgMatch ? parseInt(lgMatch[1], 10) : null;
 
-      for (const card of await page.locator('.jftiEf, .MyEned').all()) {
-        try {
-          const r = await card.evaluate(el => {
-            const t  = s => el.querySelector(s)?.textContent?.trim() || null;
-            const g  = (s, a) => el.querySelector(s)?.getAttribute(a) || null;
-            const ratingLabel = g('.kvMYJc', 'aria-label') || '';
-            const ratingNum   = parseInt(ratingLabel.replace(/[^0-9]/g, '') || '0', 10) || null;
+        const reviewPhotos = [...el.querySelectorAll('.KtCyie img, .Tya61d img')]
+          .map(img => img.src || img.dataset?.src)
+          .filter(src => src?.startsWith('http'))
+          .map(src => src.replace(/=w\d+-h\d+[^&]*/, '=w800-h600'));
 
-            // Task 2: Local Guide level
-            const lgText = t('.RfnDt, .QMUNef');
-            const lgMatch = lgText?.match(/Local Guide.*Level (\d+)/i);
-            const reviewerLocalGuideLevel = lgMatch ? parseInt(lgMatch[1], 10) : null;
-
-            // Task 2: Review photos (URLs only, no download)
-            const reviewPhotos = [...el.querySelectorAll('.KtCyie img, .Tya61d img')]
-              .map(img => img.src || img.dataset?.src)
-              .filter(src => src?.startsWith('http'))
-              .map(src => src.replace(/=w\d+-h\d+[^&]*/, '=w800-h600'));
-
-            // Task 2: Owner reply with respondedAt
-            let ownerReplyText = null;
-            let ownerRespondedAtRaw = null;
-            const ownerReplyBlock = el.querySelector('.CDe7pd');
-            if (ownerReplyBlock) {
-              ownerReplyText = ownerReplyBlock.querySelector('.wiI7pd')?.textContent?.trim() || ownerReplyBlock.textContent?.trim();
-              if (ownerReplyText) {
-                ownerReplyText = ownerReplyText.replace(/^Response from the owner.*?ago\s*/i, '').trim();
-                ownerReplyText = ownerReplyText.replace(/^["'“”‘’`´«»\s]+|["'“”‘’`´«»\s]+$/g, '');
-                ownerReplyText = ownerReplyText.replace(/(?:\.\.\.\s*)?More$/i, '').trim(); // Remove trailing "More" if unexpanded
-              }
-              ownerRespondedAtRaw = ownerReplyBlock.querySelector('.n5VP6b')?.textContent?.trim() || t('.n5VP6b');
-            }
-
-            let text = t('.wiI7pd') || t('.MyEned span');
-            if (text) {
-              text = text.replace(/^["'“”‘’`´«»\s]+|["'“”‘’`´«»\s]+$/g, '');
-              text = text.replace(/(?:\.\.\.\s*)?More$/i, '').trim(); // Remove trailing "More" if unexpanded
-            }
-
-            return {
-              reviewId:    el.getAttribute('data-review-id') || null,
-              authorName:  t('.d4r55') || t('.GHT2ce'),
-              authorUrl:   g('.al6Kxe', 'href'),
-              authorAvatar:g('.NBa7we img', 'src'),
-              reviewerLocalGuideLevel,
-              rating:      ratingNum,
-              text:        text,
-              publishedAt: t('.rsqaWe') || t('.xRkPPb span'),
-              likes:       parseInt(t('.GBkF3d') || '0', 10) || 0,
-              reviewPhotos,
-              ownerReply:  ownerReplyText
-                ? { text: ownerReplyText, respondedAt: ownerRespondedAtRaw }
-                : null,
-            };
-          });
-          if (r.authorName && !reviews.some(x => x.reviewId && x.reviewId === r.reviewId)) {
-            reviews.push(r);
+        let ownerReplyText = null;
+        let ownerRespondedAtRaw = null;
+        const ownerReplyBlock = el.querySelector('.CDe7pd');
+        if (ownerReplyBlock) {
+          ownerReplyText = ownerReplyBlock.querySelector('.wiI7pd')?.textContent?.trim() || ownerReplyBlock.textContent?.trim();
+          if (ownerReplyText) {
+            ownerReplyText = ownerReplyText.replace(/^Response from the owner.*?ago\s*/i, '').trim();
+            ownerReplyText = ownerReplyText.replace(/^["'“”‘’`´«»\s]+|["'“”‘’`´«»\s]+$/g, '');
+            ownerReplyText = ownerReplyText.replace(/(?:\.\.\.\s*)?More$/i, '').trim();
           }
-        } catch (_) {}
+          ownerRespondedAtRaw = ownerReplyBlock.querySelector('.n5VP6b')?.textContent?.trim() || t('.n5VP6b');
+        }
+
+        let text = t('.wiI7pd') || t('.MyEned span');
+        if (text) {
+          text = text.replace(/^["'“”‘’`´«»\s]+|["'“”‘’`´«»\s]+$/g, '');
+          text = text.replace(/(?:\.\.\.\s*)?More$/i, '').trim();
+        }
+
+        return {
+          reviewId:    el.getAttribute('data-review-id') || null,
+          authorName:  t('.d4r55') || t('.GHT2ce'),
+          authorUrl:   g('.al6Kxe', 'href'),
+          authorAvatar:g('.NBa7we img', 'src'),
+          reviewerLocalGuideLevel,
+          rating:      ratingNum,
+          text,
+          publishedAt: t('.rsqaWe') || t('.xRkPPb span'),
+          likes:       parseInt(t('.GBkF3d') || '0', 10) || 0,
+          reviewPhotos,
+          ownerReply:  ownerReplyText ? { text: ownerReplyText, respondedAt: ownerRespondedAtRaw } : null,
+        };
+      });
+    });
+
+    // Scroll the real container. Returns true only if scrollTop actually moved,
+    // so a no-op scroll is detected instead of being mistaken for "no more data".
+    // Returns the bounding box of the real scroll container so the caller can
+    // drive it with genuine wheel events, which trigger Google's lazy loader
+    // more reliably than a programmatic scrollTop jump.
+    const REVIEW_PANE = '.m6QErb.DxyBCb.kA9KIf.dS8AEf';
+
+    const scrollReviews = () => page.evaluate((paneSel) => {
+      // Prefer the known reviews pane; otherwise walk up from a card to the
+      // nearest genuinely scrollable ancestor. NOTE: the old code scrolled
+      // `.m6QErb[aria-label*="review"]`, whose scrollHeight EQUALS its
+      // clientHeight — it is the expanded list, not the viewport, so scrollBy
+      // was a silent no-op that never threw and never loaded another page.
+      const scrollable = (el) =>
+        el && el.scrollHeight > el.clientHeight + 10 &&
+        /auto|scroll/.test(getComputedStyle(el).overflowY);
+
+      let pane = document.querySelector(paneSel);
+      if (!scrollable(pane)) {
+        pane = null;
+        const card = document.querySelector('.jftiEf');
+        for (let el = card?.parentElement; el && el !== document.body; el = el.parentElement) {
+          if (scrollable(el)) { pane = el; break; }
+        }
+      }
+      if (!pane) return false;
+
+      const before = pane.scrollTop;
+      pane.scrollTop = Math.min(pane.scrollTop + pane.clientHeight * 2, pane.scrollHeight);
+      pane.dispatchEvent(new Event('scroll', { bubbles: true }));
+      return pane.scrollTop !== before;
+    }, REVIEW_PANE);
+
+    // Keyed dedup. The old guard was
+    //   !reviews.some(x => x.reviewId && x.reviewId === r.reviewId)
+    // which never matches when reviewId is null, so every card without an id
+    // was re-appended on every pass — inflating the count with duplicates and
+    // hitting maxReviews without ever gathering maxReviews distinct reviews.
+    const seen = new Map();
+    const keyOf = r => r.reviewId || `${r.authorName}|${(r.text || '').slice(0, 60)}|${r.publishedAt || ''}`;
+
+    let noNew = 0;
+    while (seen.size < maxReviews) {
+      // Expand truncated review text. Scoped to the in-card expander only —
+      // a bare button:has-text("More") also matches "More reviews" and
+      // "More information about the review summary", and clicking those
+      // mid-loop navigates the pane out from under us.
+      for (const btn of await page.locator('button.w8nwRe, .jftiEf button[aria-label="See more"]').all()) {
+        try { await btn.click({ force: true, timeout: 1000 }); } catch (_) {}
+      }
+      await sleep(300, 500); // let expanded text paint
+
+      const before = seen.size;
+      for (const r of await extractAll()) {
+        if (!r.authorName) continue;
+        const k = keyOf(r);
+        if (!seen.has(k)) seen.set(k, r);
       }
 
-      if (reviews.length === lastCount) { if (++noNew >= 3) break; }
-      else noNew = 0;
-      lastCount = reviews.length;
+      if (seen.size >= maxReviews) break;
+      if (seen.size === before) { if (++noNew >= 3) break; } else noNew = 0;
 
-      try { await panel.evaluate(el => el.scrollBy(0, 1800)); }
-      catch (_) { await page.mouse.wheel(0, 1800); }
-      await sleep(1000, 1800);
+      // Drive the pane with a real wheel event as well as the programmatic
+      // scroll — Google's lazy loader responds more reliably to genuine input.
+      try {
+        const box = await page.locator(REVIEW_PANE).first().boundingBox();
+        if (box) {
+          await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+          await page.mouse.wheel(0, 1200);
+        }
+      } catch (_) {}
+      await scrollReviews();
+      await sleep(900, 1500); // let the next page of reviews load
     }
+
+    reviews.push(...[...seen.values()].slice(0, maxReviews));
   } catch (err) {
     logger.warn(`Review scraping partial: ${err.message}`);
   }
