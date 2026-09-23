@@ -21,6 +21,10 @@ export function AppProvider({ children }) {
   const [events, setEvents] = useState([]);
   const [logs, setLogs] = useState([]);
   const [chainsCache, setChainsCache] = useState([]);
+  // Latest heartbeat per worker process (keyed by instance). Kept out of
+  // `events` — heartbeats arrive every few seconds per worker and would push
+  // every meaningful event out of the 200-event window.
+  const [liveWorkers, setLiveWorkers] = useState({});
   const [toasts, setToasts] = useState([]);
   const toastIdRef = useRef(0);
 
@@ -64,6 +68,11 @@ export function AppProvider({ children }) {
 
   // Events
   const handleEvent = useCallback((event) => {
+    if (event.type === 'worker:heartbeat') {
+      const hb = event.data || {};
+      if (hb.instance) setLiveWorkers(prev => ({ ...prev, [hb.instance]: { ...hb, receivedAt: Date.now() } }));
+      return;
+    }
     setEvents(prev => {
       const next = [event, ...prev];
       return next.length > 200 ? next.slice(0, 200) : next;
@@ -168,6 +177,7 @@ export function AppProvider({ children }) {
     clearEvents,
     chainsCache,
     setChainsCache,
+    liveWorkers,
     toast,
     toasts,
     reconnect,

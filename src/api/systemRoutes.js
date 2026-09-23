@@ -30,6 +30,109 @@ const { runPhotoSync, getSyncStatus } = require('../services/photoSyncService');
 const LOG_DIR = cfg.log.dir;
 let lastCpuInfo = os.cpus();
 
+// ── Live pipeline monitor ────────────────────────────────────────────────────
+
+const WORKER_ROLES = ['crawl-worker', 'chain-worker', 'enrichment-worker'];
+const PROBLEM_EVENTS = new Set([
+  'crawl:space-failed', 'crawl:block', 'crawl:circuit_breaker', 'crawl:batch-requeued',
+  'enrichment:space-failed', 'enrichment:cooldown', 'job:failed', 'watchdog:auto-resume',
+]);
+
+// Mongo counts are cheap-ish but not free on a large collection; the monitor
+// polls every few seconds, so cache the slow-moving parts.
+const pipelineCache = { backlog: { at: 0, data: null }, coverage: { at: 0, data: null } };
+async function cached(key, ttlMs, fn) {
+  const c = pipelineCache[key];
+  if (c.data && Date.now() - c.at < ttlMs) return c.data;
+  c.data = await fn();
+  c.at = Date.now();
+  return c.data;
+}
+
+async function dataCoverage() {
+  const since24h = new Date(Date.now() - 86_400_000);
+  const has = (f) => ({ [f]: { $nin: [null, ''] } });
+  const [total, new24h, updated24h, withPhone, withWebsite, withEmail, withHours, withPhotos, closed] = await Promise.all([
+    Space.estimatedDocumentCount(),
+    Space.countDocuments({ createdAt: { $gte: since24h } }),
+    Space.countDocuments({ updatedAt: { $gte: since24h } }),
+    Space.countDocuments(has('contact.phone')),
+    Space.countDocuments(has('contact.website')),
+    Space.countDocuments(has('contact.email')),
+    Space.countDocuments({ 'openingHours.0': { $exists: true } }),
+    Space.countDocuments({ totalPhotos: { $gt: 0 } }),
+    Space.countDocuments({ permanentlyClosed: true }),
+  ]);
+  return { total, new24h, updated24h, withPhone, withWebsite, withEmail, withHours, withPhotos, closed };
+}
+
+/**
+ * @swagger
+ * /api/system/pipeline:
+ *   get:
+ *     summary: Live pipeline snapshot — workers, lanes, throughput, queues, backlog, recent problems
+ *     description: >
+ *       One call that answers "what is the application doing right now".
+ *       Workers report via heartbeats (services/telemetry.js); a worker whose
+ *       heartbeat expired is listed under `missingRoles`.
+ *     tags: [System]
+ *     responses:
+ *       200:
+ *         description: Pipeline snapshot
+ */
+router.get('/pipeline', async (req, res) => {
+  try {
+    const { listWorkers } = require('../services/telemetry');
+    const { getQueueStats, getChainQueueStats, getEnrichmentQueueStats, getPausedStates } = require('../queue/queues');
+    const { getEnrichmentStats } = require('../services/enrichmentService');
+    const { sourceBacklog } = require('../services/enrichmentScheduler');
+    const CrawlJob = require('../db/crawlJobModel');
+
+    const settle = (p) => p.then(v => v, e => ({ error: e.message }));
+    const [workers, crawlQ, chainQ, enrichQ, paused, enrichment, backlog, coverage, state, runningJobs] = await Promise.all([
+      settle(listWorkers()),
+      settle(getQueueStats()),
+      settle(getChainQueueStats()),
+      settle(getEnrichmentQueueStats()),
+      settle(getPausedStates()),
+      settle(getEnrichmentStats()),
+      settle(cached('backlog', 30_000, sourceBacklog)),
+      settle(cached('coverage', 300_000, dataCoverage)),
+      settle(SystemState.getGlobalState()),
+      settle(CrawlJob.find({ status: 'running' })
+        .select('jobId type input.cityName input.regionName input.spaceName input.chainName progress startedAt lastHeartbeatAt')
+        .sort({ startedAt: -1 }).limit(20).lean()),
+    ]);
+
+    const liveWorkers = Array.isArray(workers) ? workers : [];
+    const aliveRoles = new Set(liveWorkers.map(w => w.role));
+    const sum = (fn) => +liveWorkers.reduce((a, w) => a + (fn(w) || 0), 0).toFixed(2);
+
+    const problems = bus.getHistory(400)
+      .filter(e => PROBLEM_EVENTS.has(e.type))
+      .slice(-40)
+      .reverse();
+
+    ok(res, {
+      at: new Date().toISOString(),
+      workers: liveWorkers,
+      missingRoles: WORKER_ROLES.filter(r => !aliveRoles.has(r)),
+      throughput: {
+        crawlPerMin:      sum(w => w.scrape?.perMin),
+        searchPerMin:     sum(w => w.search?.perMin),
+        enrichPerMin:     sum(w => Object.values(w.sources || {}).reduce((a, m) => a + (m.perMin || 0), 0)),
+      },
+      queues: { crawl: crawlQ, chain: chainQ, enrichment: enrichQ, paused },
+      enrichment: { ...enrichment, sources: backlog },
+      coverage,
+      system: { globalPause: !!state?.globalPause, crawlPace: state?.crawlPace || 'normal', pauseReason: state?.pauseReason || null },
+      runningJobs: Array.isArray(runningJobs) ? runningJobs : [],
+      problems,
+      sseClients: bus.sseClientCount,
+    });
+  } catch (e) { err(res, e.message); }
+});
+
 /**
  * @swagger
  * /api/system/verify-pin:

@@ -38,10 +38,10 @@ function buildQuery(brandName) {
   way["leisure"="fitness_centre"]["name"~"${escaped}",i];
   node["leisure"="sports_centre"]["brand"~"${escaped}",i];
   node["leisure"="sports_centre"]["name"~"${escaped}",i];
-  node["amenity"="space"]["brand"~"${escaped}",i];
-  node["amenity"="space"]["name"~"${escaped}",i];
-  way["amenity"="space"]["brand"~"${escaped}",i];
-  way["amenity"="space"]["name"~"${escaped}",i];
+  node["amenity"="gym"]["brand"~"${escaped}",i];
+  node["amenity"="gym"]["name"~"${escaped}",i];
+  way["amenity"="gym"]["brand"~"${escaped}",i];
+  way["amenity"="gym"]["name"~"${escaped}",i];
 );
 out center body;
   `.trim();

@@ -14,7 +14,7 @@ const PhotoSchema = new mongoose.Schema({
   // Source classification — enrichment adds more granular types
   sourceType: {
     type: String,
-    enum: ['user', 'owner', 'cover', 'video_thumb', 'streetview', 'review_photo'],
+    enum: ['user', 'owner', 'cover', 'video_thumb', 'streetview', 'review_photo', 'website'],
     default: 'user',
     index: true,
   },

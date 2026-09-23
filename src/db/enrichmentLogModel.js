@@ -9,6 +9,8 @@ const EnrichmentLogSchema = new mongoose.Schema(
       required: true 
     },
     spaceName: String, // Denormalized for quick list view
+    // Which enrichment source ran: 'google_maps' | 'website' (absent on legacy rows)
+    source: { type: String, default: 'google_maps' },
     status: { 
       type: String, 
       enum: ['success', 'failed', 'timeout', 'skipped'], 
@@ -31,5 +33,6 @@ const EnrichmentLogSchema = new mongoose.Schema(
 EnrichmentLogSchema.index({ spaceId: 1 });
 EnrichmentLogSchema.index({ startedAt: -1 });
 EnrichmentLogSchema.index({ status: 1 });
+EnrichmentLogSchema.index({ source: 1, startedAt: -1 });
 
 module.exports = mongoose.model('EnrichmentLog', EnrichmentLogSchema);

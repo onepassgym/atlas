@@ -44,10 +44,27 @@ function mapCategory(raw = '', name = '') {
   return 'fitness_venue';
 }
 
+// ── Relevance gate for discovery crawls ──────────────────────────────────────
+// Category-search feeds leak neighbours: "gym in Pune" also returns the hotel,
+// café and bank next door. Keep anything that looks like a fitness/wellness or
+// coworking venue; drop only clear non-venues. Unknown categories are KEPT —
+// the gate exists to remove obvious junk, not to second-guess Google.
+const RELEVANT_RX = /gym|fitness|yoga|pilates|crossfit|martial|karate|taekwondo|judo|jiu|boxing|kickbox|muay|mma|wrestl|dance|zumba|aerobic|swim|pool|sport|athlet|trainer|training|spin|cycl|climb|boulder|calisthenic|strength|wellness|health club|cowork|work ?space/i;
+const IRRELEVANT_RX = /\b(restaurant|cafe|café|coffee|bakery|bar|pub|hotel|lodge|resort|hostel|guest ?house|hospital|clinic|pharmacy|chemist|bank|atm|parking|car (dealer|rental|repair|wash)|auto|petrol|gas station|supermarket|grocery|department store|shopping mall|clothing store|electronics store|real estate|apartment|housing society|temple|church|mosque|gurudwara|police|government office|lawyer|travel agency|bus stop|train station|pet)\b/i;
+
+function assessRelevance(raw = {}) {
+  if (process.env.SCRAPER_RELEVANCE_FILTER === 'false') return { relevant: true };
+  const cat = raw.category || '';
+  const name = raw.name || '';
+  if (RELEVANT_RX.test(cat) || RELEVANT_RX.test(name)) return { relevant: true };
+  if (cat && IRRELEVANT_RX.test(cat)) return { relevant: false, reason: `Not a fitness venue (Google category: "${cat}")` };
+  return { relevant: true };
+}
+
 function calcCompleteness(d) {
   const checks = [d.name, d.lat, d.lng, d.address, d.contact?.phone,
                   d.contact?.website, d.rating, d.totalReviews,
-                  d.openingHours?.length, d.photos?.length, d.description, d.category];
+                  d.openingHours?.length, d.photoUrls?.length || d.photos?.length, d.description, d.category];
   return Math.round(checks.filter(Boolean).length / checks.length * 100);
 }
 
@@ -141,6 +158,11 @@ async function processSpace(raw, areaName, jobId, downloadMedia = true) {
     const ACTION_MAP = { inserted: 'created', updated: 'updated', skipped: 'skipped', error: 'error' };
     result.action = ACTION_MAP[upsertResult.action] || upsertResult.action;
     result.spaceId  = upsertResult.spaceId;
+    result.completeness = doc.crawlMeta.dataCompleteness;
+    result.newReviews = upsertResult.newReviews || 0;
+    result.newPhotos  = upsertResult.newPhotos || 0;
+    result.changedFields = upsertResult.changedFields || [];
+    if (upsertResult.skipReason) result.skipReason = upsertResult.skipReason;
     if (upsertResult.error) result.error = upsertResult.error;
 
 
@@ -153,4 +175,4 @@ async function processSpace(raw, areaName, jobId, downloadMedia = true) {
   return result;
 }
 
-module.exports = { processSpace };
+module.exports = { processSpace, assessRelevance, calcCompleteness };

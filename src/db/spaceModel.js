@@ -37,6 +37,22 @@ const ContactSchema = new mongoose.Schema({
   menuUrl:    String,      // class schedule PDF or menu link
 }, { _id: false });
 
+// Per-source enrichment schedule. The continuous enrichment worker claims a
+// record for a source when `nextAt` is missing or due, pushes `nextAt` out by
+// the source's refresh interval on success, or by an exponential backoff on
+// failure — so every record cycles through every source forever, and a broken
+// record can never monopolise the loop. See services/enrichmentScheduler.js.
+const EnrichSourceStateSchema = new mongoose.Schema({
+  status:            { type: String, enum: ['running', 'success', 'failed', 'skipped'] },
+  lastAttempt:       Date,
+  lastSuccess:       Date,
+  nextAt:            Date,
+  consecutiveErrors: { type: Number, default: 0 },
+  error:             String,
+  lastDurationMs:    Number,
+  runs:              { type: Number, default: 0 },
+}, { _id: false });
+
 // (Legacy Schema omitted array embedded objects like reviews/photos to save space - they are now separate models)
 
 // ── Main Schema ───────────────────────────────────────────────────────────────
@@ -149,6 +165,8 @@ const SpaceSchema = new mongoose.Schema({
       _id:      false,
     }],
     lastHoursVerifiedAt: Date,
+    // schema.org openingHours strings from the venue's own site (raw, unparsed)
+    websiteHours: [String],
   },
 
   // Unmapped Google attribute sections — key = section label, value = array of items
@@ -164,6 +182,10 @@ const SpaceSchema = new mongoose.Schema({
     status:           { type: String, enum: ['success', 'failed', 'never'], default: 'never' },
     consecutiveErrors: { type: Number, default: 0 },
     error:             String,
+    sources: {
+      google_maps: EnrichSourceStateSchema,
+      website:     EnrichSourceStateSchema,
+    },
   },
 
   // Details

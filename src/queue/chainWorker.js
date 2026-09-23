@@ -151,7 +151,7 @@ async function enrichViaGoogleMaps(page, location, chainId, chainSlug, chainName
         lng: location.lng,
         phone: location.phone,
         website: location.website,
-        category: 'space',
+        category: 'gym',
         openingHours: [],
         reviews: [],
         photoUrls: [],
@@ -183,7 +183,7 @@ async function enrichViaGoogleMaps(page, location, chainId, chainSlug, chainName
       lng: location.lng,
       phone: location.phone,
       website: location.website,
-      category: 'space',
+      category: 'gym',
       openingHours: [],
       reviews: [],
       photoUrls: [],
@@ -449,6 +449,7 @@ async function updateChainStats(chainId, chainSlug) {
 // ── Worker startup ────────────────────────────────────────────────────────────
 
 async function start() {
+  bus.enableBridge({ role: 'chain-worker' });
   await connectDB();
 
 // ── Crash guards ─────────────────────────────────────────────────────────────
@@ -486,8 +487,20 @@ process.on('uncaughtException', (err) => {
     lockDuration: 7_200_000,   // 2 hours — chain jobs can be long
   });
 
-  worker.on('completed', (job) => logger.info(`✅ Chain job completed: ${job.id}`));
-  worker.on('failed',    (job, err) => logger.error(`❌ Chain job failed: ${job?.id} — ${err.message}`));
+  // Live telemetry: which chain jobs this process is running right now.
+  const { ActivityBoard, startHeartbeat } = require('../services/telemetry');
+  const board = new ActivityBoard();
+  worker.on('active', (job) => board.set(String(job.id), {
+    kind: 'chain', phase: 'crawling', jobId: job.data?.jobId, target: job.data?.input?.chainName || job.data?.input?.chainSlug || job.name,
+  }));
+  const heartbeat = startHeartbeat('chain-worker', () => ({
+    config: { concurrency: CHAIN_CONCURRENCY, enrichConcurrency: ENRICH_CONCURRENCY, freshnessDays: FRESHNESS_DAYS },
+    state: isShuttingDown ? 'stopping' : (board.slots.size ? 'busy' : 'idle'),
+    activity: board.list(),
+  }));
+
+  worker.on('completed', (job) => { board.clear(String(job.id)); logger.info(`✅ Chain job completed: ${job.id}`); });
+  worker.on('failed',    (job, err) => { if (job) board.clear(String(job.id)); logger.error(`❌ Chain job failed: ${job?.id} — ${err.message}`); });
   worker.on('error',     (err) => logger.error(`Chain worker error: ${err.message}`));
 
   logger.info(`\n🏋️  Atlas Chain Worker started  [concurrency: ${CHAIN_CONCURRENCY}, enrich: ${ENRICH_CONCURRENCY}, freshness: ${FRESHNESS_DAYS}d]`);
@@ -499,6 +512,7 @@ process.on('uncaughtException', (err) => {
     logger.info(`\n⏳ Chain Worker received ${signal} — finishing current location(s) and shutting down...`);
 
     try { await worker.close(); } catch (_) {}
+    try { await heartbeat.stop(); } catch (_) {}
 
     logger.info('👋 Chain Worker shut down gracefully.');
     process.exit(0);

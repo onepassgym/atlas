@@ -10,21 +10,30 @@ const { withTimeout } = require('../utils/withTimeout');
 chromium.use(stealthPlugin());
 
 // Phase 6b: Trimmed from 16 →10 categories — removed low-yield entries
-// that heavily overlap with 'space' and 'fitness center':
-// dropped: functional training space, strength training space, health club,
+// that heavily overlap with 'gym' and 'fitness center':
+// dropped: functional training gym, strength training gym, health club,
 //          sports club, zumba class, cycling studio
-const FITNESS_CATEGORIES = [
-  'space',
+//
+// These are literal Google Maps search phrases, NOT domain names. The
+// gym→space rename (b05e7be) turned them into "space in <city>", "boxing
+// space", … which Google answers with coworking offices, parking lots and
+// event venues — the main source of junk records. Keep real-world terms here.
+// Override without a deploy via SCRAPER_CATEGORIES="gym,yoga studio,…".
+const DEFAULT_FITNESS_CATEGORIES = [
+  'gym',
   'fitness center',
   'yoga studio',
   'crossfit',
   'pilates studio',
-  'martial arts space',
-  'boxing space',
+  'martial arts gym',
+  'boxing gym',
   'dance fitness studio',
   'personal training studio',
   'swimming club',
 ];
+const FITNESS_CATEGORIES = process.env.SCRAPER_CATEGORIES
+  ? process.env.SCRAPER_CATEGORIES.split(',').map(s => s.trim()).filter(Boolean)
+  : DEFAULT_FITNESS_CATEGORIES;
 
 // ── User-Agent rotation pool ─────────────────────────────────────────────────
 // Last updated: 2026-09 — Chrome 136, Firefox 138, Edge 136, Safari 18.x
@@ -165,6 +174,19 @@ async function waitForPlacePanel(page, timeout = 15000) {
   }
 }
 
+/**
+ * After the h1 exists, wait for the info rows (rating / address / phone /
+ * website) to paint. Replaces a blind 400–900ms sleep: rich panels settle in
+ * ~100ms, and sparse panels (no rating, no phone) cost at most the timeout.
+ */
+async function settlePlacePanel(page) {
+  await page.waitForSelector(
+    '.F7nice, button[data-item-id="address"], button[data-item-id^="phone"], a[data-item-id="authority"]',
+    { timeout: 2500, state: 'attached' }
+  ).catch(() => {});
+  await sleep(150, 350);
+}
+
 // ── Browser pool ──────────────────────────────────────────────────────────────
 
 class BrowserManager {
@@ -231,6 +253,10 @@ class BrowserManager {
       const url = route.request().url();
       if (/google-analytics|doubleclick|googlesyndication|facebook\.net|hotjar|clarity\.ms/.test(url))
         return route.abort();
+      // Maps telemetry beacons and vector map tiles — pure weight, no place
+      // data. Tiles alone are dozens of requests per navigation.
+      if (/\/gen_204|\/maps\/vt[/?]|play\.google\.com\/log|\/log\?format=|\/csi\?/.test(url))
+        return route.abort();
       return route.continue();
     });
 
@@ -285,15 +311,52 @@ function isHardBlock(reason) {
 
 const MAX_SEARCH_RETRIES = 2; // max retry attempts after a Google block per category search
 
-async function searchSpacesInCity(page, cityName, category) {
-  const query = category
-    ? `${category} in ${cityName}`
-    : cityName; // direct space name search
+// Resolves once Google has rendered either a results feed or (for exact-name
+// queries) a single place panel. Replaces the old fixed 2–3s post-navigation
+// sleep: fast pages continue immediately, slow pages are no longer misread.
+const SEARCH_READY_SELECTOR = 'div[role="feed"], h1.DUwDvf, h1.fontHeadlineLarge';
 
-  const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
+async function dismissConsent(page) {
+  for (const sel of ['button:has-text("Accept all")', 'button:has-text("Agree")', 'button[aria-label="Accept all"]']) {
+    try {
+      const btn = page.locator(sel).first();
+      if (await btn.isVisible()) {
+        await btn.click();
+        await sleep(500, 900);
+        return;
+      }
+    } catch (_) {}
+  }
+}
 
+/**
+ * Snapshot the results feed in ONE page.evaluate.
+ *
+ * The old loop called `locator.all()` and then `getAttribute()` per anchor —
+ * one CDP round-trip per link, every scroll step. On a 120-result feed that
+ * was thousands of round-trips per category and the dominant cost of discovery.
+ */
+function readFeed(page) {
+  return page.evaluate(() => {
+    const feed = document.querySelector('div[role="feed"]');
+    const hrefs = [...document.querySelectorAll('a[href*="/maps/place/"]')]
+      .map(a => a.getAttribute('href'))
+      .filter(Boolean);
+    // The end-of-list marker is rendered as one of the last feed children.
+    const tail = feed ? [...feed.children].slice(-3).map(c => c.textContent || '').join(' ') : '';
+    const ended = /reached the end of the list/i.test(tail) || !!document.querySelector('.HlvSq');
+    return { hrefs, ended, count: feed ? feed.children.length : 0, hasFeed: !!feed };
+  });
+}
+
+/**
+ * Navigate to a Maps search URL and scroll the feed until it is exhausted.
+ * Shared by city search and grid search (they differed only in the URL).
+ */
+async function collectFeedUrls(page, url, label) {
   for (let attempt = 1; attempt <= MAX_SEARCH_RETRIES + 1; attempt++) {
-    logger.info(`  🔍 Searching: "${query}"${attempt > 1 ? ` (retry ${attempt - 1})` : ''}`);
+    logger.info(`  🔍 Searching: ${label}${attempt > 1 ? ` (retry ${attempt - 1})` : ''}`);
+    const t0 = Date.now();
 
     try {
       try {
@@ -302,96 +365,75 @@ async function searchSpacesInCity(page, cityName, category) {
         await page.goto(url, { waitUntil: 'commit', timeout: cfg.scraper.timeout });
       }
     } catch (navErr) {
-      logger.warn(`  ⚠️ Navigation failed for "${query}" (attempt ${attempt}): ${navErr.message}`);
+      logger.warn(`  ⚠️ Navigation failed for ${label} (attempt ${attempt}): ${navErr.message}`);
       if (attempt > MAX_SEARCH_RETRIES) return [];
-      await sleep(10000, 20000);
+      await sleep(8000, 15000);
       continue;
     }
 
-    // Optimized delay — enough for Google to render results
-    await sleep(2000, 3000);
+    await page.waitForSelector(SEARCH_READY_SELECTOR, { timeout: 12000, state: 'attached' }).catch(() => {});
 
-    // Check for Google block/CAPTCHA immediately
-    const blockReason = await isBlocked(page);
+    let blockReason = await isBlocked(page);
+    if (blockReason === 'empty') {
+      // Usually a slow hydration, not a block — one cheap second look.
+      await sleep(2000, 3500);
+      blockReason = await isBlocked(page);
+    }
     if (blockReason) {
       if (attempt > MAX_SEARCH_RETRIES) {
-        logger.warn(`  🚫 Google blocked "${query}" after ${attempt} attempt(s) — giving up`);
+        logger.warn(`  🚫 Google blocked ${label} after ${attempt} attempt(s) — giving up`);
         return [];
       }
-      // Exponential-ish backoff: 15–30s on first retry, 30–60s on second
-      const backoffMin = 15000 * attempt;
-      const backoffMax = 30000 * attempt;
-      logger.warn(`  🚫 Google blocked "${query}" (reason: ${blockReason}, attempt ${attempt}/${MAX_SEARCH_RETRIES + 1}) — backing off ${(backoffMin/1000).toFixed(0)}–${(backoffMax/1000).toFixed(0)}s`);
-      await sleep(backoffMin, backoffMax);
+      // Only a real CAPTCHA/consent wall earns the long backoff.
+      const [bMin, bMax] = isHardBlock(blockReason) ? [15000 * attempt, 30000 * attempt] : [4000, 8000];
+      logger.warn(`  🚫 Search ${label} not usable (reason: ${blockReason}, attempt ${attempt}/${MAX_SEARCH_RETRIES + 1}) — backing off ${(bMin / 1000).toFixed(0)}–${(bMax / 1000).toFixed(0)}s`);
+      await sleep(bMin, bMax);
       continue;
     }
 
-    // Dismiss cookie banner if present
-    for (const sel of ['button:has-text("Accept all")', 'button:has-text("Agree")', 'button[aria-label="Accept all"]']) {
-      try {
-        const btn = page.locator(sel).first();
-        if (await btn.isVisible({ timeout: 1500 })) {
-          await btn.click();
-          await sleep(600, 1000);
-          break;
-        }
-      } catch (_) {}
-    }
+    await dismissConsent(page);
 
-    const spaceUrls  = new Set();
-    let   noNewFor = 0;
-    let   lastSize = 0;
+    const spaceUrls = new Set();
+    let noNewFor = 0;
+    let rounds = 0;
 
-    while (true) {
-      // Grab all place links
-      const links = await page.locator('a[href*="/maps/place/"]').all();
-      for (const a of links) {
-        try {
-          const href = await a.getAttribute('href');
-          if (href) spaceUrls.add(normalizeMapUrl(href));
-        } catch (_) {}
-      }
+    while (rounds++ < 80) { // hard cap: Maps serves ~120 results per query
+      const snap = await readFeed(page).catch(() => ({ hrefs: [], ended: true, count: 0, hasFeed: false }));
+      const before = spaceUrls.size;
+      for (const h of snap.hrefs) spaceUrls.add(normalizeMapUrl(h));
 
-      // End of list?
-      const ended = await page.locator('text="You\'ve reached the end of the list."').isVisible({ timeout: 500 }).catch(() => false);
-      if (ended) break;
+      if (snap.ended || !snap.hasFeed) break;
+      if (spaceUrls.size === before) { if (++noNewFor >= 3) break; } else noNewFor = 0;
 
-      // Scroll the results panel
-      const panel = page.locator('div[role="feed"]').first();
-      try {
-        await panel.evaluate(el => el.scrollBy(0, 1200));
-      } catch (_) {
-        await page.mouse.wheel(0, 1200);
-      }
-      // Optimized scroll delay
-      await sleep(1200, 2000);
+      // Jump the feed to the bottom, then wait for Google to append the next
+      // page of results instead of sleeping a fixed 1.2–2s every round.
+      await page.evaluate(() => {
+        const feed = document.querySelector('div[role="feed"]');
+        if (feed) feed.scrollTop = feed.scrollHeight;
+      }).catch(() => page.mouse.wheel(0, 2400).catch(() => {}));
 
-      if (spaceUrls.size === lastSize) { if (++noNewFor >= 5) break; }
-      else noNewFor = 0;
-      lastSize = spaceUrls.size;
+      await page.waitForFunction(
+        (n) => (document.querySelector('div[role="feed"]')?.children.length || 0) > n,
+        snap.count,
+        { timeout: 3000, polling: 150 }
+      ).catch(() => {});
+      await sleep(150, 450); // small human jitter
     }
 
     // ── Direct place page detection ──────────────────────────────────────────
     // Google sometimes redirects exact-name queries directly to the space's
-    // own detail page instead of showing a list/feed. In that case the scroll
-    // loop above finds zero feed links and spaceUrls stays empty.
-    // Detect this by checking if we are now on a /maps/place/ URL and, if so,
-    // wait for the page to fully resolve (Google Maps appends coordinates and
-    // CID to the URL after the JS loads), then capture the final settled URL
-    // so that scrapeSpaceDetail can navigate to a proper place detail page.
+    // own detail page instead of showing a list/feed. In that case the feed
+    // loop above finds zero links and spaceUrls stays empty. Capture the
+    // settled place URL (Maps rewrites it after hydration to include the
+    // `/@lat,lng` anchor and `/data=` segment) so scrapeSpaceDetail can use it.
     if (spaceUrls.size === 0) {
       try {
-        const currentUrl = page.url();
-        if (/\/maps\/place\//i.test(currentUrl)) {
-          // Wait for the URL to settle — Google Maps rewrites it after JS hydration
-          // (e.g. /maps/place/Name → /maps/place/Name/@lat,lng,17z/data=...)
-          await sleep(3000, 4000);
+        if (/\/maps\/place\//i.test(page.url())) {
+          await page.waitForURL(/\/maps\/place\/.+\/(@-?\d+\.\d+|data=)/i, { timeout: 5000 }).catch(() => {});
           const settledUrl = page.url();
-          // Only use it if the URL is now a fully-resolved place page with coords or CID
           if (/\/maps\/place\/.+\/@-?\d+\.\d+/i.test(settledUrl) ||
               /\/maps\/place\/.+\/data=/i.test(settledUrl)) {
             const canonicalUrl = settledUrl.split('?')[0].split('/@')[0];
-            // Re-add the coordinates segment so scrapeSpaceDetail lands on the right place
             const atPart = settledUrl.match(/\/@([^/]+)/)?.[0] || '';
             const dataPart = settledUrl.match(/\/data=[^?]*/)?.[0] || '';
             const fullUrl = canonicalUrl + atPart + dataPart;
@@ -404,93 +446,24 @@ async function searchSpacesInCity(page, cityName, category) {
       } catch (_) {}
     }
 
-    logger.info(`  ✅ Found ${spaceUrls.size} URLs for "${query}"`);
+    logger.info(`  ✅ Found ${spaceUrls.size} URLs for ${label} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     return [...spaceUrls];
   }
 
-  // Safety net — should not reach here
   return [];
+}
+
+async function searchSpacesInCity(page, cityName, category) {
+  const query = category
+    ? `${category} in ${cityName}`
+    : cityName; // direct space name search
+  const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
+  return collectFeedUrls(page, url, `"${query}"`);
 }
 
 async function searchSpacesInGrid(page, lat, lng, zoom, category) {
   const url = `https://www.google.com/maps/search/${encodeURIComponent(category)}/@${lat},${lng},${zoom}z/data=!3m1!4b1`;
-
-  for (let attempt = 1; attempt <= MAX_SEARCH_RETRIES + 1; attempt++) {
-    logger.info(`  🔍 Grid Searching: "${category}" at [${lat}, ${lng}] (zoom: ${zoom})${attempt > 1 ? ` (retry ${attempt - 1})` : ''}`);
-
-    try {
-      try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: cfg.scraper.timeout });
-      } catch (_) {
-        await page.goto(url, { waitUntil: 'commit', timeout: cfg.scraper.timeout });
-      }
-    } catch (navErr) {
-      logger.warn(`  ⚠️ Navigation failed for grid [${lat}, ${lng}] (attempt ${attempt}): ${navErr.message}`);
-      if (attempt > MAX_SEARCH_RETRIES) return [];
-      await sleep(10000, 20000);
-      continue;
-    }
-
-    await sleep(2000, 3000);
-
-    const blockReason = await isBlocked(page);
-    if (blockReason) {
-      if (attempt > MAX_SEARCH_RETRIES) {
-        logger.warn(`  🚫 Google blocked grid [${lat}, ${lng}] after ${attempt} attempt(s) — giving up`);
-        return [];
-      }
-      const backoffMin = 15000 * attempt;
-      const backoffMax = 30000 * attempt;
-      logger.warn(`  🚫 Google blocked grid [${lat}, ${lng}] (reason: ${blockReason}, attempt ${attempt}/${MAX_SEARCH_RETRIES + 1}) — backing off`);
-      await sleep(backoffMin, backoffMax);
-      continue;
-    }
-
-    for (const sel of ['button:has-text("Accept all")', 'button:has-text("Agree")', 'button[aria-label="Accept all"]']) {
-      try {
-        const btn = page.locator(sel).first();
-        if (await btn.isVisible({ timeout: 1500 })) {
-          await btn.click();
-          await sleep(600, 1000);
-          break;
-        }
-      } catch (_) {}
-    }
-
-    const spaceUrls  = new Set();
-    let   noNewFor = 0;
-    let   lastSize = 0;
-
-    while (true) {
-      const links = await page.locator('a[href*="/maps/place/"]').all();
-      for (const a of links) {
-        try {
-          const href = await a.getAttribute('href');
-          if (href) spaceUrls.add(normalizeMapUrl(href));
-        } catch (_) {}
-      }
-
-      const ended = await page.locator('text="You\'ve reached the end of the list."').isVisible({ timeout: 500 }).catch(() => false);
-      if (ended) break;
-
-      const panel = page.locator('div[role="feed"]').first();
-      try {
-        await panel.evaluate(el => el.scrollBy(0, 1200));
-      } catch (_) {
-        await page.mouse.wheel(0, 1200);
-      }
-      await sleep(1200, 2000);
-
-      if (spaceUrls.size === lastSize) { if (++noNewFor >= 5) break; }
-      else noNewFor = 0;
-      lastSize = spaceUrls.size;
-    }
-
-    logger.info(`  ✅ Found ${spaceUrls.size} URLs for grid [${lat}, ${lng}]`);
-    return [...spaceUrls];
-  }
-
-  return [];
+  return collectFeedUrls(page, url, `"${category}" at [${lat}, ${lng}] (zoom: ${zoom})`);
 }
 
 // ── Detail: scrape full space data from a place page ───────────────────────────
@@ -516,7 +489,7 @@ async function scrapeSpaceDetail(page, url, mode = 'standard', ctx = null) {
     // old fixed 1.8-2.8s wait and slow ones are no longer misread as blocked.
     const panelReady = await waitForPlacePanel(page);
     if (!panelReady) await sleep(1500, 2500); // give the DOM one last chance
-    else await sleep(400, 900);               // let sibling fields paint
+    else await settlePlacePanel(page);        // let sibling fields paint
   } catch (err) {
     throw new Error(`Navigation failed: ${err.message}`);
   }
@@ -689,7 +662,7 @@ async function scrapeSpaceDetail(page, url, mode = 'standard', ctx = null) {
     const photoUrls = [...new Set(
       [...document.querySelectorAll(photoSelectors)]
         .map(img => img.src || img.dataset?.src)
-        .filter(src => src?.startsWith('http') && src.includes('googleusercontent') && !src.includes('StreetView'))
+        .filter(src => src?.startsWith('http') && src.includes('googleusercontent') && !src.includes('StreetView') && !/googleusercontent\.com\/a-?\//.test(src))
         .map(src => src.replace(/=w\d+-h\d+[^&]*/, '=w1600-h1200'))
     )];
 
@@ -743,7 +716,12 @@ async function scrapeSpaceDetail(page, url, mode = 'standard', ctx = null) {
   // ── Website Photos (Supplementary) ───────────────────────────────────────
   // Only attempt if we have a browser context (ctx) — scrapeWebsitePhotos
   // needs its own page to avoid navigating this Google Maps page away.
-  if (core.website && mode !== 'fast' && ctx) {
+  //
+  // Off by default: visiting an arbitrary third-party site (up to ~16s, often
+  // slow or dead) inside the Google crawl loop stalled every pool page. The
+  // enrichment worker's `website` source now covers this out-of-band.
+  // SCRAPER_WEBSITE_IN_CRAWL=true restores the old inline behaviour.
+  if (core.website && mode !== 'fast' && ctx && process.env.SCRAPER_WEBSITE_IN_CRAWL === 'true') {
     try {
       const webPhotos = await scrapeWebsitePhotos(ctx, core.website);
       if (webPhotos?.length > 0) {
@@ -761,7 +739,11 @@ async function scrapeSpaceDetail(page, url, mode = 'standard', ctx = null) {
 // Navigates directly to a known space URL and extracts all enrichment data points.
 // Called by processEnrichmentJob(). Returns enrichment-specific fields only.
 
-async function scrapeEnrichmentDetail(page, url) {
+// opts.maxReviews / opts.maxPhotos default to the deep ENRICHMENT_MAX_* caps;
+// the continuous enrichment loop passes smaller caps so it can cycle records.
+async function scrapeEnrichmentDetail(page, url, opts = {}) {
+  const maxReviews = opts.maxReviews ?? cfg.scraper.enrichMaxReviews;
+  const maxPhotos  = opts.maxPhotos  ?? cfg.scraper.enrichMaxPhotos;
   try {
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: cfg.scraper.timeout });
@@ -770,7 +752,7 @@ async function scrapeEnrichmentDetail(page, url) {
     }
     const panelReady = await waitForPlacePanel(page);
     if (!panelReady) await sleep(1500, 2500);
-    else await sleep(400, 900);
+    else await settlePlacePanel(page);
   } catch (err) {
     throw new Error(`Navigation failed: ${err.message}`);
   }
@@ -788,6 +770,20 @@ async function scrapeEnrichmentDetail(page, url) {
   const core = await page.evaluate(() => {
     const t  = s => document.querySelector(s)?.textContent?.trim() || null;
     const a  = (s, attr) => document.querySelector(s)?.getAttribute(attr) || null;
+
+    // Freshness signals — rating/count drift and closures are the most
+    // user-visible staleness, so re-read them on every enrichment pass.
+    const name = t('h1.DUwDvf') || t('h1.fontHeadlineLarge') || t('h1');
+    const ratingRaw = t('.F7nice span[aria-hidden="true"]') || t('.MW4etd');
+    const rating = ratingRaw ? parseFloat(ratingRaw) : null;
+    const totalReviews = (() => {
+      const lbl = document.querySelector('.F7nice [aria-label*="review" i]')?.getAttribute('aria-label')?.match(/([\d,]+)\s*review/i);
+      if (lbl) return parseInt(lbl[1].replace(/,/g, ''), 10);
+      const paren = document.querySelector('.F7nice')?.textContent?.match(/\(([\d,]+)\)/);
+      return paren ? parseInt(paren[1].replace(/,/g, ''), 10) : null;
+    })();
+    const permanentlyClosed = !!document.querySelector('.eXlrNe, [aria-label*="Permanently closed" i]');
+    const temporarilyClosed = /temporarily closed/i.test(t('.fCEvvc, .o0Svhf') || '');
 
     // Task 5: Contact enrichment
     const phone  = t('button[data-item-id^="phone:tel"] .Io6YTe') || t('[data-tooltip="Copy phone number"] .Io6YTe');
@@ -867,7 +863,7 @@ async function scrapeEnrichmentDetail(page, url) {
     const heroPhotoUrls = [...new Set(
       [...document.querySelectorAll('button[jsaction*="heroHeaderImage"] img, .RZ66Rb img, .Uf0tqf img, a[data-photo-index] img, [data-photo-index] img')]
         .map(img => img.src || img.dataset?.src)
-        .filter(src => src?.startsWith('http') && src.includes('googleusercontent') && !src.includes('StreetView'))
+        .filter(src => src?.startsWith('http') && src.includes('googleusercontent') && !src.includes('StreetView') && !/googleusercontent\.com\/a-?\//.test(src))
         .map(src => src.replace(/=w\d+-h\d+[^&]*/, '=w1600-h1200'))
     )];
 
@@ -877,6 +873,7 @@ async function scrapeEnrichmentDetail(page, url) {
       .filter(Boolean);
 
     return {
+      name, rating, totalReviews, permanentlyClosed, temporarilyClosed,
       phone, phone2, website, bookingUrl, menuUrl,
       instagram, facebook, youtube, whatsapp,
       openingHours, specialHours, isOpenNow, popularTimesData,
@@ -886,14 +883,18 @@ async function scrapeEnrichmentDetail(page, url) {
     };
   });
 
+  // Without a name the panel never really rendered — merging would record a
+  // "successful" enrichment made entirely of nulls.
+  if (!core.name) throw new Error('Could not extract space name — page may not have loaded correctly');
+
   // ── Task 4: Exhaustive About Tab ─────────────────────────────────────────
   const { amenities: deepAmenities, extraAttributes } = await scrapeAboutTabExhaustive(page);
 
   // ── Task 2: Deep review scrape ────────────────────────────────────────────
-  const { reviews, reviewSummary } = await scrapeReviews(page, cfg.scraper.enrichMaxReviews);
+  const { reviews, reviewSummary } = await scrapeReviews(page, maxReviews);
 
   // ── Task 1: Full photo tab (URL capture, no downloads) ───────────────────
-  const allPhotoUrls = await scrapePhotosTabEnriched(page, core.heroPhotoUrls || []);
+  const allPhotoUrls = await scrapePhotosTab(page, core.heroPhotoUrls || [], maxPhotos);
 
   return {
     ...core,
@@ -912,7 +913,8 @@ async function scrapeAboutTab(page) {
     const tab = page.locator('button[aria-label*="About" i], button:has-text("About")').first();
     if (!await tab.isVisible({ timeout: 1500 }).catch(() => false)) return null;
     await tab.click({ force: true });
-    await sleep(800, 1400);
+    await page.waitForSelector('.iP2t7d, .hpLkke, .LTs0Rc, .E0DTEd', { timeout: 3000, state: 'attached' }).catch(() => {});
+    await sleep(200, 400);
 
     return await page.evaluate(() => {
       const items = [...document.querySelectorAll('.hpLkke, .E0DTEd li, .kx8XBd, .iP2t7d')];
@@ -930,7 +932,8 @@ async function scrapeAboutTabExhaustive(page) {
     const tab = page.locator('button[aria-label*="About" i], button:has-text("About")').first();
     if (!await tab.isVisible({ timeout: 1500 }).catch(() => false)) return result;
     await tab.click({ force: true });
-    await sleep(800, 1400);
+    await page.waitForSelector('.iP2t7d, .hpLkke, .LTs0Rc, .E0DTEd', { timeout: 3000, state: 'attached' }).catch(() => {});
+    await sleep(200, 400);
 
     return await page.evaluate(() => {
       const KNOWN_SECTIONS = new Set([
@@ -1001,7 +1004,8 @@ async function scrapeReviews(page, maxReviews = 30) {
         const el = page.locator(sel).first();
         if (!await el.isVisible({ timeout: 1200 }).catch(() => false)) continue;
         await el.click({ force: true });
-        await sleep(1200, 2000);
+        await page.waitForSelector('.jftiEf, [data-review-id]', { timeout: 4000, state: 'attached' }).catch(() => {});
+        await sleep(300, 600);
         opened = true;
         break;
       } catch (_) {}
@@ -1025,7 +1029,7 @@ async function scrapeReviews(page, maxReviews = 30) {
         await sortBtn.click({ force: true });
         await sleep(400, 700);
         await page.locator('li[data-index="1"], li:has-text("Newest")').first().click({ timeout: 1500, force: true });
-        await sleep(800, 1400);
+        await sleep(600, 1000);
       }
     } catch (_) {}
 
@@ -1153,13 +1157,19 @@ async function scrapeReviews(page, maxReviews = 30) {
       // a bare button:has-text("More") also matches "More reviews" and
       // "More information about the review summary", and clicking those
       // mid-loop navigates the pane out from under us.
-      for (const btn of await page.locator('button.w8nwRe, .jftiEf button[aria-label="See more"]').all()) {
-        try { await btn.click({ force: true, timeout: 1000 }); } catch (_) {}
-      }
-      await sleep(300, 500); // let expanded text paint
+      // One evaluate for all expanders — clicking each via a locator cost a
+      // CDP round-trip (and up to a 1s timeout) per truncated review.
+      const expanded = await page.evaluate(() => {
+        const btns = document.querySelectorAll('button.w8nwRe, .jftiEf button[aria-label="See more"]');
+        btns.forEach(b => { try { b.click(); } catch (_) {} });
+        return btns.length;
+      }).catch(() => 0);
+      if (expanded) await sleep(150, 300); // let expanded text paint
 
       const before = seen.size;
-      for (const r of await extractAll()) {
+      const batch = await extractAll();
+      const cardCount = await page.evaluate(() => document.querySelectorAll('.jftiEf, [data-review-id]').length).catch(() => 0);
+      for (const r of batch) {
         if (!r.authorName) continue;
         const k = keyOf(r);
         if (!seen.has(k)) seen.set(k, r);
@@ -1178,7 +1188,14 @@ async function scrapeReviews(page, maxReviews = 30) {
         }
       } catch (_) {}
       await scrollReviews();
-      await sleep(900, 1500); // let the next page of reviews load
+      // Wait for the next page of reviews to actually arrive (up to 2.5s)
+      // rather than always paying a fixed 0.9–1.5s.
+      await page.waitForFunction(
+        (n) => document.querySelectorAll('.jftiEf, [data-review-id]').length > n,
+        cardCount,
+        { timeout: 2500, polling: 150 }
+      ).catch(() => {});
+      await sleep(100, 300);
     }
 
     reviews.push(...[...seen.values()].slice(0, maxReviews));
@@ -1202,36 +1219,60 @@ async function scrapePhotosTab(page, existing = [], maxPhotos = 20) {
 
   if (maxPhotos === 0) return [...urls];
 
-  try {
-    let tab = page.locator('[role="tab"][aria-label*="Photos" i], [role="tab"]:has-text("Photos")').first();
-    if (!await tab.isVisible({ timeout: 1500 }).catch(() => false)) {
-      tab = page.locator('button[aria-label*="Photos" i], button:has-text("Photos")').first();
+  // Every googleusercontent image on the page in ONE evaluate — both <img>
+  // sources and CSS background-image thumbnails (the gallery grid draws
+  // its tiles as backgrounds, so an <img>-only scan sees almost nothing).
+  // Reviewer avatars (/a/, /a-/) and Street View are excluded.
+  const readPhotos = () => page.evaluate(() => {
+    const out = [];
+    for (const img of document.querySelectorAll('img')) {
+      const src = img.getAttribute('src') || img.getAttribute('data-src');
+      if (src) out.push(src);
     }
-    if (!await tab.isVisible({ timeout: 1500 }).catch(() => false)) return [...urls];
-    await tab.click({ force: true });
-    await sleep(1200, 2000);
+    for (const el of document.querySelectorAll('[style*="googleusercontent"]')) {
+      const m = (el.getAttribute('style') || '').match(/url\(["']?(https:[^"')]+)/);
+      if (m) out.push(m[1]);
+    }
+    const ok = out.filter(src => src.startsWith('http') && src.includes('googleusercontent') &&
+      !src.includes('StreetView') && !/googleusercontent\.com\/a-?\//.test(src));
+    return { count: ok.length, urls: ok.map(src => src.replace(/=w\d+-h\d+[^&]*/, '=w1600-h1200').replace(/=s\d+[^&]*$/, '=w1600-h1200')) };
+  }).catch(() => ({ count: 0, urls: [] }));
 
-    let last = 0; let noNew = 0;
+  try {
+    // Harvest the overview first: opening the gallery replaces this DOM, and
+    // the overview carries the hero shots and review photos.
+    for (const u of (await readPhotos()).urls) urls.add(u);
+
+    let tab = page.locator('[role="tab"][aria-label*="Photos" i], [role="tab"]:has-text("Photos")').first();
+    if (!await tab.isVisible().catch(() => false)) {
+      tab = page.locator('button[aria-label*="Photos" i], button:has-text("Photos"), button[jsaction*="heroHeaderImage"]').first();
+    }
+    if (!await tab.isVisible().catch(() => false)) return [...urls].slice(0, maxPhotos);
+    await tab.click({ force: true });
+    await page.waitForSelector('a[data-photo-index], .U39Pmb', { timeout: 4000, state: 'attached' }).catch(() => {});
+    await sleep(400, 700);
+
+    // Park the mouse over the gallery grid so wheel events scroll IT, not the map.
+    const grid = await page.locator('a[data-photo-index]').first().boundingBox().catch(() => null);
+    if (grid) await page.mouse.move(grid.x + grid.width / 2, grid.y + grid.height / 2);
+
+    let last = urls.size; let noNew = 0;
     while (urls.size < maxPhotos) {
-      const imgs = await page.locator('.Uf0tqf img, .RZ66Rb img, .U39Pmb img, a[data-photo-index] img, [data-photo-index] img, img').all();
-      for (const img of imgs) {
-        try {
-          const src = await img.getAttribute('src') || await img.getAttribute('data-src');
-          if (src?.startsWith('http') && src.includes('googleusercontent') && !src.includes('StreetView')) {
-             urls.add(src.replace(/=w\d+-h\d+[^&]*/, '=w1600-h1200'));
-          }
-        } catch (_) {}
-      }
-      if (urls.size === last) { if (++noNew >= 3) break; }
-      else noNew = 0;
+      const snap = await readPhotos();
+      for (const u of snap.urls) urls.add(u);
+      if (urls.size === last) { if (++noNew >= 3) break; } else noNew = 0;
       last = urls.size;
-      await page.mouse.wheel(0, 1500);
-      await sleep(800, 1500);
+      await page.mouse.wheel(0, 1800);
+      await page.waitForFunction(
+        (n) => document.querySelectorAll('img[src*="googleusercontent"], [style*="googleusercontent"]').length > n,
+        snap.count,
+        { timeout: 2000, polling: 150 }
+      ).catch(() => {});
     }
   } catch (err) {
     logger.warn(`Photo tab scraping partial: ${err.message}`);
   }
-  return [...urls];
+  return [...urls].slice(0, Math.max(maxPhotos, existing.length));
 }
 
 // ── Selective Scraper — scrape only requested sections ────────────────────────
@@ -1254,7 +1295,7 @@ async function scrapeSelective(page, url, sections = ['all']) {
     }
     const panelReady = await waitForPlacePanel(page);
     if (!panelReady) await sleep(1500, 2500);
-    else await sleep(400, 900);
+    else await settlePlacePanel(page);
   } catch (err) {
     throw new Error(`Navigation failed: ${err.message}`);
   }
@@ -1293,7 +1334,7 @@ async function scrapeSelective(page, url, sections = ['all']) {
     }).filter(Boolean);
     const isOpenNow = (() => { const el = document.querySelector('.dpoVLd, [aria-label*="Open now" i]'); return el ? /open now/i.test(el.textContent) : null; })();
     const amenities = [...document.querySelectorAll('[aria-label].iP2t7d, .E0DTEd [aria-label]')].map(el => el.getAttribute('aria-label')).filter(Boolean);
-    const photoUrls = [...new Set([...document.querySelectorAll('button[jsaction*="heroHeaderImage"] img, .RZ66Rb img, .Uf0tqf img, a[data-photo-index] img, [data-photo-index] img')].map(img => img.src || img.dataset?.src).filter(src => src?.startsWith('http') && src.includes('googleusercontent') && !src.includes('StreetView')).map(src => src.replace(/=w\d+-h\d+[^&]*/, '=w1600-h1200')))];
+    const photoUrls = [...new Set([...document.querySelectorAll('button[jsaction*="heroHeaderImage"] img, .RZ66Rb img, .Uf0tqf img, a[data-photo-index] img, [data-photo-index] img')].map(img => img.src || img.dataset?.src).filter(src => src?.startsWith('http') && src.includes('googleusercontent') && !src.includes('StreetView') && !/googleusercontent\.com\/a-?\//.test(src)).map(src => src.replace(/=w\d+-h\d+[^&]*/, '=w1600-h1200')))];
     const href = window.location.href;
     // Same dual source as scrapeSpaceDetail: `/@lat,lng` may never appear when
     // navigating straight to a feed href, so fall back to `!3d<lat>!4d<lng>`.

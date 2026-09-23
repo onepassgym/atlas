@@ -30,38 +30,33 @@ router.get('/status', async (req, res) => {
   try {
     const stats = await getEnrichmentStats();
 
-    // Also get count of spaces needing enrichment (oldest-updated first)
-    const totalSpaces = await Space.countDocuments({
-      permanentlyClosed: { $ne: true },
-      googleMapsUrl: { $exists: true, $ne: null },
-    });
+    // Backlog per source from the enrichment schedule (enrichmentMeta.sources.*)
+    const { sourceBacklog, SOURCES } = require('../services/enrichmentScheduler');
+    const sources = await sourceBacklog();
 
-    // Spaces not updated in last 7 days
-    const staleCount = await Space.countDocuments({
-      permanentlyClosed: { $ne: true },
-      googleMapsUrl: { $exists: true, $ne: null },
-      updatedAt: { $lt: new Date(Date.now() - 7 * 86_400_000) },
-    });
-
-    // Next space in queue (oldest updatedAt)
+    // Next record the Google source will claim (peek only — never claims)
+    const now = new Date();
     const nextInQueue = await Space.findOne({
-      permanentlyClosed: { $ne: true },
-      googleMapsUrl: { $exists: true, $ne: null },
+      ...SOURCES.google_maps.eligible,
+      'enrichmentMeta.sources.google_maps.nextAt': { $not: { $gt: now } },
     })
-      .sort({ updatedAt: 1 })
-      .select('_id name areaName updatedAt')
+      .sort({ 'enrichmentMeta.sources.google_maps.nextAt': 1 })
+      .select('_id name areaName updatedAt enrichmentMeta.sources')
       .lean();
 
     ok(res, {
       enrichment: {
         ...stats,
-        totalEligibleSpaces: totalSpaces,
-        staleSpaces: staleCount,
+        totalEligibleSpaces: sources.google_maps?.eligible ?? 0,
+        // "stale" = due for a Google refresh now (never enriched or past nextAt)
+        staleSpaces: sources.google_maps?.due ?? 0,
+        sources,
         nextInQueue: nextInQueue ? {
           id: nextInQueue._id,
           name: nextInQueue.name,
           area: nextInQueue.areaName,
           lastUpdated: nextInQueue.updatedAt,
+          lastEnrichedAt: nextInQueue.enrichmentMeta?.sources?.google_maps?.lastSuccess || null,
         } : null,
       },
     });
@@ -181,17 +176,19 @@ router.get('/queue', async (req, res) => {
 router.get('/candidates', async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
+    const { SOURCES } = require('../services/enrichmentScheduler');
+    const source = SOURCES[req.query.source] ? req.query.source : 'google_maps';
+    const nextAt = `enrichmentMeta.sources.${source}.nextAt`;
 
-    const candidates = await Space.find({
-      permanentlyClosed: { $ne: true },
-      googleMapsUrl: { $exists: true, $ne: null },
-    })
-      .sort({ updatedAt: 1 })
-      .select('_id name areaName category rating totalReviews updatedAt')
+    // Same order the worker claims in: never-enriched first, then most overdue.
+    const candidates = await Space.find({ ...SOURCES[source].eligible, [nextAt]: { $not: { $gt: new Date() } } })
+      .sort({ [nextAt]: 1 })
+      .select(`_id name areaName category rating totalReviews updatedAt enrichmentMeta.sources.${source}`)
       .limit(limit)
       .lean();
 
     ok(res, {
+      source,
       candidates,
       count: candidates.length,
       oldestUpdate: candidates[0]?.updatedAt || null,
@@ -210,6 +207,7 @@ router.get('/logs', async (req, res) => {
 
     const query = {};
     if (status) query.status = status;
+    if (req.query.source) query.source = req.query.source;
 
     const [logs, total] = await Promise.all([
       EnrichmentLog.find(query)

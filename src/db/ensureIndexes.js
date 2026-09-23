@@ -27,6 +27,18 @@ async function ensureIndexes() {
   await spaces.createIndex({ areaName: 1 },        { name: 'areaName_1' });
   await spaces.createIndex({ chainName: 1 },       { sparse: true, name: 'chainName_sparse' });
   await spaces.createIndex({ primaryCategorySlug: 1 }, { name: 'primaryCategorySlug_1' });
+  // Continuous enrichment claim queries (services/enrichmentScheduler.js):
+  // "next due record for source X" = range scan on nextAt ≤ now (missing sorts
+  // first). Partial on the source's eligibility field so the scan never walks
+  // records that source can't enrich (e.g. spaces without a website).
+  await spaces.createIndex(
+    { 'enrichmentMeta.sources.google_maps.nextAt': 1 },
+    { name: 'enrich_google_nextAt', partialFilterExpression: { googleMapsUrl: { $type: 'string' } } }
+  );
+  await spaces.createIndex(
+    { 'enrichmentMeta.sources.website.nextAt': 1 },
+    { name: 'enrich_website_nextAt', partialFilterExpression: { 'contact.website': { $type: 'string' } } }
+  );
   await spaces.createIndex({ areaName: 1, primaryCategorySlug: 1 }, { name: 'areaName_primaryCategorySlug' });
   // Relevance-scored text search backing GET /api/spaces?search=... — declared on the
   // schema but never actually built (autoIndex: false on every model, same as the rest

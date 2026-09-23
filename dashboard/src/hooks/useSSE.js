@@ -31,6 +31,12 @@ export function useSSE(onEvent, onLog, onConnectionChange, deps = []) {
       'crawl:batch-start', 'crawl:batch-done',
       'crawl:search-start', 'crawl:search-done',
       'crawl:throttle', 'crawl:block', 'crawl:human-pause',
+      'crawl:circuit_breaker', 'crawl:batch-requeued',
+      // Enrichment loop (published by the enrichment worker, bridged via Redis)
+      'enrichment:started', 'enrichment:space-start', 'enrichment:space-done', 'enrichment:space-failed',
+      'enrichment:cooldown', 'enrichment:paused', 'enrichment:resumed', 'enrichment:priority-pushed',
+      // Worker telemetry + self-healing
+      'worker:heartbeat', 'watchdog:auto-resume',
     ];
 
     for (const type of eventTypes) {

@@ -94,6 +94,9 @@ app.use((err, req, res, _next) => {
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 (async () => {
+  // Receive crawl/chain/enrichment events published by the worker processes
+  // so they reach the dashboard's SSE stream and /api/events/history.
+  bus.enableBridge({ role: 'api', subscribe: true });
   await connectDB();
 
   app.listen(cfg.server.port, async () => {

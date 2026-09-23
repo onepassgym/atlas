@@ -76,12 +76,14 @@ async function upsertCapturedPhotoUrls(spaceId, urls = [], sourceType = 'user', 
     updateOne: {
       filter: { originalUrl: url, spaceId },
       update: {
+        // NOTE: publicUrl/localPath/thumbnailUrl must be OMITTED, not null.
+        // space_photos has a sparse UNIQUE index on publicUrl, and sparse
+        // indexes still index explicit nulls — so after the first
+        // `publicUrl: null` row every further insert hit E11000 and every
+        // captured enrichment photo was silently dropped.
         $setOnInsert: {
           spaceId,
           originalUrl:  url,
-          publicUrl:    null,
-          localPath:    null,
-          thumbnailUrl: null,
           sourceType,
           downloaded:   false,
           capturedAt:   capturedAt || new Date(),
@@ -97,7 +99,10 @@ async function upsertCapturedPhotoUrls(spaceId, urls = [], sourceType = 'user', 
     const res = await Photo.bulkWrite(ops, { ordered: false });
     return res.upsertedCount || 0;
   } catch (err) {
-    if (err.code === 11000 || err.name === 'BulkWriteError') return 0;
+    // ordered:false — the non-conflicting ops still landed; report them.
+    if (err.code === 11000 || err.name === 'BulkWriteError' || err.name === 'MongoBulkWriteError') {
+      return err.result?.upsertedCount ?? err.result?.nUpserted ?? 0;
+    }
     throw err;
   }
 }
@@ -169,6 +174,18 @@ async function processEnrichmentJob(enriched, spaceId, jobId) {
     const $set = {};
     const diffs = [];
 
+    // ── Freshness: rating, Google review total, closure status ───────────────
+    // totalReviews mirrors Google's own count, so take it verbatim when read
+    // and skip the "+newReviews" arithmetic further down.
+    const googleTotal = Number.isFinite(enriched.totalReviews) && enriched.totalReviews > 0 ? enriched.totalReviews : null;
+    if (Number.isFinite(enriched.rating) && enriched.rating > 0) $set.rating = enriched.rating;
+    if (googleTotal) $set.totalReviews = googleTotal;
+    if (enriched.permanentlyClosed && !existing.permanentlyClosed) {
+      $set.permanentlyClosed = true;
+      diffs.push({ field: 'permanentlyClosed', oldValue: false, newValue: true });
+    }
+    if (typeof enriched.temporarilyClosed === 'boolean') $set.temporarilyClosed = enriched.temporarilyClosed;
+
     // ── Task 3: Opening hours ────────────────────────────────────────────────
     if (enriched.openingHours?.length) {
       $set.openingHours = enriched.openingHours;
@@ -230,8 +247,12 @@ async function processEnrichmentJob(enriched, spaceId, jobId) {
       bookingUrl: enriched.bookingUrl,
       menuUrl:    enriched.menuUrl,
     };
+    const { isSocialProfileUrl } = require('./websiteScraper');
     for (const [field, newVal] of Object.entries(contactFields)) {
       if (newVal == null) continue;
+      // Reject bare network homepages (e.g. https://instagram.com/) that the
+      // Maps panel sometimes links to — only a real profile is worth storing.
+      if (['instagram', 'facebook', 'youtube', 'whatsapp'].includes(field) && !isSocialProfileUrl(newVal)) continue;
       const oldVal = existing.contact?.[field];
       if (!oldVal && newVal) {
         $set[`contact.${field}`] = newVal;
@@ -294,10 +315,16 @@ async function processEnrichmentJob(enriched, spaceId, jobId) {
     // Update totalReviews count if new reviews added
     if (newReviews > 0) {
       await Space.findByIdAndUpdate(spaceId, {
-        $inc: { totalReviews: newReviews },
+        ...(googleTotal ? {} : { $inc: { totalReviews: newReviews } }),
         $set: { reviewsScraped: (existing.reviewsScraped || 0) + newReviews },
       });
     }
+    // Report only fields whose value actually differs from what we held —
+    // hours/rating/etc. are re-$set on every pass even when unchanged.
+    const getPath = (o, p) => p.split('.').reduce((v, k) => (v == null ? v : v[k]), o);
+    result.changedFields = Object.keys($set)
+      .filter(k => !/^(enrichmentMeta|crawl)\.|^updatedAt$|lastHoursVerifiedAt$|capturedAt$|^rawAmenities\.|^isOpenNow$/.test(k))
+      .filter(k => JSON.stringify(getPath(existing, k) ?? null) !== JSON.stringify($set[k] ?? null));
 
     // ── Task 1: Upsert photo URLs into space_photos ────────────────────────────
     const capturedAt = enriched.scrapedAt || now;
@@ -339,4 +366,80 @@ async function processEnrichmentJob(enriched, spaceId, jobId) {
   }
 }
 
-module.exports = { processEnrichmentJob };
+// ─────────────────────────────────────────────────────────────────────────────
+// Website source: merge scrapeWebsiteDetails() output onto a space
+// ─────────────────────────────────────────────────────────────────────────────
+
+const last10 = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+
+/**
+ * Fill-only merge — a venue's own site is a weaker source than Google for
+ * anything Google already gave us, so we only populate EMPTY fields and never
+ * overwrite. Photos go to space_photos with sourceType 'website'.
+ *
+ * @param {Object}   details  output of scrapeWebsiteDetails()
+ * @param {ObjectId} spaceId
+ * @returns {{ action: 'enriched'|'unchanged'|'error', changedFields: string[], newPhotos: number, error?: string }}
+ */
+async function processWebsiteEnrichment(details, spaceId) {
+  const result = { action: 'unchanged', changedFields: [], newPhotos: 0 };
+  const now = new Date();
+  const existing = await Space.findById(spaceId, { contact: 1, description: 1, pricing: 1, name: 1 }).lean();
+  if (!existing) return { ...result, action: 'error', error: `Space not found: ${spaceId}` };
+
+  const c = existing.contact || {};
+  const $set = {};
+  const fill = (field, value) => {
+    if (value && !c[field]) $set[`contact.${field}`] = value;
+  };
+
+  fill('email', details.emails?.[0]);
+  const altPhone = (details.phones || []).find(p => last10(p) && last10(p) !== last10(c.phone));
+  if (!c.phone && details.phones?.[0]) $set['contact.phone'] = details.phones[0];
+  else fill('phone2', altPhone);
+  for (const key of ['instagram', 'facebook', 'youtube', 'whatsapp']) fill(key, details.socials?.[key]);
+  fill('bookingUrl', details.bookingUrl);
+
+  if (!existing.description && details.description && details.description.length >= 40) {
+    $set.description = details.description.slice(0, 1000);
+  }
+  if (!existing.pricing?.rawText && details.jsonLd?.priceRange) {
+    $set['pricing.rawText']    = details.jsonLd.priceRange;
+    $set['pricing.source']     = 'website';
+    $set['pricing.capturedAt'] = now;
+  }
+  if (details.jsonLd?.openingHours?.length) {
+    $set['operationalData.websiteHours'] = details.jsonLd.openingHours.slice(0, 14);
+  }
+
+  result.changedFields = Object.keys($set);
+  if (result.changedFields.length) {
+    await Space.updateOne({ _id: spaceId }, { $set }, { timestamps: true });
+    await writeChangeLogs(spaceId, result.changedFields
+      .filter(f => f.startsWith('contact.') || f === 'description')
+      .map(f => ({ field: f, oldValue: null, newValue: $set[f] })), now);
+    result.action = 'enriched';
+  }
+
+  result.newPhotos = await upsertCapturedPhotoUrls(spaceId, details.photos || [], 'website', now);
+  if (result.newPhotos && result.action === 'unchanged') result.action = 'enriched';
+
+  logger.info(`[ENRICH:web] "${existing.name}" → ${result.action} (${result.changedFields.join(', ') || 'no new fields'}, +${result.newPhotos} photos)`);
+  return result;
+}
+
+/**
+ * The listed "website" is a social profile — file it under the matching
+ * contact field (if empty) instead of browsing into a login wall.
+ */
+async function recordSocialWebsite(spaceId, network, url) {
+  const field = ['instagram', 'facebook', 'youtube', 'whatsapp'].includes(network) ? network : null;
+  if (!field) return false;
+  const res = await Space.updateOne(
+    { _id: spaceId, $or: [{ [`contact.${field}`]: { $exists: false } }, { [`contact.${field}`]: null }, { [`contact.${field}`]: '' }] },
+    { $set: { [`contact.${field}`]: url } }
+  );
+  return res.modifiedCount > 0;
+}
+
+module.exports = { processEnrichmentJob, processWebsiteEnrichment, recordSocialWebsite };

@@ -129,7 +129,9 @@ function startWebhookService() {
   bus.on('*', async (event) => {
     const webhooks = loadWebhooks().webhooks.filter(w => {
       if (!w.enabled) return false;
-      if (w.events.includes('*')) return true;
+      // Heartbeats fire every few seconds per worker — never fan them out to
+      // wildcard subscribers; a webhook must name 'worker:heartbeat' explicitly.
+      if (w.events.includes('*')) return event.type !== 'worker:heartbeat';
       return w.events.includes(event.type);
     });
 

@@ -4,7 +4,7 @@ require('dotenv').config();
 const { Worker } = require('bullmq');
 const { connectDB }   = require('../db/connection');
 const { BrowserManager, searchSpacesInCity, searchSpacesInGrid, scrapeSpaceDetail, scrapeEnrichmentDetail, FITNESS_CATEGORIES, isBlocked, placeKeysFromUrl } = require('../scraper/googleMapsScraper');
-const { processSpace }  = require('../scraper/spaceProcessor');
+const { processSpace, assessRelevance }  = require('../scraper/spaceProcessor');
 const { processEnrichmentJob } = require('../scraper/enrichmentProcessor');
 const CrawlJob        = require('../db/crawlJobModel');
 const Space             = require('../db/spaceModel');
@@ -13,6 +13,7 @@ const { isJobCancelled, clearCancelFlag, addBatchScrapeJob, removeJobAndBatches,
 const cfg             = require('../../config');
 const logger          = require('../utils/logger');
 const bus             = require('../services/eventBus');
+const { Meter, ActivityBoard, startHeartbeat } = require('../services/telemetry');
 
 const connection = {
   host:     cfg.redis.host,
@@ -42,6 +43,23 @@ const LOCK_DURATION        = parseInt(process.env.WORKER_LOCK_DURATION_MS   || '
 const ENRICH_LOCK_DURATION = parseInt(process.env.ENRICH_LOCK_DURATION_MS   || '900000', 10);  // 15 min
 const LOCK_RENEW_TIME      = parseInt(process.env.WORKER_LOCK_RENEW_MS      || '300000', 10);  // 5 min
 const STALLED_INTERVAL     = parseInt(process.env.WORKER_STALLED_INTERVAL_MS || '30000', 10);  // 30 s
+
+// Human-like pauses: every PAUSE_EVERY_MIN–MAX URLs (shared across the pool),
+// wait PAUSE_MS_MIN–MAX. Previously hard-coded to every 5–8 URLs for 5–15s,
+// which on its own cost ~1.5s per URL. The adaptive throttle + circuit
+// breaker already slow down the moment Google pushes back.
+const PAUSE_EVERY_MIN = parseInt(process.env.SCRAPER_PAUSE_EVERY_MIN || '10', 10);
+const PAUSE_EVERY_MAX = parseInt(process.env.SCRAPER_PAUSE_EVERY_MAX || '16', 10);
+const PAUSE_MS_MIN    = parseInt(process.env.SCRAPER_PAUSE_MS_MIN    || '3000', 10);
+const PAUSE_MS_MAX    = parseInt(process.env.SCRAPER_PAUSE_MS_MAX    || '8000', 10);
+const nextPauseGap = () => PAUSE_EVERY_MIN + Math.floor(Math.random() * (PAUSE_EVERY_MAX - PAUSE_EVERY_MIN + 1));
+
+// ── Live telemetry (see services/telemetry.js) ──────────────────────────────
+const scrapeMeter = new Meter();   // per-URL outcomes: created/updated/skipped/irrelevant/failed/blocked
+const searchMeter = new Meter();   // per-category search outcomes
+const board       = new ActivityBoard();
+const liveThrottles = new Map();   // poolId → AdaptiveThrottle
+let poolSeq = 0;
 
 // ── Graceful shutdown state & shared worker utils ────────────────────────────
 let isShuttingDown = false;
@@ -87,6 +105,8 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
   const settled = new Set();
   let stopReason = false;
   const throttle = new AdaptiveThrottle(DELAY_MIN, DELAY_MAX);
+  const poolId = `pool${++poolSeq}`;
+  liveThrottles.set(poolId, { throttle, jobId, cityName });
 
   // Open N pages in parallel inside the shared browser context
   const poolSize = Math.min(PAGE_POOL, total);
@@ -96,7 +116,8 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
   );
 
   // Track next human pause point per-pool (shared)
-  let nextPauseAt = 5 + Math.floor(Math.random() * 4);  // First pause at URL 5-8
+  let nextPauseAt = nextPauseGap();
+  let pageSeq = 0;
 
   /**
    * Worker function: each page keeps grabbing the next URL until exhausted
@@ -105,6 +126,7 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
   async function workerLoop(initialPage) {
     let page = initialPage;
     let urlsOnPage = 0;
+    const slot = `${poolId}:p${++pageSeq}`;
     const PAGE_RECYCLE_BUDGET = 35; // Gap 10: Refresh page every 35 URLs to release Chromium renderer memory
 
     try {
@@ -137,19 +159,21 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
         break;
       }
 
-      // Human-like pause: every 5-8 URLs, take a random break
+      // Human-like pause (cadence/duration configurable, see PAUSE_* above)
       if (idx > 0 && idx >= nextPauseAt) {
-        const pauseMs = 5000 + Math.random() * 10000;
+        nextPauseAt = idx + nextPauseGap(); // claim before awaiting so siblings don't double-pause
+        const pauseMs = PAUSE_MS_MIN + Math.random() * (PAUSE_MS_MAX - PAUSE_MS_MIN);
         logger.info(`  ☕ Human pause at URL ${idx}/${total}: ${(pauseMs/1000).toFixed(1)}s (throttle: ${throttle.status})`);
         bus.publish('crawl:human-pause', { jobId, pauseMs: Math.round(pauseMs), urlIndex: idx, total });
-        await sleep(pauseMs, pauseMs + 1000);
-        nextPauseAt = idx + 5 + Math.floor(Math.random() * 4);
+        board.set(slot, { kind: 'scrape', phase: 'human-pause', jobId, city: cityName, target: `pause ${(pauseMs / 1000).toFixed(0)}s` });
+        await sleep(pauseMs, pauseMs);
       }
 
       await bullJob.updateProgress(25 + Math.floor((idx / total) * 75));
 
       // Publish space-start event
-      bus.publish('crawl:space-start', { jobId, url: urlShort, urlIndex: idx, total });
+      bus.publish('crawl:space-start', { jobId, url: urlShort, urlIndex: idx, total, city: cityName });
+      board.set(slot, { kind: 'scrape', phase: 'scraping', jobId, city: cityName, target: decodeURIComponent(urlShort).replace(/\+/g, ' '), index: idx, total, mode });
       const spaceStartTime = Date.now();
 
       let scraped = null;
@@ -176,8 +200,10 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
             const cooldownMs = 30000 + Math.random() * 30000;
             logger.warn('  🛑 Google block detected — cooling down for 30-60s');
             bus.publish('crawl:block', { jobId, reason: err.message.slice(0, 80), cooldownMs: Math.round(cooldownMs) });
-            await sleep(30000, 60000);
+            board.update(slot, { phase: 'block-cooldown' });
+            await sleep(cooldownMs, cooldownMs);
           } else {
+            board.update(slot, { phase: `retry ${attempt}/${MAX_RETRIES}` });
             await sleep(3000 * attempt, 5000 * attempt);
           }
         }
@@ -186,6 +212,7 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
       if (!scraped?.name) {
         settled.add(idx);
         stats.failed++;
+        scrapeMeter.mark(sawBlock ? 'blocked' : 'failed', Date.now() - spaceStartTime);
         throttle.onFailure(sawBlock, jobId);
         await updateJob(jobId, {
           $inc: { 'progress.failed': 1, errorCount: 1 },
@@ -206,9 +233,35 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
       settled.add(idx);
       throttle.onSuccess(jobId);
       const spaceDuration = Date.now() - spaceStartTime;
-      bus.publish('crawl:space-done', { jobId, spaceName: scraped.name, url: urlShort, action: 'pending', duration: spaceDuration });
 
+      // Quality gate: category feeds leak neighbouring non-venues (cafés,
+      // banks, hotels). Record them as skipped with a reason, don't store them.
+      const relevance = assessRelevance(scraped);
+      if (!relevance.relevant) {
+        stats.skipped++;
+        scrapeMeter.mark('irrelevant', spaceDuration);
+        await updateJob(jobId, {
+          $inc: { 'progress.skipped': 1 },
+          $push: { skipLogs: { message: relevance.reason, url, spaceName: scraped.name, at: new Date() } },
+        });
+        bus.publish('crawl:space-done', { jobId, spaceName: scraped.name, url: urlShort, action: 'irrelevant', reason: relevance.reason, category: scraped.category, duration: spaceDuration });
+        await throttle.wait();
+        continue;
+      }
+
+      board.update(slot, { phase: 'saving', target: scraped.name });
       const res = await processSpace(scraped, cityName, jobId, true);
+      scrapeMeter.mark(res.action || 'error', spaceDuration);
+      bus.publish('crawl:space-done', {
+        jobId, spaceName: scraped.name, url: urlShort, city: cityName,
+        action: res.action, duration: spaceDuration,
+        category: scraped.category || null,
+        completeness: res.completeness ?? null,
+        reviews: scraped.reviews?.length || 0,
+        photos: scraped.photoUrls?.length || 0,
+        newReviews: res.newReviews || 0,
+        newPhotos: res.newPhotos || 0,
+      });
 
       if (res.action === 'created') {
         stats.created++;
@@ -236,15 +289,21 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
       }
 
       // Adaptive inter-URL delay
+      board.update(slot, { phase: 'throttle-wait' });
       await throttle.wait();
     }
   } finally {
+    board.clear(slot);
     try { await page.close(); } catch (_) {}
   }
 }
 
   // Run all page workers concurrently
-  await Promise.all(pages.map(page => workerLoop(page)));
+  try {
+    await Promise.all(pages.map(page => workerLoop(page)));
+  } finally {
+    liveThrottles.delete(poolId);
+  }
 
   // Close all pages
   await Promise.all(pages.map(async (page) => { try { await page.close(); } catch (_) {} }));
@@ -288,15 +347,21 @@ async function searchAllCategories(browser, cityName, categories, jobId, bullJob
 
       bus.publish('crawl:search-start', { jobId, cityName, category: cat, categoryIndex: ci, totalCategories: cats.length });
       await updateJob(jobId, {}); // heartbeat — discovery phase has no other DB write per category
+      const slot = `search:${jobId}:${ci}`;
+      board.set(slot, { kind: 'search', phase: 'searching', jobId, city: cityName, target: cat, index: ci, total: cats.length });
+      const t0 = Date.now();
       try {
         const urls = await searchSpacesInCity(page, cityName, cat);
+        searchMeter.mark(urls.length ? 'found' : 'empty', Date.now() - t0);
         urls.forEach(u => allUrls.add(u));
         bus.publish('crawl:search-done', { jobId, cityName, category: cat, urlsFound: urls.length, totalUnique: allUrls.size });
-        await bullJob.updateProgress(Math.floor(((ci + 1) / categories.length) * 25));
+        await bullJob.updateProgress(Math.floor(((ci + 1) / cats.length) * 25));
       } catch (err) {
+        searchMeter.mark('error', Date.now() - t0);
         logger.warn(`Category "${cat}" failed: ${err.message}`);
         bus.publish('crawl:search-done', { jobId, cityName, category: cat, urlsFound: 0, error: err.message.slice(0, 80) });
       }
+      board.clear(slot);
       await sleep(DELAY_MIN, DELAY_MAX);
     }
   }
@@ -507,15 +572,21 @@ async function searchAllCategoriesForGrid(browser, lat, lng, zoom, regionName, c
 
       bus.publish('crawl:search-start', { jobId, regionName, category: cat, categoryIndex: ci, totalCategories: cats.length });
       await updateJob(jobId, {}); // heartbeat — discovery phase has no other DB write per category
+      const slot = `search:${jobId}:${ci}`;
+      board.set(slot, { kind: 'search', phase: 'searching', jobId, city: regionName, target: cat, index: ci, total: cats.length });
+      const t0 = Date.now();
       try {
         const urls = await searchSpacesInGrid(page, lat, lng, zoom, cat);
+        searchMeter.mark(urls.length ? 'found' : 'empty', Date.now() - t0);
         urls.forEach(u => allUrls.add(u));
         bus.publish('crawl:search-done', { jobId, regionName, category: cat, urlsFound: urls.length, totalUnique: allUrls.size });
-        await bullJob.updateProgress(Math.floor(((ci + 1) / categories.length) * 25));
+        await bullJob.updateProgress(Math.floor(((ci + 1) / cats.length) * 25));
       } catch (err) {
+        searchMeter.mark('error', Date.now() - t0);
         logger.warn(`Category "${cat}" failed at [${lat}, ${lng}]: ${err.message}`);
         bus.publish('crawl:search-done', { jobId, regionName, category: cat, urlsFound: 0, error: err.message.slice(0, 80) });
       }
+      board.clear(slot);
       await sleep(DELAY_MIN, DELAY_MAX);
     }
   }
@@ -807,7 +878,7 @@ async function processSpaceNameJob(job) {
         $push: { jobErrors: { message: `Initial name search returned 0 URLs, trying fallback strategies`, at: new Date() } },
       });
 
-      const GENERIC_WORDS = new Set(['space', 'fitness', 'center', 'centre', 'studio', 'club', 'health', 'the', 'and']);
+      const GENERIC_WORDS = new Set(['gym', 'space', 'fitness', 'center', 'centre', 'studio', 'club', 'health', 'the', 'and']);
       const nameParts = targetName.trim().split(/\s+/);
 
       // Strategy 1: Try progressively shorter name variants by dropping
@@ -839,8 +910,8 @@ async function processSpaceNameJob(job) {
       if (urls.length === 0) {
         const locality = nameParts[nameParts.length - 1];
         if (locality && locality.length > 2 && !GENERIC_WORDS.has(locality.toLowerCase())) {
-          logger.info(`  🔄 Fallback 3: "space in ${locality}"`);
-          const fallback3 = await searchSpacesInCity(page, locality, 'space');
+          logger.info(`  🔄 Fallback 3: "gym in ${locality}"`);
+          const fallback3 = await searchSpacesInCity(page, locality, 'gym');
           if (fallback3.length > 0) {
             logger.info(`  ✅ Fallback 3 found ${fallback3.length} URL(s)`);
             urls.push(...fallback3);
@@ -962,6 +1033,7 @@ async function processEnrichmentJobHandler(job) {
 // ── Worker startup ───────────────────────────────────────────────────────────
 
 async function start() {
+  bus.enableBridge({ role: 'crawl-worker' });
   await connectDB();
 
   // ── Crash guards ─────────────────────────────────────────────────────────
@@ -1044,6 +1116,18 @@ async function start() {
   enrichWorker.on('failed',   (job, err) => logger.error(`❌ Enrichment failed: ${job?.id} — ${err.message}`));
   enrichWorker.on('error',    (err) => logger.error(`Enrichment worker error: ${err.message}`));
 
+  const heartbeat = startHeartbeat('crawl-worker', () => ({
+    config: { concurrency: CONCURRENCY, pagePool: PAGE_POOL, searchPool: SEARCH_POOL, batchSize: BATCH_SIZE, delayMs: [DELAY_MIN, DELAY_MAX] },
+    state: isShuttingDown ? 'stopping' : (board.slots.size ? 'busy' : 'idle'),
+    activity: board.list(),
+    scrape: scrapeMeter.snapshot(),
+    search: searchMeter.snapshot(),
+    throttles: [...liveThrottles.values()].map(({ throttle, jobId, cityName }) => ({
+      jobId, city: cityName, multiplier: throttle.multiplier, tripped: throttle.tripped,
+      consecutiveFails: throttle.consecutiveFails, consecutiveSuccess: throttle.consecutiveSuccess,
+    })),
+  }));
+
   logger.info(`\n🚀 Atlas Worker started  [concurrency: ${CONCURRENCY}, pagePool: ${PAGE_POOL}, lockDuration: ${LOCK_DURATION / 1000}s, lockRenewTime: ${LOCK_RENEW_TIME / 1000}s]`);
   logger.info(`✨ Enrichment Worker started [concurrency: 1, lockDuration: ${ENRICH_LOCK_DURATION / 1000}s]`);
 
@@ -1055,6 +1139,7 @@ async function start() {
 
     try { await worker.close(); } catch (_) {}
     try { await enrichWorker.close(); } catch (_) {}
+    try { await heartbeat.stop(); } catch (_) {}
 
     logger.info('👋 Worker shut down gracefully.');
     process.exit(0);

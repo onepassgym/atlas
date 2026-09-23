@@ -54,7 +54,7 @@ async function hasActiveJob(cityName) {
  *                 type: array
  *                 items:
  *                   type: string
- *                 example: ["space", "fitness center"]
+ *                 example: ["gym", "fitness center"]
  *               force:
  *                 type: boolean
  *                 description: Bypass active job guard

@@ -10,7 +10,7 @@ function normalizeName(name = '') {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
-    .replace(/\b(space|fitness|studio|centre|center|club|the|and|&|pvt|ltd|inc)\b/g, '')
+    .replace(/\b(gym|space|fitness|studio|centre|center|club|the|and|&|pvt|ltd|inc)\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }

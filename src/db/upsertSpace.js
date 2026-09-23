@@ -48,6 +48,23 @@ const SAFE_OVERWRITE_FIELDS = [
 const TRACKED_FIELDS = ['name', 'address'];
 // contact is handled separately (sub-object)
 
+/**
+ * True for values a scrape produces when a section simply failed to render:
+ * null, '', [], {} or an object of all-zero counters (ratingBreakdown).
+ * Such values must never overwrite data we already hold — a single flaky
+ * page load used to erase a space's hours, description or amenities.
+ */
+function isEmptyScrapeValue(v) {
+  if (v === null || v === undefined || v === '') return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (v instanceof Date) return false;
+  if (typeof v === 'object') {
+    const vals = Object.values(v);
+    return vals.length === 0 || vals.every(x => x === 0 || x === null || x === undefined);
+  }
+  return false;
+}
+
 // ── Deep equality check (good enough for our field types) ─────────────────────
 function equal(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -58,7 +75,7 @@ function normalizeName(name = '') {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
-    .replace(/\b(space|fitness|studio|centre|center|club|the|and|&|pvt|ltd|inc)\b/g, '')
+    .replace(/\b(gym|space|fitness|studio|centre|center|club|the|and|&|pvt|ltd|inc)\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -652,23 +669,27 @@ async function upsertSpace(crawledData) {
     // 3. Safe-overwrite fields (Applies describing variables)
     for (const field of SAFE_OVERWRITE_FIELDS) {
       const val = normalizedData[field];
-      if (val !== undefined) {
-        $set[field] = val;
-      }
+      if (val === undefined) continue;
+      // Booleans (permanentlyClosed, isOpenNow=false…) are real signals; only
+      // "section didn't load" empties are skipped when we already have data.
+      if (isEmptyScrapeValue(val) && !isEmptyScrapeValue(existing[field])) continue;
+      $set[field] = val;
     }
 
     // Explicitly safe-overwrite the raw fields
-    $set.rawPhotos    = normalizedData.rawPhotos;
-    $set.rawAmenities = normalizedData.rawAmenities;
+    const incomingAmenities = normalizedData.rawAmenities?.raw || [];
+    const keepAmenities = incomingAmenities.length === 0 && (existing.amenityIds?.length || existing.rawAmenities?.raw?.length);
+    if (normalizedData.rawPhotos !== undefined) $set.rawPhotos = normalizedData.rawPhotos;
+    if (!keepAmenities) $set.rawAmenities = normalizedData.rawAmenities;
     $set.rawCrawlMeta = normalizedData.rawCrawlMeta;
 
     // Explicitly set normalized IDs and flags
-    $set.categoryId = categoryId;
-    $set.amenityIds = amenityIds;
+    if (categoryId) $set.categoryId = categoryId;
+    if (!keepAmenities) $set.amenityIds = amenityIds;
     $set.parsed = true;
     $set.primaryCategorySlug = normalizedData.primaryCategorySlug;
     $set.categorySlugs = normalizedData.categorySlugs;
-    $set.amenitySlugs = normalizedData.amenitySlugs;
+    if (!keepAmenities) $set.amenitySlugs = normalizedData.amenitySlugs;
 
     // Intelligence Data
     $set.qualityScore = normalizedData.qualityScore;
