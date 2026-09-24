@@ -239,7 +239,7 @@ router.get('/cities', async (_, res) => {
  *         name: sortBy
  *         schema:
  *           type: string
- *           enum: [rating, totalReviews, name, createdAt, qualityScore, sentimentScore, relevance]
+ *           enum: [rating, totalReviews, name, createdAt, qualityScore, sentimentScore, relevance, distance]
  *       - in: query
  *         name: search
  *         schema:
@@ -277,10 +277,11 @@ router.get('/',
   query('minRating').optional().isFloat({ min: 0, max: 5 }),
   query('limit').optional().isInt({ min: 1, max: 100 }),
   query('page').optional().isInt({ min: 1 }),
-  query('sortBy').optional().isIn(['rating','totalReviews','name','createdAt','qualityScore','sentimentScore','relevance']),
+  query('sortBy').optional().isIn(['rating','totalReviews','name','createdAt','qualityScore','sentimentScore','relevance','distance']),
   query('lat').optional().isFloat(),
   query('lng').optional().isFloat(),
   query('radiusKm').optional().isFloat({ min: 0.1, max: 50 }),
+  query('minReviews').optional().isInt({ min: 0 }),
   async (req, res) => {
     if (validate(req, res)) return;
     const startTime = Date.now();
@@ -348,15 +349,24 @@ router.get('/',
       };
     }
 
-    // Build sort order
+    // Build sort order. Every branch ends with an `_id` tiebreaker —
+    // without one, ties on the leading sort key (common on qualityScore,
+    // rating, etc.) leave Mongo free to reorder them between requests, so
+    // paginating (skip/limit across separate queries) can silently skip or
+    // repeat results. $near is the one exception: Mongo doesn't allow a
+    // .sort() alongside it, so that ordering is left to the geo index.
     let sortObj;
     if (lat && lng) {
       sortObj = undefined; // $near sorts by distance
+    } else if (sortBy === 'distance') {
+      // No origin to measure distance from — fall back to quality rather than
+      // sorting on a field that doesn't exist on the document.
+      sortObj = { qualityScore: -1, _id: 1 };
     } else if (useTextScore && (sortBy === 'qualityScore' || sortBy === 'relevance')) {
       // Blend text relevance with quality score
-      sortObj = { score: { $meta: 'textScore' }, qualityScore: -1 };
+      sortObj = { score: { $meta: 'textScore' }, qualityScore: -1, _id: 1 };
     } else {
-      sortObj = { [sortBy]: order === 'asc' ? 1 : -1 };
+      sortObj = { [sortBy]: order === 'asc' ? 1 : -1, _id: 1 };
     }
 
     try {
@@ -395,7 +405,8 @@ router.get('/',
         delete filter.$text;
         
         // Reset sortObj since textScore is no longer valid
-        sortObj = lat && lng ? undefined : { [sortBy === 'relevance' ? 'qualityScore' : sortBy]: order === 'asc' ? 1 : -1 };
+        const fallbackSortBy = (sortBy === 'relevance' || sortBy === 'distance') ? 'qualityScore' : sortBy;
+        sortObj = lat && lng ? undefined : { [fallbackSortBy]: order === 'asc' ? 1 : -1, _id: 1 };
 
         Object.assign(filter, buildTokenMatchOr(search.trim()));
         try {
@@ -870,7 +881,10 @@ router.get('/:slug',
         // spaces carry 500-1000 reviews post-enrichment; inlining all of them
         // here would balloon every detail-page load for no reason.
         .populate({ path: 'reviews', options: { sort: { publishedAt: -1, createdAt: -1 }, limit: 20 } })
-        .populate({ path: 'photos', select: '-localPath', options: { limit: 10 } })
+        // Best image first: explicit cover flag wins, then higher resolution,
+        // then most recently captured. No download/vision pass needed — this
+        // sorts on metadata already present on the Photo document.
+        .populate({ path: 'photos', select: '-localPath', options: { sort: { isCover: -1, width: -1, height: -1, createdAt: -1 }, limit: 10 } })
         .populate('crawlMeta')
         .populate('pageSlug', 'slug pageData')
         .lean({ virtuals: true });

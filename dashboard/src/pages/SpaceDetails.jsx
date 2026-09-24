@@ -137,16 +137,18 @@ export default function SpaceDetails() {
                     <span>{space.address || space.areaName}</span>
                   </div>
                 )}
-                {space.contactPhone && (
+                {space.contact?.phone && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Phone size={16} style={{ color: 'var(--text-muted)' }} />
-                    <a href={`tel:${space.contactPhone}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{space.contactPhone}</a>
+                    <a href={`tel:${space.contact.phone}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{space.contact.phone}</a>
                   </div>
                 )}
-                {space.websiteUrl && (
+                {space.contact?.website && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Globe size={16} style={{ color: 'var(--text-muted)' }} />
-                    <a href={space.websiteUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>{new URL(space.websiteUrl).hostname}</a>
+                    <a href={space.contact.website} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+                      {(() => { try { return new URL(space.contact.website).hostname; } catch { return space.contact.website; } })()}
+                    </a>
                   </div>
                 )}
               </div>
@@ -161,9 +163,9 @@ export default function SpaceDetails() {
             <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 24 }}>
               {space.description || 'No description available for this space.'}
             </p>
-            {space.amenityIds?.length > 0 && (
+            {space.amenityIds?.filter(Boolean).length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {space.amenityIds.map(am => (
+                {space.amenityIds.filter(Boolean).map(am => (
                   <span key={am._id} style={{ padding: '6px 12px', background: 'var(--bg-surface)', borderRadius: 20, fontSize: 13, border: '1px solid var(--border)' }}>
                     {am.label}
                   </span>

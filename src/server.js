@@ -21,6 +21,7 @@ const enrichmentRoutes = require('./api/enrichmentRoutes');
 const dataHealthRoutes = require('./api/dataHealthRoutes');
 const systemRoutes    = require('./api/systemRoutes');
 const mediaRoutes     = require('./api/mediaRoutes');
+const gameRoutes      = require('./api/gameRoutes');
 const { startScheduler } = require('./services/schedulerService');
 const { startWatchdog } = require('./services/watchdogService');
 const bus             = require('./services/eventBus');
@@ -73,6 +74,7 @@ app.use('/api/system',  systemRoutes);
 app.use('/api/enrichment', enrichmentRoutes);
 app.use('/api/data-health', dataHealthRoutes);
 app.use('/api/media',   mediaRoutes);
+app.use('/api/games',   gameRoutes);
 app.use('/api/events',  require('./api/eventRoutes'));
 
 // ── Static files + Dashboard ──────────────────────────────────────────────────

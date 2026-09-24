@@ -276,3 +276,91 @@ export function useGameMobileFix(isActive, ref, onSwipe) {
     };
   }, [isActive, ref, onSwipe]);
 }
+
+// ── Win celebration ──────────────────────────────────────────────────────────
+const CONFETTI_COLORS = ['#f87171', '#fb923c', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa', '#22d3ee', '#f472b6'];
+
+/**
+ * Bursts confetti across the whole viewport (a fixed full-screen canvas
+ * appended to <body>, not scoped to the calling game's card) and cleans
+ * itself up when the animation finishes. No dependency — plain canvas.
+ */
+export function fireConfetti({ duration = 2600, particleCount = 180 } = {}) {
+  if (typeof document === 'undefined') return;
+
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:99999;';
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  const size = () => {
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  size();
+  window.addEventListener('resize', size);
+
+  const particles = Array.from({ length: particleCount }, () => ({
+    x: Math.random() * window.innerWidth,
+    y: -20 - Math.random() * window.innerHeight * 0.5,
+    vx: (Math.random() - 0.5) * 4,
+    vy: 2 + Math.random() * 3,
+    size: 5 + Math.random() * 5,
+    color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+    rotation: Math.random() * 360,
+    vr: (Math.random() - 0.5) * 12,
+    shape: Math.random() < 0.5 ? 'rect' : 'circle',
+    tilt: Math.random() * Math.PI,
+  }));
+
+  const start = performance.now();
+  const fadeStart = duration - 500;
+
+  const frame = (now) => {
+    const elapsed = now - start;
+    const w = window.innerWidth, h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+    const alpha = elapsed > fadeStart ? Math.max(0, 1 - (elapsed - fadeStart) / 500) : 1;
+
+    for (const p of particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.03; // gravity
+      p.rotation += p.vr;
+      p.tilt += 0.05;
+      const swing = Math.sin(p.tilt) * 1.5;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(p.x + swing, p.y);
+      ctx.rotate((p.rotation * Math.PI) / 180);
+      ctx.fillStyle = p.color;
+      if (p.shape === 'rect') {
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      } else {
+        ctx.beginPath();
+        ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    if (elapsed < duration) {
+      requestAnimationFrame(frame);
+    } else {
+      window.removeEventListener('resize', size);
+      canvas.remove();
+    }
+  };
+  requestAnimationFrame(frame);
+
+  // Backstop: browsers throttle/pause rAF in backgrounded tabs, which could
+  // otherwise leave the canvas stuck on screen if the tab stays hidden past
+  // `duration`. remove()/removeEventListener are no-ops if already cleaned up.
+  setTimeout(() => {
+    window.removeEventListener('resize', size);
+    canvas.remove();
+  }, duration + 500);
+}

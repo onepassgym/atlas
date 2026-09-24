@@ -266,8 +266,18 @@ async function processEnrichmentJob(enriched, spaceId, jobId) {
     }
 
     // ── Task 1: Cover photo ──────────────────────────────────────────────────
-    if (enriched.coverPhotoUrl && !existing.coverPhoto?.publicUrl) {
-      $set['coverPhoto.publicUrl'] = enriched.coverPhotoUrl;
+    // enriched.coverPhotoUrl is the curated hero image (Google Maps' own pick,
+    // or the equivalent from the source site) — a stronger "best photo" signal
+    // than the arbitrary rawPhotoUrls[0] the initial crawl sets as a placeholder
+    // (see upsertSpace.js). Prefer it whenever it differs from what's stored,
+    // instead of leaving that placeholder in place forever.
+    if (enriched.coverPhotoUrl && enriched.coverPhotoUrl !== existing.coverPhoto?.publicUrl) {
+      $set['coverPhoto.publicUrl']    = enriched.coverPhotoUrl;
+      // Old thumbnail/dimensions belonged to the previous publicUrl — clear
+      // them so they don't get mismatched with the new image.
+      $set['coverPhoto.thumbnailUrl'] = null;
+      $set['coverPhoto.width']        = null;
+      $set['coverPhoto.height']       = null;
     }
 
     // ── Task 1: Raw photo URLs (deduped union) ───────────────────────────────
