@@ -53,8 +53,11 @@ function buildBusinessId(prefix, sequence) {
     throw new Error(`ID space exhausted for prefix ${normalizedPrefix}`);
   }
 
-  const wordIndex = Math.floor(sequence / HEX_BLOCK_SIZE);
-  const hexValue = sequence % HEX_BLOCK_SIZE;
+  // Cycle through the full word catalog round-robin (word = sequence % WORDS.length)
+  // instead of exhausting one word's whole hex block before moving to the next, so
+  // every animal name shows up quickly rather than only after 65536 IDs.
+  const wordIndex = sequence % WORDS.length;
+  const hexValue = Math.floor(sequence / WORDS.length);
 
   return `${normalizedPrefix}-${WORDS[wordIndex]}-${formatHex4(hexValue)}`;
 }
@@ -69,7 +72,7 @@ function parseBusinessId(value) {
   const wordIndex = WORDS.indexOf(word);
   if (wordIndex === -1) return null;
 
-  const sequence = (wordIndex * HEX_BLOCK_SIZE) + parseInt(hex, 16);
+  const sequence = (parseInt(hex, 16) * WORDS.length) + wordIndex;
   if (sequence >= getPrefixCapacity()) return null;
 
   return { prefix, word, hex, sequence };
