@@ -46,7 +46,11 @@ export default function JobsPanel() {
   const [selectedJobId, setSelectedJobId] = useState(null);
   const [queueStats, setQueueStats] = useState(null);
 
-  const fetchJobs = useCallback(async (p = page) => {
+  // Depends only on `filter` — every call site passes its page explicitly,
+  // and every use of this function's identity (the effect below, the SSE
+  // refresh effect) must NOT change just because the user turned a page, or
+  // navigating pages would retrigger those effects and snap back to page 1.
+  const fetchJobs = useCallback(async (p) => {
     setLoading(true);
     const params = new URLSearchParams({ limit: LIMIT, page: p });
     if (filter) params.set('status', filter);
@@ -57,13 +61,13 @@ export default function JobsPanel() {
         setTotal(res.total || 0);
         setPage(res.page || p);
       }
-      
+
       const statsRes = await api.get('/api/crawl/queue/stats');
       if (statsRes?.success) {
         setQueueStats(statsRes.queue);
       }
     } catch {} finally { setLoading(false); }
-  }, [filter, page]);
+  }, [filter]);
 
   useEffect(() => { fetchJobs(1); }, [filter, fetchJobs]);
 

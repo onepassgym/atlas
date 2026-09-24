@@ -799,14 +799,21 @@ router.get('/photos', async (req, res) => {
  */
 async function resolveSpace(req, res, next) {
   const { slug } = req.params;
-  
+
   try {
-    const slugRecord = await PageSlug.findOne({ slug: slug.toLowerCase(), isActive: true }).lean();
-    if (!slugRecord) return err(res, 'Space not found for the given slug', 404);
-    
-    const space = await Space.findById(slugRecord.spaceId).lean({ virtuals: true });
+    let space;
+    // The dashboard's space preview/detail links pass the opgId (its stable
+    // public identifier, e.g. "OPG-HAWK-021B"), not the SEO slug — accept
+    // either so those links (and any other opgId-keyed caller) resolve too.
+    if (isValidOpgId(slug)) {
+      space = await Space.findOne({ opgId: slug.toUpperCase() }).lean({ virtuals: true });
+    } else {
+      const slugRecord = await PageSlug.findOne({ slug: slug.toLowerCase(), isActive: true }).lean();
+      if (!slugRecord) return err(res, 'Space not found for the given slug', 404);
+      space = await Space.findById(slugRecord.spaceId).lean({ virtuals: true });
+    }
     if (!space) return err(res, 'Space not found', 404);
-    
+
     req.space = space;
     next();
   } catch (e) { err(res, e.message); }
