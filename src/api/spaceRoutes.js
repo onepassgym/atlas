@@ -93,13 +93,28 @@ function buildTokenMatchOr(trimmed) {
  *         schema:
  *           type: string
  *         description: Partial search query (min 2 characters)
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         schema:
+ *           type: integer
+ *           default: 6
+ *           minimum: 1
+ *           maximum: 25
+ *         description: Max space matches to return (area/chain suggestions are unaffected)
  *     responses:
  *       200:
- *         description: List of name/area suggestions
+ *         description: List of name/area suggestions, plus totalSpaceMatches (spaces matching by name, regardless of the page shown)
  */
 router.get('/suggestions', async (req, res) => {
   const q = (req.query.q || '').trim();
   if (q.length < 2) return ok(res, { suggestions: [] });
+
+  // Optional — callers that need a fuller list of matched spaces (e.g. the
+  // /for-gyms partner-application picker) can ask for more than the default
+  // top-6 shown in the general search-bar autocomplete. Clamped so a caller
+  // can't force an unbounded scan.
+  const spaceLimit = Math.min(Math.max(parseInt(req.query.limit, 10) || 6, 1), 25);
 
   try {
     const sanitized = q.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&');
@@ -107,18 +122,18 @@ router.get('/suggestions', async (req, res) => {
     const contains = new RegExp(sanitized, 'i');
 
     // Parallel search: names that start with query + areas + chains
-    const [nameStartMatches, nameContainsMatches, areaMatches, chainMatches] = await Promise.all([
+    const [nameStartMatches, nameContainsMatches, areaMatches, chainMatches, totalSpaceMatches] = await Promise.all([
       Space.find({ name: startsWith })
          .select('name areaName chainName rating totalReviews qualityScore category coverPhoto pageSlug')
          .populate('pageSlug', 'slug')
          .sort({ qualityScore: -1 })
-         .limit(5)
+         .limit(spaceLimit)
          .lean(),
       Space.find({ name: contains })
          .select('name areaName chainName rating totalReviews qualityScore category coverPhoto pageSlug')
          .populate('pageSlug', 'slug')
          .sort({ qualityScore: -1 })
-         .limit(5)
+         .limit(spaceLimit)
          .lean(),
       Space.aggregate([
         { $match: { areaName: contains } },
@@ -132,6 +147,7 @@ router.get('/suggestions', async (req, res) => {
         { $sort: { count: -1 } },
         { $limit: 3 }
       ]),
+      Space.countDocuments({ name: contains }),
     ]);
 
     // De-duplicate name matches
@@ -154,7 +170,7 @@ router.get('/suggestions', async (req, res) => {
           slug: g.pageSlug?.slug || null,
         });
       }
-      if (spaceSuggestions.length >= 6) break;
+      if (spaceSuggestions.length >= spaceLimit) break;
     }
 
     const suggestions = [
@@ -173,7 +189,9 @@ router.get('/suggestions', async (req, res) => {
       })),
     ];
 
-    ok(res, { suggestions });
+    // Total spaces matching by name, regardless of the page shown — lets a
+    // caller render "12 gyms match — showing top 8" instead of a bare list.
+    ok(res, { suggestions, totalSpaceMatches });
   } catch (e) { err(res, e.message); }
 });
 
