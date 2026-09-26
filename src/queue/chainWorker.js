@@ -57,44 +57,67 @@ const shouldStop = (jobId) => shouldStopUtil(jobId, () => isShuttingDown);
 
 // ── Freshness check: skip spaces crawled within N days ──────────────────────────
 
+// Normalize a space/location name for comparison: strip punctuation, whitespace,
+// and common noise words that made the old substring match trigger on almost
+// every neighbouring gym.
+const NAME_NOISE = /\b(gym|fitness|club|studio|center|centre|the)\b/g;
+function normalizeName(name) {
+  return (name || '')
+    .toLowerCase()
+    .replace(NAME_NOISE, ' ')
+    .replace(/[^a-z0-9]/g, '');
+}
+
 async function checkFreshness(location) {
   const cutoff = new Date(Date.now() - FRESHNESS_DAYS * 86_400_000);
 
-  // Try to find existing space by geo proximity + name
-  if (location.lat && location.lng && location.name) {
-    try {
-      const nearby = await Space.find({
-        location: {
-          $nearSphere: {
-            $geometry: { type: 'Point', coordinates: [location.lng, location.lat] },
-            $maxDistance: 100,  // 100m radius for chain matching
-          },
+  if (!(location.lat && location.lng && location.name)) {
+    return { exists: false, spaceId: null, isFresh: false, needsChainTag: false };
+  }
+
+  let nearby;
+  try {
+    nearby = await Space.find({
+      location: {
+        $nearSphere: {
+          $geometry: { type: 'Point', coordinates: [location.lng, location.lat] },
+          $maxDistance: 100,  // 100m radius for chain matching
         },
-      }).limit(5).lean();
+      },
+    }).limit(5).lean();
+  } catch (err) {
+    logger.warn(`[ChainWorker] Freshness geo query failed for "${location.name}": ${err.message}`);
+    return { exists: false, spaceId: null, isFresh: false, needsChainTag: false };
+  }
 
-      for (const space of nearby) {
-        // Fuzzy name match — chain spaces often have slight name variations
-        const normLoc = (location.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const normSpace = (space.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normLoc = normalizeName(location.name);
+  if (!normLoc) return { exists: false, spaceId: null, isFresh: false, needsChainTag: false };
 
-        if (normLoc.includes(normSpace) || normSpace.includes(normLoc) ||
-            (location.chainSlug && space.chainSlug === location.chainSlug)) {
-          // Found existing space
-          const lastCrawled = space.crawl?.lastCrawledAt || space.rawCrawlMeta?.lastCrawledAt || space.crawlMeta?.lastCrawledAt || space.updatedAt;
-          const isFresh = lastCrawled && lastCrawled > cutoff;
+  for (const space of nearby) {
+    const normSpace = normalizeName(space.name);
+    // Match only when the space is already tagged to the same chain OR the
+    // normalised names are equal. No more substring fallback — the old rule
+    // matched every "gym"-suffixed neighbour and marked the whole job "fresh".
+    const chainMatch = location.chainSlug && space.chainSlug === location.chainSlug;
+    const nameMatch = normSpace && normLoc === normSpace;
+    if (!chainMatch && !nameMatch) continue;
 
-          return {
-            exists: true,
-            spaceId: space._id,
-            isFresh,
-            needsChainTag: !space.isChainMember || space.chainSlug !== location.chainSlug,
-            lastCrawled,
-          };
-        }
-      }
-    } catch (err) {
-      // location index may not exist — non-fatal
-    }
+    // Only trust explicit crawl timestamps. `updatedAt` bumps on any $set
+    // (including chain tagging), which used to mark stale spaces as "fresh".
+    const lastCrawled =
+      space.crawl?.lastCrawledAt ||
+      space.rawCrawlMeta?.lastCrawledAt ||
+      space.crawlMeta?.lastCrawledAt ||
+      null;
+    const isFresh = !!(lastCrawled && lastCrawled > cutoff);
+
+    return {
+      exists: true,
+      spaceId: space._id,
+      isFresh,
+      needsChainTag: !space.isChainMember || space.chainSlug !== location.chainSlug,
+      lastCrawled,
+    };
   }
 
   return { exists: false, spaceId: null, isFresh: false, needsChainTag: false };
@@ -258,8 +281,22 @@ async function processChainJob(job) {
     logger.info(`[ChainWorker] 📋 ${stats.total} locations to process for ${chainName}`);
 
     if (!locations.length) {
-      await updateJob(jobId, { status: 'completed', completedAt: new Date(), durationMs: Date.now() - startTime });
-      return { summary: stats, jobId , status: 'completed' };
+      // Locator succeeded but returned nothing usable. This is almost always a
+      // silent upstream break (endpoint 404/403, country filter kept nothing).
+      // Recording as "failed" surfaces it instead of hiding it as "completed".
+      const reason = countries.length
+        ? `Locator returned 0 locations after filtering to ${countries.join(', ')}`
+        : 'Locator returned 0 locations — store-locator endpoint likely unreachable or changed';
+      await updateJob(jobId, {
+        status: 'failed',
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime,
+        $inc: { errorCount: 1 },
+        $push: { jobErrors: { message: reason, at: new Date() } },
+      });
+      bus.publish('job:failed', { jobId, chainSlug: slug, chainName, error: reason, durationMs: Date.now() - startTime });
+      logger.error(`💥 Chain job aborted [${chainName}]: ${reason}`);
+      return { summary: stats, jobId, status: 'failed', reason };
     }
 
     // ── Phase 2: Freshness check + classification ───────────────────────────

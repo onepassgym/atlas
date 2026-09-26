@@ -8,6 +8,7 @@
 
 const axios  = require('axios');
 const logger = require('../../utils/logger');
+const { assertLocatorRunSucceeded } = require('./_util');
 
 const chainSlug = 'cult-fit';
 const CHAIN_NAME = 'Cult.fit';
@@ -60,6 +61,7 @@ function normalizeLocation(raw) {
 async function fetchAllLocations() {
   logger.info(`[CultFit] Starting location fetch across ${SEARCH_CITIES.length} Indian cities...`);
   const allLocations = new Map();
+  let bulkFailed = false;
 
   // Try fetching all centers in one shot first
   try {
@@ -85,10 +87,12 @@ async function fetchAllLocations() {
       return [...allLocations.values()];
     }
   } catch (err) {
+    bulkFailed = true;
     logger.warn(`[CultFit] Bulk API failed: ${err.message}. Trying per-city...`);
   }
 
   // Per-city fallback
+  let cityFailed = 0;
   for (const { city, lat, lng } of SEARCH_CITIES) {
     try {
       const { data } = await axios.get(ALT_API, {
@@ -112,6 +116,7 @@ async function fetchAllLocations() {
 
       logger.info(`  [CultFit] ${city}: ${centers.length} centers (unique: ${allLocations.size})`);
     } catch (err) {
+      cityFailed++;
       logger.warn(`  [CultFit] ${city} failed: ${err.message}`);
     }
 
@@ -119,6 +124,12 @@ async function fetchAllLocations() {
   }
 
   const locations = [...allLocations.values()];
+  assertLocatorRunSucceeded({
+    label: 'CultFit',
+    attempted: SEARCH_CITIES.length,
+    failed: bulkFailed && cityFailed === SEARCH_CITIES.length ? SEARCH_CITIES.length : cityFailed,
+    found: locations.length,
+  });
   logger.info(`[CultFit] ✅ Total locations fetched: ${locations.length}`);
   return locations;
 }

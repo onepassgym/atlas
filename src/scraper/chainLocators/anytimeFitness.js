@@ -8,6 +8,7 @@
 
 const axios  = require('axios');
 const logger = require('../../utils/logger');
+const { assertLocatorRunSucceeded } = require('./_util');
 
 const chainSlug = 'anytime-fitness';
 const CHAIN_NAME = 'Anytime Fitness';
@@ -116,6 +117,7 @@ async function fetchFromWPApi() {
  */
 async function fetchFromSearchApi() {
   const allLocations = new Map();  // storeId → location (dedup)
+  let failed = 0;
 
   for (const region of SEARCH_REGIONS) {
     try {
@@ -144,6 +146,7 @@ async function fetchFromSearchApi() {
 
       logger.info(`  [AnytimeFitness] ${region.label}: ${spaces.length} spaces found (total unique: ${allLocations.size})`);
     } catch (err) {
+      failed++;
       logger.warn(`  [AnytimeFitness] Region ${region.label} failed: ${err.message}`);
     }
 
@@ -151,7 +154,7 @@ async function fetchFromSearchApi() {
     await new Promise(r => setTimeout(r, 500));
   }
 
-  return [...allLocations.values()];
+  return { locations: [...allLocations.values()], attempted: SEARCH_REGIONS.length, failed };
 }
 
 /**
@@ -160,17 +163,31 @@ async function fetchFromSearchApi() {
 async function fetchAllLocations() {
   logger.info(`[AnytimeFitness] Starting global location fetch...`);
 
-  // Try WP API first (most reliable if available)
+  // Try WP API first (most reliable if available). It returns null on total
+  // failure — we treat that as "unavailable", not as a fatal error, because
+  // the search API sweep is a legitimate fallback.
   let locations = await fetchFromWPApi();
+  let searchStats = null;
 
-  // Fall back to search API with region sweeping
   if (!locations || locations.length < 50) {
     logger.info(`[AnytimeFitness] Falling back to region sweep search API...`);
-    locations = await fetchFromSearchApi();
+    const sweep = await fetchFromSearchApi();
+    searchStats = sweep;
+    locations = sweep.locations;
   }
 
-  // Filter out locations without lat/lng
-  locations = locations.filter(l => l.lat && l.lng);
+  locations = (locations || []).filter(l => l.lat && l.lng);
+
+  if (searchStats) {
+    assertLocatorRunSucceeded({
+      label: 'AnytimeFitness',
+      attempted: searchStats.attempted,
+      failed: searchStats.failed,
+      found: locations.length,
+    });
+  } else if (locations.length === 0) {
+    throw new Error('[AnytimeFitness] WP API succeeded but returned 0 locations — refusing to report success.');
+  }
 
   logger.info(`[AnytimeFitness] ✅ Total locations fetched: ${locations.length}`);
   return locations;

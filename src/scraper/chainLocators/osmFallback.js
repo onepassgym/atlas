@@ -137,7 +137,7 @@ async function fetchByBrand(brandName) {
   }
 
   logger.error(`[OSM] All Overpass endpoints failed for "${brandName}": ${lastErr?.message}`);
-  return [];
+  throw new Error(`[OSM] All Overpass endpoints failed for "${brandName}": ${lastErr?.message || 'unknown error'}`);
 }
 
 /**

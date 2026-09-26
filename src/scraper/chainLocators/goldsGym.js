@@ -7,6 +7,7 @@
 
 const axios  = require('axios');
 const logger = require('../../utils/logger');
+const { assertLocatorRunSucceeded } = require('./_util');
 
 const chainSlug = 'golds-gym';
 const CHAIN_NAME = "Gold's Gym";
@@ -55,8 +56,10 @@ function normalizeLocation(raw) {
 
 async function fetchFromApi() {
   const allLocations = new Map();
+  let failed = 0;
 
   for (const region of SEARCH_REGIONS) {
+    let regionFailed = false;
     try {
       // Try primary API
       const { data } = await axios.get(SEARCH_API, {
@@ -82,9 +85,9 @@ async function fetchFromApi() {
         }
       }
 
-      logger.info(`  [GoldsSpace] ${region.label}: ${spaces.length} found (unique: ${allLocations.size})`);
+      logger.info(`  [GoldsGym] ${region.label}: ${spaces.length} found (unique: ${allLocations.size})`);
     } catch (err) {
-      // Try alternative API
+      regionFailed = true;
       try {
         const { data } = await axios.get(ALT_API, {
           params: { country: region.country, limit: 500 },
@@ -98,23 +101,31 @@ async function fetchFromApi() {
           const key = loc.storeId || `${loc.lat},${loc.lng}`;
           if (!allLocations.has(key)) allLocations.set(key, loc);
         }
-        logger.info(`  [GoldsSpace] ${region.label} (alt API): ${spaces.length} found`);
+        regionFailed = false;
+        logger.info(`  [GoldsGym] ${region.label} (alt API): ${spaces.length} found`);
       } catch (altErr) {
-        logger.warn(`  [GoldsSpace] ${region.label} failed: ${err.message}`);
+        logger.warn(`  [GoldsGym] ${region.label} failed: ${err.message}`);
       }
     }
+    if (regionFailed) failed++;
 
     await new Promise(r => setTimeout(r, 500));
   }
 
-  return [...allLocations.values()];
+  return { locations: [...allLocations.values()], attempted: SEARCH_REGIONS.length, failed };
 }
 
 async function fetchAllLocations() {
-  logger.info(`[GoldsSpace] Starting global location fetch...`);
-  let locations = await fetchFromApi();
-  locations = locations.filter(l => l.lat && l.lng);
-  logger.info(`[GoldsSpace] ✅ Total locations fetched: ${locations.length}`);
+  logger.info(`[GoldsGym] Starting global location fetch...`);
+  const { locations: raw, attempted, failed } = await fetchFromApi();
+  const locations = raw.filter(l => l.lat && l.lng);
+  assertLocatorRunSucceeded({
+    label: 'GoldsGym',
+    attempted,
+    failed,
+    found: locations.length,
+  });
+  logger.info(`[GoldsGym] ✅ Total locations fetched: ${locations.length}`);
   return locations;
 }
 

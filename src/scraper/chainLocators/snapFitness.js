@@ -7,6 +7,7 @@
 
 const axios  = require('axios');
 const logger = require('../../utils/logger');
+const { assertLocatorRunSucceeded } = require('./_util');
 
 const chainSlug = 'snap-fitness';
 const CHAIN_NAME = 'Snap Fitness';
@@ -52,6 +53,7 @@ function normalizeLocation(raw) {
 async function fetchAllLocations() {
   logger.info(`[SnapFitness] Starting global location fetch...`);
   const allLocations = new Map();
+  let failed = 0;
 
   for (const region of SEARCH_REGIONS) {
     try {
@@ -78,6 +80,7 @@ async function fetchAllLocations() {
 
       logger.info(`  [SnapFitness] ${region.label}: ${spaces.length} found (unique: ${allLocations.size})`);
     } catch (err) {
+      failed++;
       logger.warn(`  [SnapFitness] ${region.label} failed: ${err.message}`);
     }
 
@@ -85,6 +88,12 @@ async function fetchAllLocations() {
   }
 
   let locations = [...allLocations.values()].filter(l => l.lat && l.lng);
+  assertLocatorRunSucceeded({
+    label: 'SnapFitness',
+    attempted: SEARCH_REGIONS.length,
+    failed,
+    found: locations.length,
+  });
   logger.info(`[SnapFitness] ✅ Total locations fetched: ${locations.length}`);
   return locations;
 }

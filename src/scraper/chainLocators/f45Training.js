@@ -8,6 +8,7 @@
 
 const axios  = require('axios');
 const logger = require('../../utils/logger');
+const { assertLocatorRunSucceeded } = require('./_util');
 
 const chainSlug = 'f45-training';
 const CHAIN_NAME = 'F45 Training';
@@ -57,6 +58,7 @@ function normalizeLocation(raw) {
 async function fetchAllLocations() {
   logger.info(`[F45Training] Starting global location fetch...`);
   const allLocations = new Map();
+  let failed = 0;
 
   for (const region of SEARCH_REGIONS) {
     try {
@@ -83,6 +85,7 @@ async function fetchAllLocations() {
 
       logger.info(`  [F45Training] ${region.label}: ${studios.length} found (unique: ${allLocations.size})`);
     } catch (err) {
+      failed++;
       logger.warn(`  [F45Training] ${region.label} failed: ${err.message}`);
     }
 
@@ -90,6 +93,12 @@ async function fetchAllLocations() {
   }
 
   let locations = [...allLocations.values()].filter(l => l.lat && l.lng);
+  assertLocatorRunSucceeded({
+    label: 'F45Training',
+    attempted: SEARCH_REGIONS.length,
+    failed,
+    found: locations.length,
+  });
   logger.info(`[F45Training] ✅ Total locations fetched: ${locations.length}`);
   return locations;
 }

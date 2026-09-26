@@ -7,6 +7,7 @@
 
 const axios  = require('axios');
 const logger = require('../../utils/logger');
+const { assertLocatorRunSucceeded } = require('./_util');
 
 const chainSlug = 'orangetheory';
 const CHAIN_NAME = 'Orangetheory Fitness';
@@ -57,8 +58,10 @@ function normalizeLocation(raw) {
 async function fetchAllLocations() {
   logger.info(`[Orangetheory] Starting global location fetch...`);
   const allLocations = new Map();
+  let failed = 0;
 
   for (const region of SEARCH_REGIONS) {
+    let regionFailed = false;
     try {
       const { data } = await axios.get(SEARCH_API, {
         params: {
@@ -83,7 +86,8 @@ async function fetchAllLocations() {
 
       logger.info(`  [Orangetheory] ${region.label}: ${studios.length} found (unique: ${allLocations.size})`);
     } catch (err) {
-      // Try alternative endpoint
+      // Alt endpoint keeps regionFailed true unless it also succeeds.
+      regionFailed = true;
       try {
         const { data } = await axios.get(ALT_SEARCH, {
           params: { lat: region.lat, lng: region.lng, radius: 8000 },
@@ -97,16 +101,24 @@ async function fetchAllLocations() {
           const key = loc.storeId || `${loc.lat},${loc.lng}`;
           if (!allLocations.has(key)) allLocations.set(key, loc);
         }
+        regionFailed = false;
         logger.info(`  [Orangetheory] ${region.label} (alt): ${studios.length} found`);
       } catch (altErr) {
         logger.warn(`  [Orangetheory] ${region.label} failed: ${err.message}`);
       }
     }
+    if (regionFailed) failed++;
 
     await new Promise(r => setTimeout(r, 500));
   }
 
   let locations = [...allLocations.values()].filter(l => l.lat && l.lng);
+  assertLocatorRunSucceeded({
+    label: 'Orangetheory',
+    attempted: SEARCH_REGIONS.length,
+    failed,
+    found: locations.length,
+  });
   logger.info(`[Orangetheory] ✅ Total locations fetched: ${locations.length}`);
   return locations;
 }
