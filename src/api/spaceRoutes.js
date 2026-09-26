@@ -300,6 +300,7 @@ router.get('/',
   query('lng').optional().isFloat(),
   query('radiusKm').optional().isFloat({ min: 0.1, max: 50 }),
   query('minReviews').optional().isInt({ min: 0 }),
+  query('isPartner').optional().isBoolean(),
   async (req, res) => {
     if (validate(req, res)) return;
     const startTime = Date.now();
@@ -354,6 +355,7 @@ router.get('/',
     if (req.query.chainSlug)     filter.chainSlug     = req.query.chainSlug;
     if (req.query.isChainMember) filter.isChainMember  = req.query.isChainMember === 'true';
     if (req.query.minReviews)    filter.totalReviews   = { ...(filter.totalReviews || {}), $gte: +req.query.minReviews };
+    if (req.query.isPartner)     filter['atlas.isPartner'] = req.query.isPartner === 'true';
 
     if (lat && lng) {
       filter.location = {
