@@ -252,18 +252,35 @@ async function processChainJob(job) {
     // ── Phase 1: Fetch all locations from store locator ─────────────────────
     logger.info(`\n🏋️  Chain crawl starting: ${chainName} [${slug}]`);
 
-    const locator = require('../scraper/chainLocators').getLocator(slug);
+    const locator = getLocator(slug);
     let locations;
+    let fromOsm = locator.chainSlug === 'osm-fallback';
 
-    if (locator.chainSlug === 'osm-fallback') {
-      // OSM fallback needs the chain name
-      locations = await locator.fetchAllLocations(chainName);
+    if (fromOsm) {
+      locations = await fetchByBrand(chainName, { countries });
     } else {
-      locations = await locator.fetchAllLocations();
+      // Dedicated store-locator APIs break without notice (every one of them
+      // started 404ing). Their failure throws — fall back to OSM rather than
+      // failing the whole job, and only give up if OSM fails too.
+      try {
+        locations = await locator.fetchAllLocations();
+      } catch (err) {
+        logger.warn(`[ChainWorker] Dedicated locator failed for ${chainName}: ${err.message}`);
+        locations = [];
+      }
+      if (!locations.length) {
+        logger.info(`[ChainWorker] Falling back to OSM Overpass for ${chainName}...`);
+        locations = await fetchByBrand(chainName, { countries });
+        fromOsm = true;
+      }
     }
 
-    // Apply country filter if provided
-    if (countries.length > 0) {
+    for (const loc of locations) loc.chainSlug = slug;
+
+    // Apply country filter if provided. OSM results are already scoped by
+    // country in the Overpass query and mostly lack addr:country, so
+    // post-filtering them would drop nearly everything.
+    if (countries.length > 0 && !fromOsm) {
       const countrySet = new Set(countries.map(c => c.toUpperCase()));
       locations = locations.filter(l => {
         const code = (l.countryCode || l.country || '').toUpperCase();
