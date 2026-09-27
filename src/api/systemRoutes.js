@@ -36,6 +36,7 @@ const WORKER_ROLES = ['crawl-worker', 'chain-worker', 'enrichment-worker'];
 const PROBLEM_EVENTS = new Set([
   'crawl:space-failed', 'crawl:block', 'crawl:circuit_breaker', 'crawl:batch-requeued',
   'enrichment:space-failed', 'enrichment:cooldown', 'job:failed', 'watchdog:auto-resume',
+  'watchdog:stale-job',
 ]);
 
 // Mongo counts are cheap-ish but not free on a large collection; the monitor

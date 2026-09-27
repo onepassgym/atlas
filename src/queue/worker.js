@@ -14,6 +14,7 @@ const cfg             = require('../../config');
 const logger          = require('../utils/logger');
 const bus             = require('../services/eventBus');
 const { Meter, ActivityBoard, startHeartbeat } = require('../services/telemetry');
+const { withTimeout } = require('../utils/withTimeout');
 
 const connection = {
   host:     cfg.redis.host,
@@ -25,6 +26,13 @@ const CONCURRENCY       = cfg.scraper.concurrency;
 const DELAY_MIN         = cfg.scraper.delayMin;
 const DELAY_MAX         = cfg.scraper.delayMax;
 const MAX_RETRIES       = cfg.scraper.maxRetries;
+// A single scrapeSpaceDetail() call has no internal timeout — a wedged
+// Chromium page context (evaluate() never resolving) would otherwise hang
+// this attempt forever, freezing the slot's ActivityBoard phase at
+// 'scraping' with no error, no retry, and no throughput for as long as the
+// job runs. Bound each attempt so a stuck page fails fast into the normal
+// retry/backoff path instead.
+const SCRAPE_TIMEOUT_MS = parseInt(process.env.SCRAPER_SCRAPE_TIMEOUT_MS || '90000', 10); // 90s
 // Phase 2: parallel browser pages within a single job (detail scraping)
 const PAGE_POOL         = cfg.scraper.pagePool;
 // Phase 6: parallel browser pages for category search
@@ -187,13 +195,25 @@ async function processUrlsWithPool(browser, urls, jobId, cityName, stats, bullJo
       let sawBlock = false;
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try { scraped = await scrapeSpaceDetail(page, url, mode, browser.ctx); break; }
+        try {
+          scraped = await withTimeout(scrapeSpaceDetail(page, url, mode, browser.ctx), SCRAPE_TIMEOUT_MS, 'scrapeSpaceDetail');
+          break;
+        }
         catch (err) {
           lastError = err;
           const isBlock = err.message.includes('Google blocked');
+          const isTimeout = err.code === 'TIMEOUT';
           if (isBlock) sawBlock = true;
           logger.warn(`  ⚠  Attempt ${attempt}/${MAX_RETRIES} [${url.slice(-40)}]: ${err.message}`);
           bus.publish('crawl:space-failed', { jobId, url: urlShort, error: err.message.slice(0, 120), attempt, maxRetries: MAX_RETRIES, isBlock });
+
+          // withTimeout() only unblocks the awaiter — it can't cancel an
+          // in-flight page.evaluate(), so the old page may still be wedged.
+          // Reusing it for the next attempt/URL would just hang the same way.
+          if (isTimeout) {
+            try { await page.close(); } catch (_) {}
+            try { page = await browser.newPage(); urlsOnPage = 0; } catch (_) {}
+          }
 
           // If Google blocked us, add a MUCH longer backoff
           if (isBlock) {

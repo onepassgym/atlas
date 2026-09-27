@@ -214,13 +214,14 @@ function describeEvent(e) {
     case 'job:started':           return `${d.type} job started — ${d.cityName || d.regionName || d.spaceName || d.chainName || d.jobId}`;
     case 'job:completed':         return `Job completed — ${d.cityName || d.chainName || d.jobId} (${fmtMs(d.durationMs)})`;
     case 'job:failed':            return `Job failed — ${d.cityName || d.chainName || d.jobId}: ${d.error}`;
+    case 'watchdog:stale-job':    return `Job ${d.jobId} stalled — no heartbeat for ${fmtMs(d.staleSinceMs)}${d.cityName ? ` (${d.cityName})` : ''}`;
     default:                      return d.spaceName || d.name || d.message || d.category || '';
   }
 }
 
 const EVENT_TONE = (e) => {
   const d = e.data || {};
-  if (/failed|block|circuit|cooldown/.test(e.type)) return 'bad';
+  if (/failed|block|circuit|cooldown|stale/.test(e.type)) return 'bad';
   if (e.type === 'crawl:space-done' && d.action === 'irrelevant') return 'neutral';
   if (/done|completed|created/.test(e.type)) return 'good';
   return 'neutral';
