@@ -16,7 +16,11 @@
 require('dotenv').config();
 
 const { Worker }        = require('bullmq');
-const pLimit            = require('p-limit');
+// p-limit v5 is ESM-only: require() hands back the module namespace, so the
+// function lives on `.default`. Calling the namespace threw "pLimit is not a
+// function" the moment a chain job reached the scraping phase.
+const pLimitModule      = require('p-limit');
+const pLimit            = pLimitModule.default || pLimitModule;
 const { connectDB }     = require('../db/connection');
 const { getLocator }    = require('../scraper/chainLocators');
 const { fetchByBrand }  = require('../scraper/chainLocators/osmFallback');
