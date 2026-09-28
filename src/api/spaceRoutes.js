@@ -11,6 +11,7 @@ const { ok, err, validate } = require('../utils/apiUtils');
 const { isValidOpgId } = require('../utils/opgId');
 const { categoryGroupFilter } = require('../utils/categoryGroups');
 const { attachDistanceKm } = require('../utils/geo');
+const { buildCityFilter } = require('../utils/cityFilter');
 
 // opg-web's /c/:category/:city route uses 'near-me' as a pseudo-city slug for
 // the geolocated variant of the page — there's no areaName to match against,
@@ -18,19 +19,6 @@ const { attachDistanceKm } = require('../utils/geo');
 // string "near-me".
 const NEAR_ME_CITY_SLUG = 'near-me';
 
-/**
- * Builds the `areaName` regex filter for a `city` query param. Tolerant of
- * hyphenated slugs (e.g. "new-delhi") matching a space-separated areaName
- * ("New Delhi") since URL slugs and scraped area names don't share a
- * separator convention.
- */
-function buildCityFilter(city) {
-  const pattern = city
-    .split('-')
-    .map(part => part.replace(/[[\]{}()*+?.,\\^$|#-]/g, '\\$&'))
-    .join('[- ]');
-  return { $regex: new RegExp(pattern, 'i') };
-}
 
 
 // ── In-memory stats cache (TTL-based) ─────────────────────────────────────────
@@ -55,6 +43,26 @@ const SEARCH_STOPWORDS = new Set(['the', 'and', 'of', 'a', 'an', 'in', 'at', 'ne
  * relevance signal available when lat/lng is also present, and it directly
  * gates which results are even eligible for the nearest-first distance sort.
  */
+/**
+ * Whole-phrase match for locality-style queries ("Sector 43", "DLF Phase 2"):
+ * the words must appear together, in order, as whole words (separator may be
+ * a space or hyphen), in any searchable field — address included, which is
+ * where localities live. Without this, "Sector 43" hit $text (OR semantics,
+ * and address isn't text-indexed) and returned every "Sector N" gym.
+ */
+function buildPhraseMatchOr(trimmed) {
+  const words = queryWords(trimmed).map(w => w.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&'));
+  const phrase = new RegExp(`(^|[^a-z0-9])${words.join('[\\s-]*')}(?![a-z0-9])`, 'i');
+  return { $or: SEARCHABLE_FIELDS.map(f => ({ [f]: { $regex: phrase } })) };
+}
+
+const queryWords = q => q.split(/[\s-]+/).filter(Boolean);
+
+/** Multi-word query containing a number ("Sector 43", "sector-43") → match it as a phrase. */
+function isLocalityQuery(trimmed) {
+  return /\d/.test(trimmed) && queryWords(trimmed).length > 1;
+}
+
 function buildTokenMatchOr(trimmed) {
   const exactSanitized = trimmed.replace(/[-[\]{}()*+?.,\\^$|#]/g, '\\$&');
   const tokens = exactSanitized
@@ -62,9 +70,11 @@ function buildTokenMatchOr(trimmed) {
     .filter(t => t.length >= 2 && !SEARCH_STOPWORDS.has(t.toLowerCase()));
   const words = tokens.length ? tokens : [exactSanitized];
 
+  // Each word must START a word somewhere ("fit" → "Fitness", but "43" no
+  // longer matches inside a pincode like 122043).
   return {
     $and: words.map(w => ({
-      $or: SEARCHABLE_FIELDS.map(f => ({ [f]: { $regex: new RegExp(w, 'i') } })),
+      $or: SEARCHABLE_FIELDS.map(f => ({ [f]: { $regex: new RegExp(`(^|[^a-z0-9])${w}`, 'i') } })),
     })),
   };
 }
@@ -301,6 +311,8 @@ router.get('/',
   query('radiusKm').optional().isFloat({ min: 0.1, max: 50 }),
   query('minReviews').optional().isInt({ min: 0 }),
   query('isPartner').optional().isBoolean(),
+  query('openOnly').optional().isBoolean(),
+  query('area').optional().isString().isLength({ max: 60 }),
   async (req, res) => {
     if (validate(req, res)) return;
     const startTime = Date.now();
@@ -332,6 +344,12 @@ router.get('/',
           { 'contact.phone':  { $regex: new RegExp(exactSanitized, 'i') } },
           { 'contact.phone2': { $regex: new RegExp(exactSanitized, 'i') } },
         ];
+      } else if (isLocalityQuery(trimmed)) {
+        Object.assign(filter, buildPhraseMatchOr(trimmed));
+      } else if (queryWords(trimmed).length > 1) {
+        // Multi-word names/areas ("Palam Vihar", "gold gym"): every word must
+        // match. $text would OR them — "Palam Vihar" returned every "Vihar".
+        Object.assign(filter, buildTokenMatchOr(trimmed));
       } else if (trimmed.length >= 3 && !(lat && lng)) {
         // MongoDB text index — relevance-scored, best option when it's available.
         // Note: MongoDB does not allow $text and $near in the same query, so this
@@ -356,6 +374,17 @@ router.get('/',
     if (req.query.isChainMember) filter.isChainMember  = req.query.isChainMember === 'true';
     if (req.query.minReviews)    filter.totalReviews   = { ...(filter.totalReviews || {}), $gte: +req.query.minReviews };
     if (req.query.isPartner)     filter['atlas.isPartner'] = req.query.isPartner === 'true';
+    // Landing pages list only spaces that still exist (matches /api/spaces/landing's counts).
+    if (req.query.openOnly === 'true') filter.permanentlyClosed = { $ne: true };
+    // Locality ("Sector 43", "Rohini") — the exact phrase in the address,
+    // the same place /api/spaces/landing reads a space's locality from, so a
+    // landing page's area tab and its results agree. ANDed so it can't
+    // clobber a text search's own $or.
+    if (req.query.area && req.query.area.trim()) {
+      const areaPhrase = buildPhraseMatchOr(req.query.area.trim()).$or
+        .filter(c => 'address' in c || 'areaName' in c);
+      filter.$and = [...(filter.$and || []), { $or: areaPhrase }];
+    }
 
     if (lat && lng) {
       filter.location = {

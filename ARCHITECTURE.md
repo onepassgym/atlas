@@ -71,6 +71,7 @@ Atlas is an **enterprise Google Maps fitness space & wellness venue discovery, c
 │  ├── indexRoutes      GET / (redirects), GET /health                   │
 │  ├── crawlRoutes      POST|GET /api/crawl/* (city, grid, chain, batch) │
 │  ├── compareRoutes    GET /api/spaces/compare, /compare/suggest        │
+│  ├── landingRoutes    GET /api/spaces/landing (category × city facts)  │
 │  ├── spaceRoutes      GET|PATCH /api/spaces/* (listing, geo, opgId)    │
 │  ├── systemRoutes     GET|POST|DELETE /api/system/*                    │
 │  ├── eventRoutes      GET /api/events (SSE real-time bus)              │
@@ -280,10 +281,22 @@ Mounted before `spaceRoutes` so `/:slug` doesn't claim `compare`. The service is
 
 ---
 
+## Category × City Landing Facts (`src/api/landingRoutes.js`, `src/services/landing/`)
+
+`GET /api/spaces/landing?category=<landing slug>&city=<slug>|near-me[&lat&lng]` powers opg-web's `/c/:category/:city` pages: total, average rating, review volume, 24/7 / open-by-5:30 / open-till-11 counts, popular localities, common amenities, top 3 picks (compare score), 24/7 examples and up to 8 recent 4★+ reviews that actually talk about training (a regex drops club/wedding/food reviews of "gym"-filed gymkhanas). Cached in memory for 10 minutes per category × city.
+
+- **Localities** are parsed from `address` (Atlas has no locality field): the segment before the city, skipping segments that are themselves city names ("…, Paharganj, New Delhi, Delhi 110055" → Paharganj), rejecting unit/building segments, normalising "Sec-43" → "Sector 43". A locality needs ≥2 spaces to be listed.
+- **City aliases** (`src/utils/cityFilter.js`) — `areaName` stores one city under several names (prod: "Gurgaon" ×528 and "Gurugram" ×207; Bengaluru as "Bangalore"). `buildCityFilter` matches every alias, and `/api/spaces?city=` uses the same helper, so every city filter benefits.
+- `/api/spaces` gained `openOnly=true` (excludes `permanentlyClosed`) for listing pages.
+
+---
+
 ## Changelog
 
 | Date | Author | Description |
 |------|--------|-------------|
+| 2026-09-28 | Claude | **Search precision + `area` filter** (`/api/spaces`): `area=<locality>` matches the phrase in `address`/`areaName` (how `/api/spaces/landing` counts localities, so area tabs and results agree). `search` semantics: one word → `$text`; several words → every word must start a word (was `$text` OR — "Palam Vihar" returned every "Vihar"); several words with a number ("Sector 43", "sector-43") → whole phrase (was every "Sector N" gym, 28 vs 12). |
+| 2026-09-28 | Claude | **Landing facts API + city aliases**: `GET /api/spaces/landing`, `src/services/landing/` (locality parsing, fitness-relevant review picking), `src/utils/cityFilter.js` (gurugram⇄gurgaon, bengaluru⇄bangalore, …) now used by `/api/spaces`; `openOnly` list param. |
 | 2026-09-28 | Claude | **Space comparison API**: `GET /api/spaces/compare` + `/compare/suggest`, `src/services/compare/` normalisers (amenities, hours, busyness, pin coordinates) and scoring; `categoryGroupForValue()` in `utils/categoryGroups.js`. |
 | 2026-09-15 | Antigravity | **Crawling Pipeline Audit & Core Fixes (Phase 1–5)**:<br>• **Gap 1**: Upgraded UA pool to 2026-era Chrome 135+, Firefox 138+, Edge 136+, Safari 18.x.<br>• **Gap 3**: Wrapped `urlIndex` in shared state with explicit atomic claim.<br>• **Gap 4**: Fixed `preFilterUrls` error fallback shape `{ fresh, skippedUrls }`.<br>• **Gap 5**: Added resilient selector fallback chains (`tryText`, `tryAttr`, `tryAll`) for Google Maps DOM changes.<br>• **Gap 6**: Added `extractExistingAmenities` normalizer in `enrichmentProcessor.js` to preserve boolean tags and raw arrays.<br>• **Gap 7**: Added 30s TTL cache for `SystemState.getGlobalState()` in `sleep()`.<br>• **Gap 8**: Added circuit breaker to `AdaptiveThrottle` tripping on 7+ consecutive failures/blocks.<br>• **Gap 9**: Isolated `websiteScraper.js` to dedicated page contexts.<br>• **Gap 10**: Added page recycle budget (every 35 URLs) in parallel batch pool.<br>• **Gap 11**: Extracted shared worker utilities into `src/queue/workerUtils.js`.<br>• **Gap 12**: Documented dual enrichment architecture in `enrichmentWorker.js`.<br>• **Gap 13**: Removed 150-review hard-cap in `spaceProcessor.js`.<br>• **Gap 14**: Preserved `/@lat,lng` coordinate anchors in Google Maps URL normalizer.<br>• **Gap 15**: Fixed batch completion criteria in `worker.js`.<br>• **Gap 17**: Deferred `removeJobAndBatches()` out of BullMQ lock-holding path.<br>• **Gap 16**: Modernized `ARCHITECTURE.md`. |
 | 2026-05-09 | Antigravity | Migration scheduler refactor, opgId rollout, enrichment session Tasks 1–7. |

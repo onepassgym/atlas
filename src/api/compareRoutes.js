@@ -242,3 +242,4 @@ router.get('/suggest',
 );
 
 module.exports = router;
+module.exports.COMPARE_FIELDS = COMPARE_FIELDS;
