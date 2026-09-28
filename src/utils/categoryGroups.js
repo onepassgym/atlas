@@ -52,8 +52,54 @@ function categoryGroupFilter(slug) {
   return values ? { $in: values } : undefined;
 }
 
+/**
+ * Reverse of `categoryGroupFilter`: which landing slug a raw `Space.category`
+ * value belongs to. Anything unclassified falls into the "spaces" catch-all,
+ * matching the $nin semantics above.
+ */
+function categoryGroupForValue(value) {
+  const normalized = String(value || '').toLowerCase().trim();
+  for (const [slug, values] of Object.entries(CATEGORY_GROUP_VALUES)) {
+    if (values.includes(normalized)) return slug;
+  }
+  return 'spaces';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Compare families — which groups are close enough to compare head-to-head.
+// A visitor weighing a "Gym" against a "Fitness Center" is making one choice,
+// so the space comparison (services/compare, api/compareRoutes) treats a
+// family as the unit of "similar category". Mirrored by opg-web's
+// COMPARE_FAMILIES (ui/src/components/organisms/Compare/compareRules.ts).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const COMPARE_FAMILIES = {
+  gym:       ['gyms', 'fitness'],
+  mind_body: ['yoga', 'pilates'],
+  swimming:  ['swimming'],
+  spaces:    ['spaces'],
+};
+
+function compareFamilyForGroup(groupSlug) {
+  for (const [family, groups] of Object.entries(COMPARE_FAMILIES)) {
+    if (groups.includes(groupSlug)) return family;
+  }
+  return 'spaces';
+}
+
+/** Mongo `category` condition matching every group in `groupSlug`'s family. */
+function compareFamilyFilter(groupSlug) {
+  const groups = COMPARE_FAMILIES[compareFamilyForGroup(groupSlug)];
+  if (groups.includes('spaces')) return categoryGroupFilter('spaces');
+  return { $in: groups.flatMap(g => CATEGORY_GROUP_VALUES[g]) };
+}
+
 module.exports = {
   CATEGORY_GROUP_SLUGS,
+  COMPARE_FAMILIES,
   isCategoryGroupSlug,
   categoryGroupFilter,
+  categoryGroupForValue,
+  compareFamilyForGroup,
+  compareFamilyFilter,
 };

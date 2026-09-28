@@ -70,6 +70,7 @@ Atlas is an **enterprise Google Maps fitness space & wellness venue discovery, c
 │  Express 4 Application                                                 │
 │  ├── indexRoutes      GET / (redirects), GET /health                   │
 │  ├── crawlRoutes      POST|GET /api/crawl/* (city, grid, chain, batch) │
+│  ├── compareRoutes    GET /api/spaces/compare, /compare/suggest        │
 │  ├── spaceRoutes      GET|PATCH /api/spaces/* (listing, geo, opgId)    │
 │  ├── systemRoutes     GET|POST|DELETE /api/system/*                    │
 │  ├── eventRoutes      GET /api/events (SSE real-time bus)              │
@@ -260,10 +261,30 @@ findExistingSpace(data)
 
 ---
 
+## Space Comparison (`src/api/compareRoutes.js`, `src/services/compare/`)
+
+Powers opg-web's `/compare` page and "best near you" finder.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/spaces/compare?ids=a,b[,c]&lat&lng` | 2–3 opgIds and/or SEO slugs → normalised records, per-dimension winners, amenity matrix, verdict (best + reasons + trade-offs). 400 outside 2–3 ids, 404 with `missing[]` |
+| `GET /api/spaces/compare/suggest?lat&lng\|anchor&category&radiusKm&limit&exclude` | Top-N spaces in the same compare family (gyms+fitness, yoga+pilates, swimming, other — `COMPARE_FAMILIES` in `utils/categoryGroups.js`) by compare score. `anchor` supplies location + category and is returned separately. Widens radius ×3 (≤25 km) once if short |
+
+Mounted before `spaceRoutes` so `/:slug` doesn't claim `compare`. The service is pure (no DB) and normalises the fields that are too raw to diff directly:
+
+- **Amenities** (`amenities.js`) — canonical features detected by pattern over `amenitySlugs` + `amenityIds[].label`, because the scraper stores both per-item (`-restroom`) and section-concatenated (`amenities-restroom-wi-fi-…`) slugs.
+- **Hours** (`hours.js`) — parses `"6\u202fam"`, past-midnight closes, holiday suffixes. Split shifts were flattened by the scraper (`close: "12 pm5"`); those days are `approximate` and excluded from totals rather than guessed.
+- **Busyness** (`busyness.js`) — structured `operationalData.popularTimesData` if present, else raw `"91% busy at 7 pm."` labels split into day blocks; day-agnostic peak/quiet summary.
+- **Coordinates** — the Maps URL pin (`!3d…!4d…`) wins over stored `lat/lng`, which on many records is the search viewport centre. `suggest` also unions same-`areaName` candidates for the same reason.
+- **Score** — absolute 0–100 (review-weighted Bayesian rating 35%, distance 15%, quality 15%, sentiment 15%, amenities 10%, hours 10%); dimensions without data drop out and weights re-normalise. Pricing/highlights/offerings are not compared — empty on nearly all records.
+
+---
+
 ## Changelog
 
 | Date | Author | Description |
 |------|--------|-------------|
+| 2026-09-28 | Claude | **Space comparison API**: `GET /api/spaces/compare` + `/compare/suggest`, `src/services/compare/` normalisers (amenities, hours, busyness, pin coordinates) and scoring; `categoryGroupForValue()` in `utils/categoryGroups.js`. |
 | 2026-09-15 | Antigravity | **Crawling Pipeline Audit & Core Fixes (Phase 1–5)**:<br>• **Gap 1**: Upgraded UA pool to 2026-era Chrome 135+, Firefox 138+, Edge 136+, Safari 18.x.<br>• **Gap 3**: Wrapped `urlIndex` in shared state with explicit atomic claim.<br>• **Gap 4**: Fixed `preFilterUrls` error fallback shape `{ fresh, skippedUrls }`.<br>• **Gap 5**: Added resilient selector fallback chains (`tryText`, `tryAttr`, `tryAll`) for Google Maps DOM changes.<br>• **Gap 6**: Added `extractExistingAmenities` normalizer in `enrichmentProcessor.js` to preserve boolean tags and raw arrays.<br>• **Gap 7**: Added 30s TTL cache for `SystemState.getGlobalState()` in `sleep()`.<br>• **Gap 8**: Added circuit breaker to `AdaptiveThrottle` tripping on 7+ consecutive failures/blocks.<br>• **Gap 9**: Isolated `websiteScraper.js` to dedicated page contexts.<br>• **Gap 10**: Added page recycle budget (every 35 URLs) in parallel batch pool.<br>• **Gap 11**: Extracted shared worker utilities into `src/queue/workerUtils.js`.<br>• **Gap 12**: Documented dual enrichment architecture in `enrichmentWorker.js`.<br>• **Gap 13**: Removed 150-review hard-cap in `spaceProcessor.js`.<br>• **Gap 14**: Preserved `/@lat,lng` coordinate anchors in Google Maps URL normalizer.<br>• **Gap 15**: Fixed batch completion criteria in `worker.js`.<br>• **Gap 17**: Deferred `removeJobAndBatches()` out of BullMQ lock-holding path.<br>• **Gap 16**: Modernized `ARCHITECTURE.md`. |
 | 2026-05-09 | Antigravity | Migration scheduler refactor, opgId rollout, enrichment session Tasks 1–7. |
 | 2026-04-18 | Antigravity | Initial architecture document created. |

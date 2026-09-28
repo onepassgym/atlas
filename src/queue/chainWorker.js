@@ -143,8 +143,13 @@ async function tagWithChain(spaceId, chainId, chainSlug, chainName) {
 // ── Enrich a single location via Google Maps ──────────────────────────────────
 
 async function enrichViaGoogleMaps(page, location, chainId, chainSlug, chainName, areaName, jobId) {
-  const searchQuery = `${location.name} ${location.city || ''} ${location.state || ''} ${location.country || ''}`.trim();
-  const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(searchQuery)}`;
+  const searchQuery = [location.name, location.address || [location.city, location.state, location.country].filter(Boolean).join(' ')]
+    .filter(Boolean).join(' ').trim();
+  // Anchor the search at the location's coordinates. OSM-sourced locations
+  // usually have no city/country, so a bare "Gold's Gym" query would match
+  // whichever branch Google ranks first (e.g. a Delhi gym for a Dubai pin).
+  const viewport = location.lat && location.lng ? `/@${location.lat},${location.lng},16z` : '';
+  const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(searchQuery)}${viewport}`;
 
   try {
     // Navigate to Google Maps search

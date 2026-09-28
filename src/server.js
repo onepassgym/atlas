@@ -68,6 +68,8 @@ app.use('/docs',       require('./api/docsRoutes'));
 app.use('/api',        authMiddleware);
 
 app.use('/api/crawl',   crawlRoutes);
+// Must precede spaceRoutes — its /:slug handler would otherwise claim "compare".
+app.use('/api/spaces/compare', require('./api/compareRoutes'));
 app.use('/api/spaces',  spaceRoutes);
 app.use('/api/chains',  chainRoutes);
 app.use('/api/system',  systemRoutes);
